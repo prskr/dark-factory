@@ -21,6 +21,9 @@ use df_proto::transcript::v1::{
     content_block::Kind as ContentBlockKind, event::Kind as EventKind,
 };
 
+/// Code of the notice that shows the summary a new harness session was seeded with.
+pub const CONTEXT_COMPACTED: &str = "context_compacted";
+
 /// Async I/O compatibility wrapper for Tokio `AsyncRead` into futures `AsyncRead`.
 pub struct TokioAsyncReadCompat<T>(pub T);
 
@@ -228,7 +231,17 @@ pub async fn setup_session(
         }
     }
 
-    // New session (first run or fallback)
+    // New session (first run or fallback). A summary seeds it instead of the history the
+    // previous session had: the transcript says so.
+    if let Some(cont) = continuation
+        && !cont.summary.is_empty()
+    {
+        notices.push(Notice {
+            level: NoticeLevel::Info as i32,
+            code: CONTEXT_COMPACTED.to_string(),
+            message: cont.summary.clone(),
+        });
+    }
     let new_res = cx
         .send_request(NewSessionRequest::new(repo_dir.to_path_buf()).mcp_servers(vec![factory_mcp]))
         .block_task()

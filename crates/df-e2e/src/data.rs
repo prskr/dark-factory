@@ -67,6 +67,20 @@ pub const WEBHOOK_SECRET: &str = "e2e-webhook-secret";
 pub const DELEGATION_PROJECT_KEY: &str = "DG";
 pub const DELEGATION_PROJECT_NAME: &str = "Delegation";
 
+/// Project of the chat scenario (`iter3-chats`): a chat that delegates, is archived while a task
+/// runs and is unarchived; its chats are `CH-<n>-CHAT`, its tasks `CH-<n>`.
+pub const CHAT_PROJECT_KEY: &str = "CH";
+pub const CHAT_PROJECT_NAME: &str = "Chats";
+
+/// What `chat.yaml` marks its chat and tasks with, the topic its chat sets, and what the chat says
+/// when the implementation completed.
+pub const CHAT_MARKER: &str = "[chat]";
+pub const CHAT_IMPLEMENTATION: &str = "[chat-impl]";
+pub const CHAT_REVIEW: &str = "[chat-review]";
+pub const CHAT_FINISH: &str = "[chat-finish]";
+pub const CHAT_TOPIC: &str = "Helm chart plan";
+pub const CHAT_IMPLEMENTATION_DONE: &str = "The implementation is in.";
+
 /// Project whose fake agents build on each other's branches (`iter3-task-tree`, demo steps 1 and
 /// 4); its `subtask_merge` is `parent-agent`; tasks are `TT-<n>`.
 pub const TASK_TREE_PROJECT_KEY: &str = "TT";
@@ -208,6 +222,7 @@ pub const PROTECTED_SCRIPT: &str = "/opt/harness/scripts/push-protected.yaml";
 pub const HIDDEN_SCRIPT: &str = "/opt/harness/scripts/push-hidden.yaml";
 pub const WEBHOOK_SCRIPT: &str = "/opt/harness/scripts/webhook.yaml";
 pub const EXISTING_BRANCH_SCRIPT: &str = "/opt/harness/scripts/existing-branch.yaml";
+pub const CHAT_SCRIPT: &str = "/opt/harness/scripts/chat.yaml";
 pub const DELEGATION_SCRIPT: &str = "/opt/harness/scripts/delegation.yaml";
 pub const RESEARCH_SCRIPT: &str = "/opt/harness/scripts/research.yaml";
 pub const TASK_TREE_SCRIPT: &str = "/opt/harness/scripts/task-tree.yaml";

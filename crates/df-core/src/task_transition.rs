@@ -10,7 +10,7 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::json;
 
-use crate::domain::{CAPACITY_DETAIL, Principal, RunOutcome, TaskStatus, system_reason};
+use crate::domain::{CAPACITY_DETAIL, Principal, RunOutcome, TaskKind, TaskStatus, system_reason};
 use crate::ids::RunId;
 
 /// Resume time of a task whose run reported a rate limit without a retry time.
@@ -32,6 +32,11 @@ pub struct TaskSnapshot {
     pub pr: PrState,
     /// The task has a parent, whose Subtasks tab shows this task's status.
     pub has_parent: bool,
+    pub kind: TaskKind,
+    /// A chat that is archived.
+    pub archived: bool,
+    /// The task has an agent request that is still pending.
+    pub pending_requests: bool,
 }
 
 impl TaskSnapshot {
@@ -47,6 +52,9 @@ impl TaskSnapshot {
             undelivered_messages: false,
             pr: PrState::None,
             has_parent: false,
+            kind: TaskKind::Task,
+            archived: false,
+            pending_requests: false,
         }
     }
 }
@@ -155,15 +163,33 @@ pub enum TaskEvent {
     DependencySatisfied,
     /// A child of this task ended (an effect of the child's event).
     ChildEnded(ChildEnded),
+    /// A board member archived the chat.
+    Archived {
+        by: Principal,
+    },
+    /// A board member unarchived the chat.
+    Unarchived,
 }
 
-/// A command the task's status does not allow.
+/// A command the task's status or kind does not allow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum Rejected {
     #[error("a {0} task cannot be marked done")]
     MarkDone(TaskStatus),
     #[error("a {0} task cannot be cancelled")]
     Cancel(TaskStatus),
+    #[error("a chat is never marked done or cancelled; archive it instead")]
+    Chat,
+    #[error("only a chat can be archived or unarchived")]
+    NotAChat,
+    #[error("a {0} chat cannot be archived")]
+    ArchiveBusy(TaskStatus),
+    #[error("the chat has an open request; answer it before archiving")]
+    ArchiveOpenRequest,
+    #[error("the chat is archived already")]
+    AlreadyArchived,
+    #[error("the chat is not archived")]
+    NotArchived,
 }
 
 /// Which runs a [`Effect::StopRun`] marks.
@@ -223,6 +249,8 @@ pub enum Effect {
     NotifyDependents,
     /// Raise `ChildEnded` on the parent, if there is one.
     NotifyParent(ChildEnd),
+    /// Set (`Some`) or clear (`None`) `archived_at` and `archived_by`.
+    SetArchived(Option<Principal>),
     /// Queue a message on the task and apply `MessageQueued` for it.
     QueueMessage {
         author: Principal,
@@ -297,7 +325,65 @@ fn apply_event(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, Reje
         TaskEvent::Cancelled { via } => return cancelled(task, via),
         TaskEvent::DependencySatisfied => dependency_satisfied(task),
         TaskEvent::ChildEnded(child) => child_ended(task, &child),
+        TaskEvent::Archived { by } => return archived(task, by),
+        TaskEvent::Unarchived => return unarchived(task),
     })
+}
+
+/// Why a chat with this `status` and `pending_requests` cannot be archived right now; the UI
+/// shows it before the command is sent.
+pub const fn archive_rejection(status: TaskStatus, pending_requests: bool) -> Option<Rejected> {
+    if matches!(status, TaskStatus::Queued | TaskStatus::Running) {
+        Some(Rejected::ArchiveBusy(status))
+    } else if pending_requests {
+        Some(Rejected::ArchiveOpenRequest)
+    } else {
+        None
+    }
+}
+
+/// Archiving keeps the status. A chat that is in a run (or about to start one) or has an open
+/// request is not archived.
+fn archived(task: &TaskSnapshot, by: Principal) -> Result<Transition, Rejected> {
+    if task.kind != TaskKind::Chat {
+        return Err(Rejected::NotAChat);
+    }
+    if task.archived {
+        return Err(Rejected::AlreadyArchived);
+    }
+    if let Some(rejected) = archive_rejection(task.status, task.pending_requests) {
+        return Err(rejected);
+    }
+    Ok(Transition::unchanged(task)
+        .with(Effect::SetArchived(Some(by)))
+        .with(Effect::Audit {
+            action: "chat.archive",
+            details: json!({ "status": task.status }),
+        })
+        .with(Effect::Publish(Notice::TaskChanged)))
+}
+
+/// Unarchiving queues the chat when messages wait for it, as a new message does.
+fn unarchived(task: &TaskSnapshot) -> Result<Transition, Rejected> {
+    if task.kind != TaskKind::Chat {
+        return Err(Rejected::NotAChat);
+    }
+    if !task.archived {
+        return Err(Rejected::NotArchived);
+    }
+    let next = if task.undelivered_messages {
+        message_queued(task)
+    } else {
+        Transition::unchanged(task)
+    };
+    let status = next.status;
+    Ok(next
+        .with(Effect::SetArchived(None))
+        .with(Effect::Audit {
+            action: "chat.unarchive",
+            details: json!({ "status": status }),
+        })
+        .with(Effect::Publish(Notice::TaskChanged)))
 }
 
 /// Task status for a finished run, before the "undelivered prompts" override. `completed` is
@@ -510,6 +596,9 @@ fn plan_resume(end: &RunEnded, overridden: Option<TaskStatus>, auto_resumes: i32
 }
 
 fn marked_done(task: &TaskSnapshot, by: DoneBy) -> Result<Transition, Rejected> {
+    if task.kind == TaskKind::Chat {
+        return Err(Rejected::Chat);
+    }
     let mut next = Transition {
         status: TaskStatus::Completed,
         resume_at: None,
@@ -563,6 +652,9 @@ fn marked_done(task: &TaskSnapshot, by: DoneBy) -> Result<Transition, Rejected> 
 }
 
 fn cancelled(task: &TaskSnapshot, via: Option<String>) -> Result<Transition, Rejected> {
+    if task.kind == TaskKind::Chat {
+        return Err(Rejected::Chat);
+    }
     if !task.status.can_cancel() {
         return Err(Rejected::Cancel(task.status));
     }
@@ -647,5 +739,7 @@ pub fn child_ended_text(child: &ChildEnded) -> String {
     lines.join("\n")
 }
 
+#[cfg(test)]
+mod chat_tests;
 #[cfg(test)]
 mod tests;

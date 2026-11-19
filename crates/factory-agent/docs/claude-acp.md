@@ -25,6 +25,10 @@ This document captures the behavior, constraints, and integration specifics of `
 - When `Assign.continuation.harness_session_id` is present, `factory-agent` attempts `session/load`.
 - If the adapter returns an error or does not support `session/load`, `factory-agent` falls back to `session/new`, prepending `Assign.continuation.summary` to the first prompt, and emits a `harness.session_resume_failed` notice to the control plane.
 
+### `context_compacted` notice
+- Whenever a run starts a new session seeded with a non-empty `Assign.continuation.summary` (the previous session could not be resumed, or there was none to resume), `factory-agent` emits a notice with code `context_compacted`, level `INFO` and the summary as its message. It comes before the first prompt of the run, applies to tasks and chats alike, and the web UI shows it as one line, expandable to the summary.
+- A run that resumes the previous session, a first run and a run with an empty summary emit none.
+
 ## 3. Persona System Prompt Injection
 
 - Claude Code allows appending project guidelines via `/data/home/.claude/CLAUDE.md` or through `_meta` attributes on prompt requests.

@@ -621,6 +621,19 @@ fn volume_retention_defaults_to_seven_and_thirty_days_and_can_be_overridden() {
 }
 
 #[test]
+fn the_chat_concurrency_limit_defaults_to_two_and_zero_is_rejected() {
+    let minimal = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n";
+    let cfg = InstanceConfig::from_yaml_str(minimal).unwrap();
+    assert_eq!(cfg.runs.max_concurrent_chats, 2);
+    let cfg = InstanceConfig::from_yaml_str(&format!("{minimal}runs:\n  maxConcurrentChats: 5\n"))
+        .unwrap();
+    assert_eq!(cfg.runs.max_concurrent_chats, 5);
+    let err = InstanceConfig::from_yaml_str(&format!("{minimal}runs:\n  maxConcurrentChats: 0\n"))
+        .unwrap_err();
+    assert!(err.to_string().contains("runs.maxConcurrentChats"), "{err}");
+}
+
+#[test]
 fn a_concurrency_limit_of_zero_is_rejected() {
     let yaml = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\nruns:\n  maxConcurrent: 0\n";
     let err = InstanceConfig::from_yaml_str(yaml).unwrap_err();

@@ -186,6 +186,95 @@ async fn assign_for_the_first_run_of_df_1() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The system prompt file of the harness in `assign`.
+fn prompt_file(assign: &Assign, env: &Env) -> String {
+    let Some(harness_kind::Kind::Acp(acp)) = assign.harness.clone().and_then(|h| h.kind) else {
+        panic!("expected ACP harness");
+    };
+    let path = harness::profile("claude-code").unwrap().system_prompt_path;
+    acp.files
+        .into_iter()
+        .find(|file| file.path == path)
+        .unwrap_or_else(|| panic!("no prompt file in {:?}", env.ctx.config.landlock))
+        .content
+}
+
+// Scenario "Assign for DF-12-CHAT" of `run-orchestration` and "System prompt of a chat run" and
+// "Task runs unchanged" of `chats`.
+#[tokio::test]
+async fn assign_for_a_chat_run_is_read_only_without_branches_and_offers_the_chat_tools()
+-> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let chat = env.chat().await;
+    let run_id = env.insert_run(chat.id, 1, "connecting").await;
+    let rc = load_run_context(&pool, get_run(&pool, run_id).await?.expect("run")).await?;
+
+    let assign = build_assign(&env.ctx, &rc).await?;
+
+    let workspace = assign.workspace.clone().expect("workspace");
+    assert_eq!(workspace.base_branch, "main");
+    assert_eq!(workspace.task_branch, "");
+    assert_eq!(workspace.wip_branch, "");
+    assert!(workspace.read_only);
+    assert!(!workspace.existing_branch);
+    assert_eq!(
+        assign.task.clone().expect("task").task_key,
+        chat.key.to_string()
+    );
+    let tools: Vec<_> = assign.tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(tools.contains(&"create_task"), "{tools:?}");
+    for excluded in [
+        "complete_task",
+        "ask_question",
+        "update_pull_request",
+        "comment_on_issue",
+    ] {
+        assert!(!tools.contains(&excluded), "{excluded} in {tools:?}");
+    }
+    let prompt = prompt_file(&assign, &env);
+    assert!(prompt.starts_with("You are Linus"), "{prompt}");
+    assert!(prompt.contains(CHAT_INSTRUCTIONS), "{prompt}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn assign_for_a_task_run_has_no_chat_instructions_and_a_writable_workspace()
+-> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = env.insert_run(env.task.id, 1, "connecting").await;
+    let rc = load_run_context(&pool, get_run(&pool, run_id).await?.expect("run")).await?;
+
+    let assign = build_assign(&env.ctx, &rc).await?;
+
+    assert!(!assign.workspace.clone().expect("workspace").read_only);
+    assert!(!prompt_file(&assign, &env).contains(CHAT_INSTRUCTIONS));
+    assert!(assign.tools.iter().any(|t| t.name == "complete_task"));
+    Ok(())
+}
+
+#[test]
+fn the_chat_instructions_say_what_a_chat_agent_must_know() {
+    for part in [
+        "board member",
+        "read-only",
+        "create_task",
+        "send_message",
+        "never completed",
+    ] {
+        assert!(CHAT_INSTRUCTIONS.contains(part), "{part}");
+    }
+}
+
+#[test]
+fn every_chat_tool_is_a_factory_tool() {
+    let names: Vec<_> = tool_descriptors().into_iter().map(|t| t.name).collect();
+    for tool in CHAT_TOOLS {
+        assert!(names.iter().any(|name| name == tool), "{tool}");
+    }
+}
+
 // Scenarios "Based on a task" and "Base task merged" of `task-tree`.
 #[tokio::test]
 async fn the_workspace_base_branch_is_the_base_tasks_branch_until_that_task_is_done()

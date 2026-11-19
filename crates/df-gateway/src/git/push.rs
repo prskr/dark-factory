@@ -404,6 +404,7 @@ impl Push {
                 task_branch: forge.route.task_branch.clone(),
                 wip_branch: forge.route.wip_branch.clone(),
                 rewrite_allowed: forge.route.rewrite_policy() == pb::RewritePolicy::WithLease,
+                read_only: forge.route.read_only,
             },
             commands: parsed.commands.clone(),
             pack_offset: parsed.pack_offset,

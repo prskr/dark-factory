@@ -74,11 +74,47 @@ pub(crate) fn tool_input_schemas()
         .map(|t| (t.name.as_str(), &t.input_schema))
 }
 
+/// What every chat run is told after the persona's system prompt.
+pub const CHAT_INSTRUCTIONS: &str = "\
+## Chat
+
+You are in a chat with a board member, who reads your replies as they come. \
+The checkout of the repository is read-only and reset to the base branch at the start of every run: \
+anything you change in it is gone with the run, and pushes are rejected. \
+Work that needs a branch or a pull request goes into tasks: create them with `create_task` for a persona \
+from `list_personas`, and follow up with `send_message`. \
+Results that should outlive the chat belong in artifacts or tasks. \
+Set a short topic for the chat with `set_task_title` in your first reply. \
+A chat is never completed: there is no `complete_task`, you just answer and wait for the next message.";
+
+/// The tools a chat run is offered. A call to any other tool is rejected.
+pub const CHAT_TOOLS: &[&str] = &[
+    "set_task_title",
+    "report_progress",
+    "create_task",
+    "list_personas",
+    "send_message",
+    "request_approval",
+    "write_artifact",
+    "list_artifacts",
+    "read_artifact",
+];
+
 /// The factory tools v2 as sent in `Assign.tools`.
 pub fn tool_descriptors() -> Vec<ToolDescriptor> {
+    tool_descriptors_where(|_| true)
+}
+
+/// The tools of a run: all of them, or only [`CHAT_TOOLS`] for a chat.
+fn tool_descriptors_for(kind: df_core::TaskKind) -> Vec<ToolDescriptor> {
+    tool_descriptors_where(|name| kind == df_core::TaskKind::Task || CHAT_TOOLS.contains(&name))
+}
+
+fn tool_descriptors_where(offered: impl Fn(&str) -> bool) -> Vec<ToolDescriptor> {
     TOOL_ENTRIES
         .tools
         .iter()
+        .filter(|t| offered(&t.name))
         .map(|t| ToolDescriptor {
             name: t.name.clone(),
             title: t.title.clone(),
@@ -138,8 +174,10 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
         workspace: Some(Workspace {
             repo_url: proxy_repo_url(&config.git_proxy, &rc.task.key.to_string()),
             base_branch: rc.base_branch().to_owned(),
+            // Empty for a chat, which has no branch: its checkout is read-only.
             task_branch: rc.task_branch().to_owned(),
-            wip_branch: rc.wip_branch(),
+            wip_branch: rc.wip_branch().unwrap_or_default(),
+            read_only: rc.is_chat(),
             commit_identity: Some(CommitIdentity {
                 name: config.agent.commit_identity.name.clone(),
                 email: config.agent.commit_identity.email.clone(),
@@ -162,7 +200,7 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
                 files: harness_files(ctx, rc, profile, &hidden_paths),
             })),
         }),
-        tools: tool_descriptors(),
+        tools: tool_descriptors_for(rc.kind()),
         budgets: Some(Budgets {
             max_wall_clock: Some(Duration {
                 seconds: i64::try_from(ctx.orch.config.runs.max_wall_clock_seconds)
@@ -184,7 +222,12 @@ fn harness_files(
     hidden_paths: &[String],
 ) -> Vec<HarnessFile> {
     let mut files = Vec::new();
-    let prompt = system_prompt(&rc.persona.system_prompt, hidden_paths, ctx.config.landlock);
+    let persona_prompt = if rc.is_chat() {
+        format!("{}\n\n{CHAT_INSTRUCTIONS}", rc.persona.system_prompt)
+    } else {
+        rc.persona.system_prompt.clone()
+    };
+    let prompt = system_prompt(&persona_prompt, hidden_paths, ctx.config.landlock);
     if !prompt.is_empty() {
         files.push(HarnessFile {
             path: profile.system_prompt_path.to_string(),

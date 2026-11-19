@@ -19,7 +19,9 @@ static PROJECT_KEY_REGEX: LazyLock<Regex> =
 pub enum KeyError {
     #[error("invalid project key `{0}`: must match ^[A-Z][A-Z0-9]{{1,9}}$")]
     InvalidProjectKey(String),
-    #[error("invalid task key `{0}`: expected `<PROJECT_KEY>-<number>` with number >= 1")]
+    #[error(
+        "invalid task key `{0}`: expected `<PROJECT_KEY>-<number>` or `<PROJECT_KEY>-<number>-CHAT` with number >= 1"
+    )]
     InvalidTaskKey(String),
 }
 
@@ -77,20 +79,48 @@ impl<'de> Deserialize<'de> for ProjectKey {
     }
 }
 
-/// A per-project task key `<PROJECT_KEY>-<n>` where `n >= 1`.
+/// Suffix of a chat key.
+const CHAT_SUFFIX: &str = "-CHAT";
+
+/// Whether `key` is the key of a chat; `false` for any other string, valid key or not.
+pub fn is_chat_key(key: &str) -> bool {
+    key.parse::<TaskKey>().is_ok_and(|key| key.is_chat())
+}
+
+/// A per-project task key `<PROJECT_KEY>-<n>` where `n >= 1`, or a chat key
+/// `<PROJECT_KEY>-<n>-CHAT`. Tasks and chats share the number counter.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskKey {
     project: ProjectKey,
     number: u64,
+    chat: bool,
 }
 
 impl TaskKey {
     /// Creates a new `TaskKey` from a validated [`ProjectKey`] and positive task number (`>= 1`).
     pub fn new(project: ProjectKey, number: u64) -> Result<Self, KeyError> {
+        Self::build(project, number, false)
+    }
+
+    /// Creates the key of a chat (`<PROJECT_KEY>-<n>-CHAT`).
+    pub fn chat(project: ProjectKey, number: u64) -> Result<Self, KeyError> {
+        Self::build(project, number, true)
+    }
+
+    fn build(project: ProjectKey, number: u64, chat: bool) -> Result<Self, KeyError> {
         if number == 0 {
             return Err(KeyError::InvalidTaskKey(format!("{project}-0")));
         }
-        Ok(Self { project, number })
+        Ok(Self {
+            project,
+            number,
+            chat,
+        })
+    }
+
+    /// Whether this is the key of a chat.
+    pub fn is_chat(&self) -> bool {
+        self.chat
     }
 
     /// Returns the project key portion.
@@ -103,36 +133,37 @@ impl TaskKey {
         self.number
     }
 
-    /// Returns the task branch name (`factory/task/<KEY>`).
-    pub fn task_branch(&self) -> String {
-        format!("{TASK_BRANCH_PREFIX}{self}")
+    /// Returns the task branch name (`factory/task/<KEY>`); `None` for a chat, which has none.
+    pub fn task_branch(&self) -> Option<String> {
+        (!self.chat).then(|| format!("{TASK_BRANCH_PREFIX}{self}"))
     }
 
     /// The key a task branch names, inverse of [`Self::task_branch`]; a `refs/heads/` prefix is
-    /// accepted. `None` for any other branch.
+    /// accepted. `None` for any other branch, and for a chat key.
     pub fn from_task_branch(branch: &str) -> Option<Self> {
         let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
-        branch.strip_prefix(TASK_BRANCH_PREFIX)?.parse().ok()
+        let key: Self = branch.strip_prefix(TASK_BRANCH_PREFIX)?.parse().ok()?;
+        (!key.chat).then_some(key)
     }
 
-    /// Returns the WIP snapshot branch name (`factory/wip/<KEY>`).
-    pub fn wip_branch(&self) -> String {
-        format!("factory/wip/{self}")
+    /// Returns the WIP snapshot branch name (`factory/wip/<KEY>`); `None` for a chat.
+    pub fn wip_branch(&self) -> Option<String> {
+        (!self.chat).then(|| format!("factory/wip/{self}"))
     }
 
     /// Returns the Kubernetes PVC / volume name (`task-<key in lower case>`).
     pub fn volume_name(&self) -> String {
-        format!(
-            "task-{}-{}",
-            self.project.as_str().to_ascii_lowercase(),
-            self.number
-        )
+        format!("task-{}", self.to_string().to_ascii_lowercase())
     }
 }
 
 impl fmt::Display for TaskKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}-{}", self.project, self.number)
+        write!(f, "{}-{}", self.project, self.number)?;
+        if self.chat {
+            f.write_str(CHAT_SUFFIX)?;
+        }
+        Ok(())
     }
 }
 
@@ -140,7 +171,11 @@ impl FromStr for TaskKey {
     type Err = KeyError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let Some((proj_part, num_part)) = s.split_once('-') else {
+        let (s_task, chat) = match s.strip_suffix(CHAT_SUFFIX) {
+            Some(task) => (task, true),
+            None => (s, false),
+        };
+        let Some((proj_part, num_part)) = s_task.split_once('-') else {
             return Err(KeyError::InvalidTaskKey(s.to_string()));
         };
         if num_part.is_empty()
@@ -154,7 +189,7 @@ impl FromStr for TaskKey {
         let number: u64 = num_part
             .parse()
             .map_err(|_invalid| KeyError::InvalidTaskKey(s.to_string()))?;
-        Self::new(project, number)
+        Self::build(project, number, chat)
     }
 }
 
@@ -210,8 +245,8 @@ mod tests {
         assert_eq!(key.project().as_str(), "DF");
         assert_eq!(key.number(), 1);
         assert_eq!(key.to_string(), "DF-1");
-        assert_eq!(key.task_branch(), "factory/task/DF-1");
-        assert_eq!(key.wip_branch(), "factory/wip/DF-1");
+        assert_eq!(key.task_branch().as_deref(), Some("factory/task/DF-1"));
+        assert_eq!(key.wip_branch().as_deref(), Some("factory/wip/DF-1"));
         assert_eq!(key.volume_name(), "task-df-1");
 
         let json = serde_json::to_string(&key).unwrap();
@@ -224,7 +259,7 @@ mod tests {
     fn task_key_comes_back_from_its_task_branch_only() {
         let key: TaskKey = "DF-12".parse().unwrap();
         assert_eq!(
-            TaskKey::from_task_branch(&key.task_branch()),
+            TaskKey::from_task_branch(&key.task_branch().unwrap()),
             Some(key.clone())
         );
         assert_eq!(
@@ -239,6 +274,40 @@ mod tests {
         ] {
             assert_eq!(TaskKey::from_task_branch(other), None, "{other}");
         }
+    }
+
+    #[test]
+    fn chat_key_parses_and_displays_with_suffix() {
+        let key: TaskKey = "DF-12-CHAT".parse().unwrap();
+        assert!(key.is_chat());
+        assert_eq!(key.number(), 12);
+        assert_eq!(key.to_string(), "DF-12-CHAT");
+        assert_eq!(key.volume_name(), "task-df-12-chat");
+        let json = serde_json::to_string(&key).unwrap();
+        assert_eq!(json, "\"DF-12-CHAT\"");
+        assert_eq!(serde_json::from_str::<TaskKey>(&json).unwrap(), key);
+        assert!(!"DF-12".parse::<TaskKey>().unwrap().is_chat());
+    }
+
+    #[test]
+    fn malformed_chat_suffixes_are_rejected() {
+        for invalid in [
+            "DF-12-chat",
+            "DF-12-CHAT-1",
+            "DF-12-CHAT-",
+            "DF-0-CHAT",
+            "DF-12-CHATS",
+        ] {
+            assert!(TaskKey::from_str(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn branch_names_are_none_for_a_chat_key() {
+        let key: TaskKey = "DF-12-CHAT".parse().unwrap();
+        assert_eq!(key.task_branch(), None);
+        assert_eq!(key.wip_branch(), None);
+        assert_eq!(TaskKey::from_task_branch("factory/task/DF-12-CHAT"), None);
     }
 
     #[test]

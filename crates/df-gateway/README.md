@@ -192,6 +192,7 @@ Smart-HTTP endpoint for the task repository (`openspec/changes/archive/2026-11-0
 | Mirror fetch before the checks fails on the gateway (repository, negotiation) | `500` (`df:gateway-error`), recorded as `REJECTED` |
 | Pack invalid | `400`, `df: invalid pack` |
 | Spooling, quarantine or ancestry lookup fails | `500` |
+| The route is read-only (`GitRoute.read_only`, a chat run): any ref update | `200` with `report-status`: `ng <ref> df:read-only`, nothing is forwarded |
 | Ref neither the task branch nor the WIP branch, or a deletion of the task branch | `200` with `report-status`: `ng <ref> df:ref-not-allowed` |
 | Task branch update that is not a fast-forward (WIP branch: any update allowed) | `ng <ref> df:non-fast-forward` |
 | A push check rejects a ref | `ng <ref> <reason>`, see [Push checks](#push-checks) (`df:check-failed` if the checks return a wrong count) |

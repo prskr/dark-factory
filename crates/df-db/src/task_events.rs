@@ -189,6 +189,7 @@ pub(crate) async fn execute_effects(
                     });
                 }
             }
+            Effect::SetArchived(by) => set_archived(tx, task_id, by.as_ref()).await?,
             Effect::QueueMessage { author, text } => {
                 let content = vec![crate::tasks::text_block(text.clone(), false)];
                 // The message arm sets the status: async recursion needs the box.
@@ -203,6 +204,32 @@ pub(crate) async fn execute_effects(
         }
     }
     Ok(followups)
+}
+
+/// Archives the chat by `by` now, or with `None` takes it out of the archive.
+async fn set_archived(
+    tx: &mut Transaction<'_, Postgres>,
+    task_id: TaskId,
+    by: Option<&Principal>,
+) -> Result<(), DbError> {
+    let archiving = by.is_some();
+    let by = by.map(serde_json::to_value).transpose()?;
+    sqlx::query!(
+        "UPDATE tasks SET archived_at = CASE WHEN $2::jsonb IS NULL THEN NULL ELSE now() END,
+             archived_by = $2 WHERE id = $1",
+        task_id.as_uuid(),
+        by
+    )
+    .execute(&mut **tx)
+    .await?;
+    if archiving {
+        // The run that still waits for a message in its keep-alive window gives up its slot: no
+        // prompt reaches a run of an archived chat.
+        if let Some(run_id) = crate::runs::idle_run_of_task(&mut **tx, task_id).await? {
+            publish(&mut **tx, &Notification::ReleaseIdle { run_id }).await?;
+        }
+    }
+    Ok(())
 }
 
 async fn record_first(
@@ -349,6 +376,8 @@ struct TaskRowFacts {
     has_pr: bool,
     merged: bool,
     has_parent: bool,
+    kind: String,
+    archived: bool,
 }
 
 /// Locks the task row and reads what the rules need. With `after`, only messages queued after
@@ -361,7 +390,8 @@ async fn load_snapshot(
 ) -> Result<TaskSnapshot, DbError> {
     let row: Option<TaskRowFacts> = sqlx::query_as(
         "SELECT status, resume_at, auto_resumes, pr_number IS NOT NULL AS has_pr,
-             pr_merged_at IS NOT NULL AS merged, parent_id IS NOT NULL AS has_parent
+             pr_merged_at IS NOT NULL AS merged, parent_id IS NOT NULL AS has_parent,
+             kind, archived_at IS NOT NULL AS archived
          FROM tasks WHERE id = $1 FOR UPDATE",
     )
     .bind(task_id.as_uuid())
@@ -374,6 +404,8 @@ async fn load_snapshot(
         has_pr,
         merged,
         has_parent,
+        kind,
+        archived,
     }) = row
     else {
         return Err(DbError::NotFound(format!("task `{task_id}` not found")));
@@ -426,6 +458,9 @@ async fn load_snapshot(
     .fetch_one(&mut **tx)
     .await?;
     Ok(TaskSnapshot {
+        kind: kind.parse()?,
+        archived,
+        pending_requests: has_pending_request(tx, task_id).await?,
         status: status.parse()?,
         resume_at,
         auto_resumes,
@@ -446,6 +481,21 @@ async fn load_snapshot(
         },
         has_parent,
     })
+}
+
+/// Whether an agent request of the task is pending.
+async fn has_pending_request(
+    tx: &mut Transaction<'_, Postgres>,
+    task_id: TaskId,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM agent_requests WHERE task_id = $1 AND state = $2)
+           AS "pending!""#,
+        task_id.as_uuid(),
+        crate::requests::RequestState::Pending.as_str()
+    )
+    .fetch_one(&mut **tx)
+    .await?)
 }
 
 async fn write_status(

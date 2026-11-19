@@ -187,8 +187,16 @@ fn git_route(run: &ActiveRun, git: &GitSettings) -> Option<GitRoute> {
     Some(GitRoute {
         upstream_url: run.repo_url.clone(),
         base_branch: format!("refs/heads/{}", run.base_branch),
-        task_branch: format!("refs/heads/{}", run.task_branch),
-        wip_branch: format!("refs/heads/{}", key.wip_branch()),
+        // A chat has no task branch (empty) and may not push.
+        task_branch: Some(run.task_branch.as_str())
+            .filter(|branch| !branch.is_empty())
+            .map(|branch| format!("refs/heads/{branch}"))
+            .unwrap_or_default(),
+        wip_branch: key
+            .wip_branch()
+            .map(|branch| format!("refs/heads/{branch}"))
+            .unwrap_or_default(),
+        read_only: key.is_chat(),
         credential_ref: run
             .forge_credential
             .as_ref()
@@ -366,6 +374,23 @@ mod tests {
             (route.commit_name.as_str(), route.commit_email.as_str()),
             ("Dark Factory", "factory@example.test")
         );
+    }
+
+    #[test]
+    fn a_chat_run_gets_a_read_only_git_route_without_task_and_wip_branches() {
+        let mut chat = run(Uuid::now_v7(), "DF");
+        chat.task_key = "DF-12-CHAT".into();
+        chat.task_branch = String::new();
+
+        let update = assemble(1, &[chat, run(Uuid::now_v7(), "DF")], &[]);
+
+        let sandboxes = update.snapshot.unwrap().sandboxes;
+        let chat_route = sandboxes[0].git.clone().unwrap();
+        assert!(chat_route.read_only);
+        assert_eq!(chat_route.task_branch, "");
+        assert_eq!(chat_route.wip_branch, "");
+        assert_eq!(chat_route.base_branch, "refs/heads/main");
+        assert!(!sandboxes[1].git.clone().unwrap().read_only);
     }
 
     #[test]

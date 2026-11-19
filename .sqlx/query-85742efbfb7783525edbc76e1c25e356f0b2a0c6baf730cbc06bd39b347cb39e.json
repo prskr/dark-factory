@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT p.key AS \"key!\", p.name AS \"name!\",\n               count(t.id) FILTER (WHERE $1::text[] IS NULL OR t.status = ANY($1))\n                   AS \"task_count!\"\n        FROM projects p\n        LEFT JOIN tasks t ON t.project_id = p.id\n        GROUP BY p.id\n        ORDER BY p.name, p.key\n        ",
+  "query": "\n        SELECT p.key AS \"key!\", p.name AS \"name!\",\n               count(t.id) FILTER (WHERE $1::text[] IS NULL OR t.status = ANY($1))\n                   AS \"task_count!\"\n        FROM projects p\n        LEFT JOIN tasks t ON t.project_id = p.id AND t.kind = 'task'\n        GROUP BY p.id\n        ORDER BY p.name, p.key\n        ",
   "describe": {
     "columns": [
       {
@@ -43,5 +43,5 @@
       null
     ]
   },
-  "hash": "e11bced362f14ec5bb03cd80539bdb09ae385d5aa96ece3826975ad1463513f8"
+  "hash": "85742efbfb7783525edbc76e1c25e356f0b2a0c6baf730cbc06bd39b347cb39e"
 }

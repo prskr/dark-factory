@@ -171,7 +171,7 @@ pub fn queued_message(
                     "x-on:click"={"if (!editing) saved = draft; editing = '" (id) "'; draft = $el.dataset.text; $nextTick(() => $refs.message.focus())"}
                     class=(ICON_BUTTON_CLASS) { (icon(Icon::Pencil)) }
                 button type="button" aria-label="Remove queued message"
-                    hx-delete={"/tasks/" (key) "/messages/" (id)} hx-target="#pending" hx-swap="outerMorph"
+                    hx-delete={(crate::layout::item_path(key)) "/messages/" (id)} hx-target="#pending" hx-swap="outerMorph"
                     "x-on:click"={"if (editing === '" (id) "') { editing = null; draft = saved }"}
                     class=(ICON_BUTTON_CLASS) { (icon(Icon::Close)) }
             }

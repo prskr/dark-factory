@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE runs SET\n            state = $2,\n            idle_since = CASE WHEN $2 = 'awaiting_input' THEN COALESCE(idle_since, now())\n                              END,\n            pod_ip = COALESCE($3, pod_ip),\n            provisioning_started_at =\n                CASE WHEN $4 THEN COALESCE(provisioning_started_at, now())\n                     ELSE provisioning_started_at END,\n            sandbox_started_at =\n                CASE WHEN $5 THEN COALESCE(sandbox_started_at, now())\n                     ELSE sandbox_started_at END,\n            connected_at =\n                CASE WHEN $6 THEN COALESCE(connected_at, now()) ELSE connected_at END,\n            stop_requested_at =\n                CASE WHEN $7 THEN COALESCE(stop_requested_at, clock_timestamp())\n                     ELSE stop_requested_at END,\n            finalize_reason = COALESCE($8, finalize_reason),\n            outcome = COALESCE($9, outcome),\n            detail = CASE WHEN $9::text IS NULL THEN detail ELSE $10 END,\n            retry_after = CASE WHEN $9::text IS NULL THEN retry_after ELSE $11 END,\n            harness_session_id = CASE WHEN $12 <> '' THEN $12 ELSE harness_session_id END,\n            task_branch_sha = CASE WHEN $9::text IS NULL THEN task_branch_sha ELSE $13 END,\n            wip_sha = CASE WHEN $9::text IS NULL THEN wip_sha ELSE $14 END,\n            ended_at = CASE WHEN $9::text IS NULL THEN ended_at ELSE now() END\n        WHERE id = $1\n        RETURNING ended_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ended_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "ended_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "f75fad4ca5aefc76093024d7a331c348b5f2c6e05c746fada0e5877c6bc00149"
+}

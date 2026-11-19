@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT p.key AS \"key!\" FROM tasks t JOIN projects p ON p.id = t.project_id\n        WHERE t.kind = 'chat'\n        ORDER BY task_last_activity(t.id, t.created_at) DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "90be41c6e59df9620e3a18211baff2d293aff2ef49753186f38f32c09ffea1a9"
+}

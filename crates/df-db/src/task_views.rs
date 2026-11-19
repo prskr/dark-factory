@@ -141,6 +141,7 @@ pub struct TaskDetail {
     pub persona_harness: String,
     /// Model of the persona; `None` means the instance default.
     pub persona_model: Option<String>,
+    pub persona_description: String,
     pub issue_number: Option<i64>,
     pub status: TaskStatus,
     pub status_line: String,
@@ -149,6 +150,10 @@ pub struct TaskDetail {
     pub pr_title: Option<String>,
     /// The PR was opened outside the factory.
     pub pr_attached: bool,
+    /// When a chat was archived.
+    pub archived_at: Option<DateTime<Utc>>,
+    /// The task has an agent request that is still pending.
+    pub has_pending_request: bool,
     /// The branch the task commits to.
     pub branch: String,
     pub resume_at: Option<DateTime<Utc>>,
@@ -159,6 +164,8 @@ pub struct TaskDetail {
     pub creator_task_key: Option<String>,
     pub parent_key: Option<String>,
     pub parent_title: Option<String>,
+    /// The persona of the parent, which a chat parent shows next to its key.
+    pub parent_persona_name: Option<String>,
     /// The task whose branch this one builds on.
     pub base_task_key: Option<String>,
     pub base_task_title: Option<String>,
@@ -178,6 +185,7 @@ struct TaskDetailRow {
     persona_name: String,
     persona_harness: String,
     persona_model: Option<String>,
+    persona_description: String,
     issue_number: Option<i64>,
     status: String,
     status_line: String,
@@ -185,6 +193,8 @@ struct TaskDetailRow {
     pr_url: Option<String>,
     pr_title: Option<String>,
     pr_attached: bool,
+    archived_at: Option<DateTime<Utc>>,
+    has_pending_request: bool,
     branch: String,
     resume_at: Option<DateTime<Utc>>,
     auto_resumes: i32,
@@ -192,6 +202,7 @@ struct TaskDetailRow {
     creator_task_key: Option<String>,
     parent_key: Option<String>,
     parent_title: Option<String>,
+    parent_persona_name: Option<String>,
     base_task_key: Option<String>,
     base_task_title: Option<String>,
 }
@@ -213,6 +224,7 @@ impl TryFrom<TaskDetailRow> for TaskDetail {
             persona_name: row.persona_name,
             persona_harness: row.persona_harness,
             persona_model: row.persona_model,
+            persona_description: row.persona_description,
             issue_number: row.issue_number,
             status: row.status.parse()?,
             status_line: row.status_line,
@@ -220,6 +232,8 @@ impl TryFrom<TaskDetailRow> for TaskDetail {
             pr_url: row.pr_url,
             pr_title: row.pr_title,
             pr_attached: row.pr_attached,
+            archived_at: row.archived_at,
+            has_pending_request: row.has_pending_request,
             branch: row.branch,
             resume_at: row.resume_at,
             auto_resumes: row.auto_resumes,
@@ -227,6 +241,7 @@ impl TryFrom<TaskDetailRow> for TaskDetail {
             creator_task_key: row.creator_task_key,
             parent_key: row.parent_key,
             parent_title: row.parent_title,
+            parent_persona_name: row.parent_persona_name,
             base_task_key: row.base_task_key,
             base_task_title: row.base_task_title,
         })
@@ -340,7 +355,8 @@ pub async fn list_task_items(
                    count(*) FILTER (WHERE s.status <> 'cancelled') AS total
             FROM tasks s WHERE s.parent_id = t.id
         ) sub ON true
-        WHERE ($1::text[] IS NULL OR t.status = ANY($1))
+        WHERE t.kind = 'task'
+          AND ($1::text[] IS NULL OR t.status = ANY($1))
           AND ($2::text IS NULL OR p.key = $2)
         ORDER BY CASE WHEN $3 = 'updated_desc' THEN t.updated_at END DESC,
                  CASE WHEN $3 = 'updated_asc' THEN t.updated_at END ASC,
@@ -383,7 +399,7 @@ pub async fn list_project_filter_items(
                count(t.id) FILTER (WHERE $1::text[] IS NULL OR t.status = ANY($1))
                    AS "task_count!"
         FROM projects p
-        LEFT JOIN tasks t ON t.project_id = p.id
+        LEFT JOIN tasks t ON t.project_id = p.id AND t.kind = 'task'
         GROUP BY p.id
         ORDER BY p.name, p.key
         "#,
@@ -402,10 +418,15 @@ pub async fn get_task_detail_by_key(
         r#"
         SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
             p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
-            ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status,
-            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,
+            ps.harness AS persona_harness, ps.model AS persona_model,
+            ps.description AS persona_description, t.issue_number, t.status,
+            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.archived_at,
+            EXISTS (SELECT 1 FROM agent_requests r WHERE r.task_id = t.id AND r.state = $2)
+                AS "has_pending_request!",
+            t.branch,
             t.resume_at, t.auto_resumes, t.created_by, creator.key AS "creator_task_key?",
             parent.key AS "parent_key?", parent.title AS "parent_title?",
+            parent_persona.name AS "parent_persona_name?",
             base.key AS "base_task_key?", base.title AS "base_task_title?"
         FROM tasks t
         JOIN projects p ON p.id = t.project_id
@@ -413,10 +434,12 @@ pub async fn get_task_detail_by_key(
         LEFT JOIN tasks creator ON creator.id =
             CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END
         LEFT JOIN tasks parent ON parent.id = t.parent_id
+        LEFT JOIN personas parent_persona ON parent_persona.id = parent.persona_id
         LEFT JOIN tasks base ON base.id = t.base_task_id
         WHERE t.key = $1
         "#,
-        key
+        key,
+        crate::requests::RequestState::Pending.as_str()
     )
     .fetch_optional(pool)
     .await?
@@ -430,10 +453,15 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
         r#"
         SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
             p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
-            ps.harness AS persona_harness, ps.model AS persona_model, t.issue_number, t.status,
-            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.branch,
+            ps.harness AS persona_harness, ps.model AS persona_model,
+            ps.description AS persona_description, t.issue_number, t.status,
+            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.archived_at,
+            EXISTS (SELECT 1 FROM agent_requests r WHERE r.task_id = t.id AND r.state = $2)
+                AS "has_pending_request!",
+            t.branch,
             t.resume_at, t.auto_resumes, t.created_by, creator.key AS "creator_task_key?",
             parent.key AS "parent_key?", parent.title AS "parent_title?",
+            parent_persona.name AS "parent_persona_name?",
             base.key AS "base_task_key?", base.title AS "base_task_title?"
         FROM tasks t
         JOIN projects p ON p.id = t.project_id
@@ -441,10 +469,12 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
         LEFT JOIN tasks creator ON creator.id =
             CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END
         LEFT JOIN tasks parent ON parent.id = t.parent_id
+        LEFT JOIN personas parent_persona ON parent_persona.id = parent.persona_id
         LEFT JOIN tasks base ON base.id = t.base_task_id
         WHERE t.id = $1
         "#,
-        id.as_uuid()
+        id.as_uuid(),
+        crate::requests::RequestState::Pending.as_str()
     )
     .fetch_optional(pool)
     .await?

@@ -102,6 +102,12 @@ impl InstanceConfig {
                 "`runs.maxConcurrent` must be at least 1: with 0 no run ever starts".into(),
             ));
         }
+        if cfg.runs.max_concurrent_chats == 0 {
+            return Err(ConfigError::Invalid(
+                "`runs.maxConcurrentChats` must be at least 1: with 0 no chat run ever starts"
+                    .into(),
+            ));
+        }
         cfg.lifecycle_events.validate()?;
         cfg.artifacts.validate()?;
         cfg.scheduling.validate()?;
@@ -714,6 +720,10 @@ pub struct RunsConfig {
     /// wait in their status until a slot frees.
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent: u32,
+    /// Runs of chats that may be non-terminal at the same time, across all replicas. Chat runs
+    /// don't count against `max_concurrent`.
+    #[serde(default = "default_max_concurrent_chats")]
+    pub max_concurrent_chats: u32,
     /// Consecutive automatic resumes after `sandbox_lost`, `connect_timeout` or
     /// `provisioning_failed` before the task becomes `failed`.
     #[serde(default = "default_max_auto_resumes")]
@@ -728,6 +738,7 @@ impl Default for RunsConfig {
             cancel_grace_seconds: default_cancel_grace(),
             keep_alive_seconds: default_keep_alive(),
             max_concurrent: default_max_concurrent(),
+            max_concurrent_chats: default_max_concurrent_chats(),
             max_auto_resumes: default_max_auto_resumes(),
         }
     }
@@ -1194,6 +1205,10 @@ fn default_idle_ttl() -> u64 {
 
 fn default_max_concurrent() -> u32 {
     4
+}
+
+fn default_max_concurrent_chats() -> u32 {
+    2
 }
 
 fn default_max_auto_resumes() -> u32 {

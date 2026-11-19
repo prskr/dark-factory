@@ -87,7 +87,11 @@ fn render_with(
         let inline = images.filter(|i| i.names.iter().any(|name| *name == *link.url));
         if let Some(images) = inline {
             let mut image = link.clone();
-            image.url = format!("/tasks/{}/artifacts/{}/raw", images.task_key, link.url);
+            image.url = format!(
+                "{}/artifacts/{}/raw",
+                crate::layout::item_path(images.task_key),
+                link.url
+            );
             data.value = comrak::nodes::NodeValue::Image(image);
         } else {
             data.value = comrak::nodes::NodeValue::Link(link.clone());

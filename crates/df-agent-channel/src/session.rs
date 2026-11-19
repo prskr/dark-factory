@@ -259,21 +259,7 @@ impl Session {
                     }
                 }
                 note = notifications.recv() => {
-                    if matches!(&note, Ok(Notification::RunChanged { run_id, .. }) if *run_id == self.rc.run.id)
-                        && !self.reconcile_finalizing().await?
-                    {
-                        return Ok(());
-                    }
-                    if !self.forward_interrupt_notification(&note).await {
-                        return Ok(());
-                    }
-                    let relevant = match note {
-                        Ok(Notification::TaskMessageQueued { task_id }) => task_id == self.rc.task.id,
-                        Ok(Notification::Reconnected) | Err(RecvError::Lagged(_)) => true,
-                        Ok(_) => false,
-                        Err(RecvError::Closed) => return Ok(()),
-                    };
-                    if relevant && !self.send_new_prompts().await? {
+                    if !self.handle_notification(note).await? {
                         return Ok(());
                     }
                 }
@@ -296,6 +282,36 @@ impl Session {
                 Some(_) = self.tasks.join_next() => {}
             }
         }
+    }
+
+    /// Reacts to a notification: a change of the run, an interrupt, a chat that needs the slot of
+    /// this idle run (given up like an expired keep-alive) or a message queued for the task.
+    /// Returns `false` once the peer is gone or the run ended.
+    async fn handle_notification(
+        &mut self,
+        note: Result<Notification, RecvError>,
+    ) -> Result<bool, ChannelError> {
+        let ours = self.rc.run.id;
+        if matches!(&note, Ok(Notification::RunChanged { run_id, .. }) if *run_id == ours)
+            && !self.reconcile_finalizing().await?
+        {
+            return Ok(false);
+        }
+        if !self.forward_interrupt_notification(&note).await {
+            return Ok(false);
+        }
+        if matches!(&note, Ok(Notification::ReleaseIdle { run_id }) if *run_id == ours)
+            && !self.release_if_idle().await?
+        {
+            return Ok(false);
+        }
+        let relevant = match note {
+            Ok(Notification::TaskMessageQueued { task_id }) => task_id == self.rc.task.id,
+            Ok(Notification::Reconnected) | Err(RecvError::Lagged(_)) => true,
+            Ok(_) => false,
+            Err(RecvError::Closed) => return Ok(false),
+        };
+        Ok(!relevant || self.send_new_prompts().await?)
     }
 
     /// When the budget `Cancel` is due; `None` if the configured budget has no deadline.
@@ -936,5 +952,7 @@ fn run_end(rc: &RunContext, report: &RunReport) -> RunEnd {
 mod command_tests;
 #[cfg(test)]
 mod interrupt_tests;
+#[cfg(test)]
+mod release_idle_tests;
 #[cfg(test)]
 mod tests;

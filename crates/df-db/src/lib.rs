@@ -12,6 +12,8 @@ pub mod artifacts;
 pub mod audit;
 pub mod blobs;
 pub mod catalog;
+pub mod chat_views;
+pub mod chats;
 pub mod egress;
 pub mod event_subscriptions;
 pub mod git_pushes;

@@ -20,7 +20,7 @@ use crate::notify::{Notification, publish};
 use crate::pool::DbError;
 use crate::runs::has_undelivered_message;
 use crate::task_events::apply_task_event;
-use crate::tasks::record_run_report;
+use crate::tasks::{lock_task_archived, record_run_report};
 
 static NO_EVENTS: EventSinks = EventSinks::disabled();
 
@@ -104,7 +104,9 @@ pub async fn apply_run_event(
         return Ok(None);
     };
     let task_id = TaskId::from_uuid(facts.task_id);
+    // The messages of an archived chat wait for the unarchive: they don't keep its idle run.
     let undelivered_messages = matches!(event, RunEvent::Finalize(FinalizeReason::Idle))
+        && !lock_task_archived(tx, task_id).await?
         && has_undelivered_message(tx, task_id, None).await?;
     let snapshot = RunSnapshot {
         run_id,
@@ -198,6 +200,8 @@ async fn write(
         r#"
         UPDATE runs SET
             state = $2,
+            idle_since = CASE WHEN $2 = 'awaiting_input' THEN COALESCE(idle_since, now())
+                              END,
             pod_ip = COALESCE($3, pod_ip),
             provisioning_started_at =
                 CASE WHEN $4 THEN COALESCE(provisioning_started_at, now())

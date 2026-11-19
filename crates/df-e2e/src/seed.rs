@@ -96,7 +96,7 @@ pub(crate) fn project_input(
 }
 
 /// The projects of the end-to-end suite.
-fn projects() -> [SeedProject; 15] {
+fn projects() -> [SeedProject; 16] {
     let project = |key, name, script| SeedProject {
         key,
         name,
@@ -157,6 +157,11 @@ fn projects() -> [SeedProject; 15] {
             data::LIFECYCLE_PROJECT_KEY,
             data::LIFECYCLE_PROJECT_NAME,
             data::DEMO_SCRIPT,
+        ),
+        project(
+            data::CHAT_PROJECT_KEY,
+            data::CHAT_PROJECT_NAME,
+            data::CHAT_SCRIPT,
         ),
         project(
             data::DELEGATION_PROJECT_KEY,

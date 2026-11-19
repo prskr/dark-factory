@@ -1,0 +1,61 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT p.key AS \"key!\", p.name AS \"name!\",\n               count(t.id) FILTER (WHERE t.archived_at IS NULL) AS \"chats!\",\n               count(t.id) FILTER (WHERE t.archived_at IS NOT NULL) AS \"archived!\",\n               COALESCE(bool_or(t.archived_at IS NULL AND EXISTS (\n                   SELECT 1 FROM agent_requests r WHERE r.task_id = t.id AND r.state = $1)),\n                   false) AS \"needs_you!\"\n        FROM projects p\n        LEFT JOIN tasks t ON t.project_id = p.id AND t.kind = 'chat'\n        GROUP BY p.id\n        ORDER BY p.name, p.key\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "chats!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "archived!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "needs_you!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "8817cd2930154b4052c906c79b7c42c03f837777611d1127725140954922e5cf"
+}

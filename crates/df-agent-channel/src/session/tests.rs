@@ -587,7 +587,7 @@ async fn a_message_for_an_idle_run_starts_no_run_and_is_forwarded_at_once() {
 
     assert_eq!(state_and_status(&env, run_id).await.1, "running");
     assert!(
-        df_db::runs::start_queued_runs(&pool, 10, 100)
+        df_db::runs::start_queued_runs(&pool, 10, 100, 100)
             .await
             .unwrap()
             .is_empty()

@@ -180,6 +180,10 @@ message Workspace {
   // out from `origin/<task_branch>` and fails prepare if it is missing, instead of creating it
   // from the base.
   bool existing_branch = 10;
+  // A chat's workspace: a detached checkout of `base_branch` reset to `origin/<base_branch>` at
+  // the start of every run, with untracked files removed. `task_branch` and `wip_branch` are
+  // empty and the runtime pushes nothing.
+  bool read_only = 11;
 }
 
 enum RewritePolicy {

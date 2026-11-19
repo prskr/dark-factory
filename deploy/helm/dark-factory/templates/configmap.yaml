@@ -41,6 +41,7 @@ data:
     runs:
       keepAliveSeconds: {{ .Values.runs.keepAliveSeconds }}
       maxConcurrent: {{ .Values.runs.maxConcurrent }}
+      maxConcurrentChats: {{ .Values.runs.maxConcurrentChats }}
       maxAutoResumes: {{ .Values.runs.maxAutoResumes }}
     scheduling:
       tickMillis: {{ .Values.scheduling.tickMillis }}

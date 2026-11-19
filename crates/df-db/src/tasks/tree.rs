@@ -231,12 +231,15 @@ pub async fn lock_task_status(
 }
 
 /// The id of the base task `key` of a new task in `project`: a task of the project that is not
-/// Done, failed or cancelled.
+/// Done, failed or cancelled. A chat has no branch to build on, so it is no base task.
 pub(super) async fn resolve_base_task(
     tx: &mut Transaction<'_, Postgres>,
     project: df_core::ProjectId,
     key: &TaskKey,
 ) -> Result<TaskId, DbError> {
+    if key.is_chat() {
+        return Err(DbError::InvalidBaseTask(key.to_string()));
+    }
     let id = sqlx::query_scalar!(
         "SELECT id FROM tasks WHERE project_id = $1 AND key = $2 AND status <> ALL($3)",
         project.as_uuid(),

@@ -219,6 +219,9 @@ runs:
   keepAliveSeconds: 600
   # Runs that may be active at the same time, across all replicas.
   maxConcurrent: 4
+  # Chat runs that may be active at the same time, across all replicas. They don't count
+  # against maxConcurrent.
+  maxConcurrentChats: 2
   # Consecutive automatic resumes after a lost sandbox, a connect timeout or a failed
   # provisioning before the task fails.
   maxAutoResumes: 3

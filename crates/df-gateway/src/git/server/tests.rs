@@ -61,6 +61,7 @@ fn route(credential_ref: &str) -> GitRoute {
         commit_name: "factory".into(),
         commit_email: "factory@example.com".into(),
         rewrite_policy: 0,
+        read_only: false,
     }
 }
 

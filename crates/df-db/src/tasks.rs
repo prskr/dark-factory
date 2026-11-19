@@ -5,7 +5,7 @@ use df_core::run_transition::RunEvent;
 use df_core::task_transition::{DoneBy, StopScope, TaskEvent, TaskSnapshot, transition};
 use df_core::{
     DependencyKind, ExistingBranch, FALLBACK_TITLE, PersonaId, Principal, ProjectId, ProjectKey,
-    PromptId, RunId, RunState, TITLE_MAX_CHARS, TaskId, TaskKey, TaskStatus, TitleSource,
+    PromptId, RunId, RunState, TITLE_MAX_CHARS, TaskId, TaskKey, TaskKind, TaskStatus, TitleSource,
     is_satisfied, placeholder_title, sanitize_title, system_reason, title_too_long,
 };
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
@@ -144,14 +144,25 @@ pub struct TaskRow {
     pub base_branch: Option<String>,
     /// The PR was opened outside the factory; the factory never changes it.
     pub pr_attached: bool,
+    /// When a chat was archived; always `None` for a task.
+    pub archived_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 impl TaskRow {
+    /// Whether this is a task or a chat; the key says.
+    pub fn kind(&self) -> TaskKind {
+        if self.key.is_chat() {
+            TaskKind::Chat
+        } else {
+            TaskKind::Task
+        }
+    }
+
     /// Whether the task started on an existing branch rather than its own `factory/task/<KEY>`.
     pub fn on_existing_branch(&self) -> bool {
-        self.branch != self.key.task_branch()
+        self.key.task_branch().is_some_and(|own| self.branch != own)
     }
 }
 
@@ -244,7 +255,7 @@ pub async fn create_task_on_tx(
     placement: TaskPlacement,
 ) -> Result<(TaskRow, TaskMessageRow), DbError> {
     // The project row lock of the allocation serializes creations; the check names the holder.
-    let (task_key, _) = allocate_task_key(tx, input.project_id).await?;
+    let (task_key, _) = allocate_task_key(tx, input.project_id, TaskKind::Task).await?;
     if let Some(branch) = &placement.branch
         && let Some(holder) =
             open_branch_holder(tx, input.project_id, branch.as_str(), None).await?
@@ -369,9 +380,10 @@ async fn resolve_dependencies(
 
 /// Locks the project row and allocates the next gap-free task number. Returns the task key and
 /// the number.
-async fn allocate_task_key(
+pub(crate) async fn allocate_task_key(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     project_id: ProjectId,
+    kind: TaskKind,
 ) -> Result<(TaskKey, i64), DbError> {
     let project_alloc = sqlx::query!(
         r#"
@@ -391,14 +403,17 @@ async fn allocate_task_key(
         ProjectKey::new(project_alloc.key).map_err(|e| DbError::InvalidData(e.to_string()))?;
     let number = u64::try_from(project_alloc.allocated_number)
         .map_err(|_negative| DbError::InvalidData("negative task number".into()))?;
-    let task_key =
-        TaskKey::new(project_key, number).map_err(|e| DbError::InvalidData(e.to_string()))?;
+    let task_key = match kind {
+        TaskKind::Task => TaskKey::new(project_key, number),
+        TaskKind::Chat => TaskKey::chat(project_key, number),
+    }
+    .map_err(|e| DbError::InvalidData(e.to_string()))?;
     Ok((task_key, project_alloc.allocated_number))
 }
 
 /// Inserts the queued task. Without a usable `user_title` the title is a placeholder derived from
 /// the description.
-async fn insert_task(
+pub(crate) async fn insert_task(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     input: &NewTask,
     placement: &TaskPlacement,
@@ -409,8 +424,9 @@ async fn insert_task(
 ) -> Result<TaskRow, DbError> {
     let allocated_number = i64::try_from(task_key.number())
         .map_err(|_overflow| DbError::InvalidData("task number out of range".into()))?;
+    // A chat has no branch: the empty string, which the open-branch index skips.
     let branch = placement.branch.as_ref().map_or_else(
-        || task_key.task_branch(),
+        || task_key.task_branch().unwrap_or_default(),
         |branch| branch.as_str().to_owned(),
     );
     let attached = placement.attached_pr.as_ref();
@@ -436,9 +452,10 @@ async fn insert_task(
         INSERT INTO tasks (
             id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, created_by, parent_id, base_task_id,
-            branch, base_branch, pr_number, pr_url, pr_attached
+            branch, base_branch, pr_number, pr_url, pr_attached, kind
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                $19)
         RETURNING
             id, project_id, number, key, title, title_source, description,
             persona_id, issue_number, status, status_line,
@@ -462,7 +479,8 @@ async fn insert_task(
         attached.map(|pr| pr.base.as_str()),
         attached.map(|pr| pr.number),
         attached.map(|pr| pr.url.as_str()),
-        attached.is_some()
+        attached.is_some(),
+        if task_key.is_chat() { "chat" } else { "task" }
     )
     .fetch_one(&mut **tx)
     .await
@@ -492,9 +510,25 @@ async fn insert_task(
         branch,
         base_branch: attached.map(|pr| pr.base.clone()),
         pr_attached: attached.is_some(),
+        archived_at: None,
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
+}
+
+/// Locks the task row (after the run row, the global order) and returns whether it is an archived
+/// chat; `false` for an unknown task.
+pub(crate) async fn lock_task_archived(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT archived_at IS NOT NULL AS "archived!" FROM tasks WHERE id = $1 FOR UPDATE"#,
+        task_id.as_uuid()
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .unwrap_or(false))
 }
 
 /// The key of the open task of `project` that holds `branch`, other than `except`.
@@ -504,6 +538,10 @@ async fn open_branch_holder(
     branch: &str,
     except: Option<TaskId>,
 ) -> Result<Option<TaskKey>, DbError> {
+    // A chat has no branch (the empty string), which holds nothing: the `tasks_open_branch` rule.
+    if branch.is_empty() {
+        return Ok(None);
+    }
     let key: Option<String> = sqlx::query_scalar(
         "SELECT key FROM tasks
          WHERE project_id = $1 AND branch = $2 AND id IS DISTINCT FROM $3
@@ -543,22 +581,29 @@ async fn enqueue_assignment_prompt(
     user_title: Option<&str>,
     description: &str,
 ) -> Result<TaskMessageRow, DbError> {
-    let prompt_id = PromptId::new();
     let author = Principal::system(system_reason::TASK_ASSIGNED);
     let content = format_assignment_prompt(user_title, description);
-    let author_json = serde_json::to_value(&author)?;
-    let content_json = serde_json::to_value(&content)?;
+    insert_message(tx, task_id, author, content).await
+}
 
+/// Inserts an undelivered message at the end of the queue of the task.
+pub(crate) async fn insert_message(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: TaskId,
+    author: Principal,
+    content: Vec<ContentBlock>,
+) -> Result<TaskMessageRow, DbError> {
+    let prompt_id = PromptId::new();
     let msg_row = sqlx::query!(
         r#"
         INSERT INTO task_messages (id, task_id, author, content)
         VALUES ($1, $2, $3, $4)
-        RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at
+        RETURNING id, task_id, queued_at, delivered_run_id, delivered_at
         "#,
         prompt_id.as_uuid(),
         task_id.as_uuid(),
-        author_json,
-        content_json
+        serde_json::to_value(&author)?,
+        serde_json::to_value(&content)?
     )
     .fetch_one(&mut **tx)
     .await?;
@@ -607,10 +652,6 @@ pub async fn queue_message_tx(
     author: Principal,
     content: Vec<ContentBlock>,
 ) -> Result<TaskMessageRow, DbError> {
-    let prompt_id = PromptId::new();
-    let author_json = serde_json::to_value(&author)?;
-    let content_json = serde_json::to_value(&content)?;
-
     reject_taken_branch(tx, task_id).await?;
     apply_task_event(tx, task_id, TaskEvent::MessageQueued, &author)
         .await
@@ -618,31 +659,7 @@ pub async fn queue_message_tx(
             DbError::Sqlx(error) => branch_violation(error),
             other => other,
         })?;
-
-    let msg_row = sqlx::query!(
-        r#"
-        INSERT INTO task_messages (id, task_id, author, content)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, task_id, queued_at, delivered_run_id, delivered_at
-        "#,
-        prompt_id.as_uuid(),
-        task_id.as_uuid(),
-        author_json,
-        content_json
-    )
-    .fetch_one(&mut **tx)
-    .await?;
-
-    Ok(TaskMessageRow {
-        id: PromptId::from_uuid(msg_row.id),
-        task_id: TaskId::from_uuid(msg_row.task_id),
-        author,
-        content,
-        queued_at: msg_row.queued_at,
-        delivered_run_id: msg_row.delivered_run_id.map(RunId::from_uuid),
-        delivered_at: msg_row.delivered_at,
-        forwarded_at: None,
-    })
+    insert_message(tx, task_id, author, content).await
 }
 
 /// A message reopens a final task only if no other open task holds its branch
@@ -770,7 +787,7 @@ pub async fn get_task(
             persona_id, issue_number, status, status_line,
             pr_number, pr_url, pr_title, pr_body,
             diverged, harness_session_id, created_by, parent_id, base_task_id,
-            branch, base_branch, pr_attached, created_at, updated_at
+            branch, base_branch, pr_attached, archived_at, created_at, updated_at
         FROM tasks
         WHERE id = $1
         "#,
@@ -819,6 +836,7 @@ pub async fn get_task(
             branch: r.branch,
             base_branch: r.base_branch,
             pr_attached: r.pr_attached,
+            archived_at: r.archived_at,
             created_at: r.created_at,
             updated_at: r.updated_at,
         })
@@ -888,6 +906,9 @@ pub async fn claim_held_back_messages(
         r#"
         UPDATE task_messages SET forwarded_at = now()
         WHERE task_id = $1 AND held_back
+          -- An archived chat takes no prompt, whatever run is alive: the message waits for the
+          -- unarchive (decided in this statement, so a concurrent archive cannot be missed).
+          AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = $1 AND t.archived_at IS NOT NULL)
         RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at,
                   forwarded_at
         "#,
@@ -1259,7 +1280,7 @@ pub(crate) async fn has_active_run(
 }
 
 /// Asks a persona to name a task that has no title from a person.
-fn ask_for_title() -> String {
+pub(crate) fn ask_for_title() -> String {
     format!(
         "Before you start, call the `set_task_title` tool with a short title (at most {TITLE_MAX_CHARS} characters) for this task."
     )

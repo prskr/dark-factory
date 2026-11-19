@@ -72,6 +72,8 @@ pub struct RefScope {
     pub wip_branch: String,
     /// Whether non-fast-forward updates of the task branch are forwarded (policy `with-lease`).
     pub rewrite_allowed: bool,
+    /// The run is a chat's: no update is allowed, whatever the branches say.
+    pub read_only: bool,
 }
 
 impl RefScope {
@@ -82,6 +84,7 @@ impl RefScope {
             task_branch: format!("{TASK_BRANCH_PREFIX}{key}"),
             wip_branch: format!("{WIP_BRANCH_PREFIX}{key}"),
             rewrite_allowed: false,
+            read_only: false,
         }
     }
 
@@ -101,6 +104,8 @@ impl RefScope {
 pub enum Reason {
     /// The ref is outside the run's scope, or the update is a task branch deletion.
     RefNotAllowed,
+    /// The run is a chat's and takes no ref update at all.
+    ReadOnly,
     /// A task branch update whose old commit is not an ancestor of the new one.
     NonFastForward,
     /// The update is allowed on its own, but another update of the same push was rejected.
@@ -118,6 +123,7 @@ impl Reason {
     pub fn as_str(&self) -> &str {
         match self {
             Self::RefNotAllowed => "df:ref-not-allowed",
+            Self::ReadOnly => "df:read-only",
             Self::NonFastForward => NON_FAST_FORWARD,
             Self::OtherRefRejected => "df:other-ref-rejected",
             Self::AuditUnavailable => "df:audit-unavailable",
@@ -186,6 +192,9 @@ fn rejection<A: Ancestry>(
     command: &RefCommand,
     ancestry: &A,
 ) -> Result<Option<Reason>, A::Error> {
+    if scope.read_only {
+        return Ok(Some(Reason::ReadOnly));
+    }
     if command.name == scope.wip_branch {
         return Ok(None);
     }
@@ -283,8 +292,36 @@ mod tests {
                 task_branch: "refs/heads/factory/task/DF-7".to_owned(),
                 wip_branch: "refs/heads/factory/wip/DF-7".to_owned(),
                 rewrite_allowed: false,
+                read_only: false,
             }
         );
+    }
+
+    #[test]
+    fn every_update_of_a_read_only_scope_is_rejected_as_read_only() {
+        let ancestry = FakeAncestry::answering(Ok(true));
+        let scope = RefScope {
+            task_branch: String::new(),
+            wip_branch: String::new(),
+            rewrite_allowed: true,
+            read_only: true,
+        };
+        let commands = [
+            command(oid('1'), oid('2'), "refs/heads/factory/task/DF-12-CHAT"),
+            command(zero(), oid('2'), "refs/heads/factory/wip/DF-12-CHAT"),
+            command(oid('1'), zero(), "refs/heads/main"),
+            // An empty name must not match the empty branch of the scope.
+            command(zero(), oid('2'), ""),
+        ];
+
+        let verdicts = check_refs(&scope, &commands, &ancestry).unwrap();
+
+        assert_eq!(
+            reasons(&verdicts),
+            vec![Some(Reason::ReadOnly); commands.len()]
+        );
+        assert_eq!(Reason::ReadOnly.as_str(), "df:read-only");
+        assert!(ancestry.calls().is_empty());
     }
 
     #[test]

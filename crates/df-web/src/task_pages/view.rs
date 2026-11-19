@@ -19,7 +19,7 @@ use crate::components::{
     phone_profile_menu, search_menu, section, status_badge, tone_badge,
 };
 use crate::components::{ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
-use crate::layout::Shell;
+use crate::layout::{Shell, item_path};
 use crate::transcript::block_parts;
 
 const CHIP_SELECT: &str =
@@ -435,7 +435,7 @@ pub(crate) fn pending_region(
 
 /// The queued stack and the message input below the transcript. One Alpine scope holds the
 /// draft and the edit state, so the stack's buttons and the input share them (design D3).
-pub(super) fn message_area(
+pub(crate) fn message_area(
     key: &str,
     persona: &str,
     task_status: TaskStatus,
@@ -443,7 +443,7 @@ pub(super) fn message_area(
     pending: &[TaskMessageRow],
     show_hidden: bool,
 ) -> Markup {
-    let messages = format!("/tasks/{key}/messages");
+    let messages = format!("{}/messages", item_path(key));
     html! {
         // The state lives outside every region the stream swaps, so the draft survives
         // reconnects. The server clears it with `message-queued` (sent) and `message-saved`
@@ -490,8 +490,8 @@ pub(crate) fn interruptible(runs: &[RunView]) -> bool {
 /// placeholder, so this is CSS only and needs no draft state. "No turn is running" appears in
 /// the `#pending` region.
 pub(crate) fn composer_action(key: &str, interruptible: bool) -> Markup {
-    let messages = format!("/tasks/{key}/messages");
-    let interrupt = format!("/tasks/{key}/interrupt");
+    let messages = format!("{}/messages", item_path(key));
+    let interrupt = format!("{}/interrupt", item_path(key));
     let send_class = if interruptible {
         format!("{ROUND_ACTION_CLASS} group-has-[textarea:placeholder-shown]:hidden")
     } else {
@@ -617,11 +617,8 @@ pub(crate) fn details_region(
         ),
         ("Created by", super::dependencies::creator(task)),
     ];
-    if let (Some(key), Some(title)) = (&task.parent_key, &task.parent_title) {
-        properties.push((
-            "Parent",
-            html! { a href={"/tasks/" (key)} class="text-accent-text hover:underline" { (key) } " " span class="font-normal text-muted" { (title) } },
-        ));
+    if let Some(parent) = parent_link(task) {
+        properties.push(("Parent", parent));
     }
     if let (Some(key), Some(title)) = (&task.base_task_key, &task.base_task_title) {
         properties.push((
@@ -674,6 +671,21 @@ pub(crate) fn details_region(
             }
         }
     }
+}
+
+/// The parent of the task: its key and title linked to its page. A chat parent reads
+/// `<key> · <persona> · <topic>` and links to the chat page.
+fn parent_link(task: &TaskDetail) -> Option<Markup> {
+    let (key, title) = task.parent_key.as_ref().zip(task.parent_title.as_ref())?;
+    let persona = task
+        .parent_persona_name
+        .as_ref()
+        .filter(|_| df_core::is_chat_key(key));
+    Some(if let Some(persona) = persona {
+        html! { a href=(item_path(key)) class="text-accent-text hover:underline" { (key) " · " (persona) " · " (title) } }
+    } else {
+        html! { a href=(item_path(key)) class="text-accent-text hover:underline" { (key) } " " span class="font-normal text-muted" { (title) } }
+    })
 }
 
 /// The collapsible description of the details: closed, only the header with a chevron; open, the
@@ -868,7 +880,7 @@ fn run_card(task_key: &str, run: &RunView, persona_model: Option<&str>) -> Marku
             time datetime=(run.started_at.to_rfc3339()) class="ml-auto font-mono text-xs text-faint" { (short_time(run.started_at)) }
             // A run that is already ending cannot be stopped again.
             @if run.state.can_stop() {
-                button type="button" hx-post={"/tasks/" (task_key) "/stop"} hx-swap="none"
+                button type="button" hx-post={(item_path(task_key)) "/stop"} hx-swap="none"
                     class="inline-flex min-h-11 items-center justify-center rounded-[10px] border border-line bg-panel px-3 text-sm font-medium text-ink hover:bg-sunk lg:min-h-8" { "Stop run" }
             }
         }
@@ -1104,7 +1116,7 @@ fn short_time(time: DateTime<Utc>) -> String {
 }
 
 /// A task status as shown: without underscores.
-pub(super) fn status_name(status: TaskStatus) -> String {
+pub(crate) fn status_name(status: TaskStatus) -> String {
     status.as_str().replace('_', " ")
 }
 

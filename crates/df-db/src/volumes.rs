@@ -70,8 +70,13 @@ pub async fn due_for_retention(
           AND NOT EXISTS (
               SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state <> ALL($4))
           AND (SELECT MAX(COALESCE(r.ended_at, r.started_at)) FROM runs r WHERE r.task_id = t.id)
+              IS NOT NULL
+          AND GREATEST(
+                  (SELECT MAX(COALESCE(r.ended_at, r.started_at)) FROM runs r WHERE r.task_id = t.id),
+                  t.archived_at)
               < GREATEST(
-                  CASE WHEN t.status = ANY($5) THEN $1::timestamptz END,
+                  CASE WHEN t.status = ANY($5) OR t.archived_at IS NOT NULL
+                       THEN $1::timestamptz END,
                   $2::timestamptz,
                   CASE WHEN t.pr_merged_at IS NOT NULL THEN 'infinity'::timestamptz END
               )

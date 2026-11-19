@@ -82,6 +82,12 @@ pub enum Icon {
     Copy,
     /// The sort menu of the task list (Lucide `arrow-down-up`).
     ArrowDownUp,
+    /// The chats (Lucide `message-square`).
+    Chat,
+    /// Archive a chat (Lucide `archive`).
+    Archive,
+    /// Back out of an archived chat or artifact (Lucide `arrow-left`).
+    ArrowLeft,
 }
 
 /// Inner elements of the factory mark (Lucide `factory`, ISC licence); `assets/logo.svg` has the
@@ -140,6 +146,9 @@ impl Icon {
         Self::EyeOff,
         Self::Copy,
         Self::ArrowDownUp,
+        Self::Chat,
+        Self::Archive,
+        Self::ArrowLeft,
     ];
 
     /// Inner SVG elements of the 24x24 icon.
@@ -237,6 +246,13 @@ impl Icon {
             Self::ArrowDownUp => {
                 "<path d=\"m3 16 4 4 4-4\"/><path d=\"M7 20V4\"/><path d=\"m21 8-4-4-4 4\"/><path d=\"M17 4v16\"/>"
             }
+            Self::Chat => {
+                "<path d=\"M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z\"/>"
+            }
+            Self::Archive => {
+                "<rect width=\"20\" height=\"5\" x=\"2\" y=\"3\" rx=\"1\"/><path d=\"M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8\"/><path d=\"M10 12h4\"/>"
+            }
+            Self::ArrowLeft => "<path d=\"m12 19-7-7 7-7\"/><path d=\"M19 12H5\"/>",
             Self::PullRequestDraft => {
                 "<circle cx=\"18\" cy=\"18\" r=\"3\"/><circle cx=\"6\" cy=\"6\" r=\"3\"/><path d=\"M18 6V5\"/><path d=\"M18 11v-1\"/><line x1=\"6\" x2=\"6\" y1=\"9\" y2=\"21\"/>"
             }

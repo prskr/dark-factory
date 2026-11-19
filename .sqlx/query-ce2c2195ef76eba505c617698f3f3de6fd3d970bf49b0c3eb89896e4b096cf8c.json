@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id, t.resume_at IS NOT NULL AS \"resumed!\" FROM tasks t\n        WHERE t.kind = $4\n          AND t.archived_at IS NULL\n          AND t.status = ANY($3)\n          AND (t.resume_at IS NULL OR t.resume_at <= now())\n          AND NOT EXISTS (\n              SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.state <> ALL($2))\n        ORDER BY COALESCE(t.resume_at, t.updated_at), t.created_at\n        LIMIT $1\n        FOR UPDATE OF t SKIP LOCKED\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "resumed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "TextArray",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "ce2c2195ef76eba505c617698f3f3de6fd3d970bf49b0c3eb89896e4b096cf8c"
+}

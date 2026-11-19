@@ -174,11 +174,12 @@ tests:
     template: configmap.yaml
     set:
       runs.maxConcurrent: 2
+      runs.maxConcurrentChats: 3
       runs.maxAutoResumes: 5
     asserts:
       - matchRegex:
           path: data["config.yaml"]
-          pattern: 'maxConcurrent: 2\n  maxAutoResumes: 5\n'
+          pattern: 'maxConcurrent: 2\n  maxConcurrentChats: 3\n  maxAutoResumes: 5\n'
         documentIndex: 0
 
   - it: renders the volume retention values

@@ -23,6 +23,8 @@ async fn predicate_values(pool: &PgPool, name: &str) -> BTreeSet<String> {
         .split('\'')
         .skip(1)
         .step_by(2)
+        // `branch <> ''` of the open-branch index is no list member.
+        .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .collect()
 }

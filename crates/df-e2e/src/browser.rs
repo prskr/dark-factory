@@ -471,6 +471,90 @@ impl Session {
         Ok(key)
     }
 
+    /// Starts a chat of project `project_key` with the only persona and `message` through the new
+    /// chat dialog. Returns the key of the chat once the UI has opened it. The message gets the
+    /// suffix of the test like a task description does. The chat is recorded, so the fixture
+    /// cancels the tasks it creates.
+    pub async fn create_chat(
+        &self,
+        env: &E2eEnv,
+        project_key: &str,
+        message: &str,
+    ) -> Result<String> {
+        let message = &submitted_description(message, self.description_suffix.get());
+        self.page
+            .goto(
+                &format!("{}/chats?project={project_key}", env.base_url),
+                None,
+            )
+            .await
+            .context("open the chat list")?;
+        // `.first()`: the page has a "New chat" button for each layout (header and phone).
+        self.page
+            .locator("button[hx-get^='/chats/compose']:visible")
+            .first()
+            .click(None)
+            .await
+            .context("open the new chat dialog")?;
+        self.page
+            .locator("#composer #message")
+            .fill(message, None)
+            .await
+            .context("fill the first message")?;
+        button(&self.page, "Start chat")
+            .click(None)
+            .await
+            .context("start the chat")?;
+        expect_page(&self.page)
+            .to_have_url_regex(&format!("/chats/{project_key}-[0-9]+-CHAT$"))
+            .await
+            .context("land on the new chat")?;
+        let url = self.page.url();
+        let key = url
+            .rsplit('/')
+            .next()
+            .map(str::to_owned)
+            .with_context(|| format!("chat key in {url}"))?;
+        self.record_created(&key);
+        Ok(key)
+    }
+
+    /// Opens the page of chat `key`.
+    pub async fn open_chat(&self, env: &E2eEnv, key: &str) -> Result<()> {
+        self.page
+            .goto(&format!("{}/chats/{key}", env.base_url), None)
+            .await
+            .with_context(|| format!("open chat {key}"))?;
+        Ok(())
+    }
+
+    /// Archives the open chat with the "Archive" action of its overview and waits for the chat
+    /// list the UI goes back to.
+    pub async fn archive_chat(&self) -> Result<()> {
+        button(&self.page, "Archive")
+            .click(None)
+            .await
+            .context("archive the chat")?;
+        expect_page(&self.page)
+            .to_have_url_regex(r"/chats\?project=")
+            .await
+            .context("go back to the chat list")
+    }
+
+    /// Unarchives the open (archived) chat with the "Unarchive" action of its overview.
+    pub async fn unarchive_chat(&self) -> Result<()> {
+        // `.first()`: the notice in place of the message box has the action too.
+        self.page
+            .get_by_role(
+                AriaRole::Button,
+                Some(GetByRoleOptions::default().name("Unarchive").exact(true)),
+            )
+            .first()
+            .click(None)
+            .await
+            .context("unarchive the chat")
+    }
+
     /// Opens the page of task `key`.
     pub async fn open_task(&self, env: &E2eEnv, key: &str) -> Result<()> {
         self.page

@@ -76,8 +76,23 @@ impl RunContext {
         &self.base_branch
     }
 
-    pub fn wip_branch(&self) -> String {
+    /// The WIP snapshot branch; `None` for a chat, which has none.
+    pub fn wip_branch(&self) -> Option<String> {
         self.task.key.wip_branch()
+    }
+
+    /// Whether the run is a chat's: a read-only checkout of the base branch.
+    pub fn is_chat(&self) -> bool {
+        self.task.key.is_chat()
+    }
+
+    /// What the run's task is.
+    pub fn kind(&self) -> df_core::TaskKind {
+        if self.is_chat() {
+            df_core::TaskKind::Chat
+        } else {
+            df_core::TaskKind::Task
+        }
     }
 }
 

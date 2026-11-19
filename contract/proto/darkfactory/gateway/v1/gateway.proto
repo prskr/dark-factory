@@ -175,6 +175,9 @@ message GitRoute {
   // Whether non-fast-forward updates of the task branch are forwarded (upstream rejects a stale
   // lease). UNSPECIFIED is treated as NEVER.
   RewritePolicy rewrite_policy = 8;
+  // The run is a chat's: every ref update is rejected (`df:read-only`). `task_branch` and
+  // `wip_branch` are empty.
+  bool read_only = 9;
 }
 
 // Branch rewrite policy of the project (`darkfactory.agent.v1.RewritePolicy`).

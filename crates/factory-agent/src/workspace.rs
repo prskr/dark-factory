@@ -124,7 +124,7 @@ fn config_params<'a>(
 ///   check out task branch, restore WIP files if available).
 /// - If workspace already exists: rewrite `.git/config`, fetch from remote, push unpushed commits,
 ///   fast-forward merge if remote is ahead, or detect divergence and emit notice.
-/// - Never runs `git clean`.
+/// - Never runs `git clean`, except in a read-only workspace (a chat's), which is reset to the base.
 pub async fn prepare_workspace(
     git: &Git,
     repo_dir: &Path,
@@ -133,11 +133,49 @@ pub async fn prepare_workspace(
     ssl_ca_info: Option<&Path>,
 ) -> anyhow::Result<PrepareResult> {
     let config_params = config_params(workspace, hooks_path, ssl_ca_info);
-    if repo_dir.join(".git").exists() {
+    if workspace.read_only {
+        prepare_read_only(git, repo_dir, workspace, &config_params).await
+    } else if repo_dir.join(".git").exists() {
         sync_existing_workspace(git, repo_dir, workspace, &config_params).await
     } else {
         clone_workspace(git, repo_dir, workspace, &config_params).await
     }
+}
+
+/// A read-only workspace (a chat's): clones if needed, fetches, checks out `origin/<base>`
+/// detached and resets the work tree to it, removing untracked and ignored files. Nothing of an
+/// earlier run is kept and nothing is pushed.
+async fn prepare_read_only(
+    git: &Git,
+    repo_dir: &Path,
+    workspace: &Workspace,
+    config_params: &GitConfigParams<'_>,
+) -> anyhow::Result<PrepareResult> {
+    if repo_dir.join(".git").exists() {
+        rewrite_git_config(repo_dir, config_params)?;
+        let fetch_out = git.run_network_cmd(&["fetch", "origin"]).await?;
+        if !fetch_out.status.success() {
+            let stderr = String::from_utf8_lossy(&fetch_out.stderr);
+            anyhow::bail!(
+                "git fetch origin failed during workspace prepare: {}",
+                stderr.trim()
+            );
+        }
+    } else {
+        clone_without_checkout(git, repo_dir, workspace, config_params).await?;
+    }
+    let base_ref = format!("origin/{}", workspace.base_branch);
+    git.git_output(&["checkout", "--force", "--detach", &base_ref])
+        .await?;
+    git.git_output(&["reset", "--hard", &base_ref]).await?;
+    git.git_output(&["clean", "-fdx"]).await?;
+    let removed = hidden_paths::enforce(git, repo_dir, &workspace.hidden_paths).await?;
+
+    let mut result = PrepareResult::clean(git.current_head().await.unwrap_or_default());
+    result
+        .notices
+        .extend(hidden_paths::removed_notice(&removed));
+    Ok(result)
 }
 
 impl PrepareResult {
@@ -177,6 +215,44 @@ async fn clone_workspace(
     workspace: &Workspace,
     config_params: &GitConfigParams<'_>,
 ) -> anyhow::Result<PrepareResult> {
+    clone_without_checkout(git, repo_dir, workspace, config_params).await?;
+
+    // Start from origin/<task branch> if the remote has it, else from the base branch
+    let task_remote_ref = format!("origin/{}", workspace.task_branch);
+    let has_remote_task = ref_exists(git, &task_remote_ref).await;
+    let start_point = if has_remote_task {
+        match git.git_output(&["rev-parse", &task_remote_ref]).await {
+            Ok(sha) => store_remote_sha(git, &sha),
+            // Only the lease is lost: pushes stay plain until the next fetch records a sha.
+            Err(error) => tracing::warn!(
+                error = %error,
+                task_branch = %workspace.task_branch,
+                "could not read the remote task branch; the lease is not tracked"
+            ),
+        }
+        task_remote_ref
+    } else if workspace.existing_branch {
+        return Err(PrepareError::BranchMissing(workspace.task_branch.clone()).into());
+    } else {
+        format!("origin/{}", workspace.base_branch)
+    };
+    git.git_output(&["checkout", "-B", &workspace.task_branch, &start_point])
+        .await?;
+    follow_base(git, workspace, has_remote_task).await;
+
+    restore_wip_snapshot(git, workspace).await?;
+
+    let head_sha = git.current_head().await.unwrap_or_default();
+    Ok(PrepareResult::clean(head_sha))
+}
+
+/// Blobless clone without checkout, then the runtime-owned `.git/config`.
+async fn clone_without_checkout(
+    git: &Git,
+    repo_dir: &Path,
+    workspace: &Workspace,
+    config_params: &GitConfigParams<'_>,
+) -> anyhow::Result<()> {
     let parent_dir = repo_dir.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent_dir)?;
 
@@ -206,34 +282,7 @@ async fn clone_workspace(
 
     // Write runtime-owned .git/config and remove config.worktree
     rewrite_git_config(repo_dir, config_params)?;
-
-    // Start from origin/<task branch> if the remote has it, else from the base branch
-    let task_remote_ref = format!("origin/{}", workspace.task_branch);
-    let has_remote_task = ref_exists(git, &task_remote_ref).await;
-    let start_point = if has_remote_task {
-        match git.git_output(&["rev-parse", &task_remote_ref]).await {
-            Ok(sha) => store_remote_sha(git, &sha),
-            // Only the lease is lost: pushes stay plain until the next fetch records a sha.
-            Err(error) => tracing::warn!(
-                error = %error,
-                task_branch = %workspace.task_branch,
-                "could not read the remote task branch; the lease is not tracked"
-            ),
-        }
-        task_remote_ref
-    } else if workspace.existing_branch {
-        return Err(PrepareError::BranchMissing(workspace.task_branch.clone()).into());
-    } else {
-        format!("origin/{}", workspace.base_branch)
-    };
-    git.git_output(&["checkout", "-B", &workspace.task_branch, &start_point])
-        .await?;
-    follow_base(git, workspace, has_remote_task).await;
-
-    restore_wip_snapshot(git, workspace).await?;
-
-    let head_sha = git.current_head().await.unwrap_or_default();
-    Ok(PrepareResult::clean(head_sha))
+    Ok(())
 }
 
 /// Moves the checked-out task branch to `origin/<base>` while it has no commits of its own: its
@@ -560,6 +609,9 @@ pub async fn push_after_turn(
     workspace: &Workspace,
     last_pushed_sha: &mut Option<String>,
 ) -> anyhow::Result<Option<PushReport>> {
+    if workspace.read_only {
+        return Ok(None);
+    }
     let current_sha = git.current_head().await?;
     if last_pushed_sha.as_deref() == Some(&current_sha) {
         return Ok(None);
@@ -749,6 +801,24 @@ pub async fn finalize_workspace(
     // 1. Rewrite .git/config
     let config_params = config_params(workspace, params.hooks_path, params.ssl_ca_info);
     rewrite_git_config(params.repo_dir, &config_params)?;
+
+    if workspace.read_only {
+        // A chat's workspace is reset by the next prepare: nothing to push, nothing to keep.
+        return Ok(FinalizeResult {
+            run_report: RunReport {
+                outcome: params.outcome as i32,
+                detail: params.detail.to_string(),
+                retry_after: None,
+                harness_session_id: params.harness_session_id.to_string(),
+                workspace: Some(WorkspaceState {
+                    size_bytes: compute_dir_size(params.repo_dir),
+                    ..WorkspaceState::default()
+                }),
+            },
+            push_reports: Vec::new(),
+            notices: Vec::new(),
+        });
+    }
 
     // 2. Push task branch if needed
     if let Some(report) = push_after_turn(git, workspace, last_pushed_sha).await? {

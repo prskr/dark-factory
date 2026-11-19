@@ -32,6 +32,7 @@ mod transcript;
 mod workspace;
 mod workspace_base;
 mod workspace_finalize;
+mod workspace_read_only;
 
 /// A `Release`, as the control plane sends it once the idle deadline passed. The runtime keeps
 /// an early one, so tests queue it up front to end the idle wait after the last turn.

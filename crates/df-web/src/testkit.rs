@@ -766,6 +766,69 @@ pub(crate) async fn new_task(pool: &PgPool, seed: &Seed, title: &str) -> df_db::
     .0
 }
 
+/// Starts a chat of the seeded project with the seeded persona; it is `queued`.
+pub(crate) async fn new_chat(pool: &PgPool, seed: &Seed, text: &str) -> df_db::TaskRow {
+    new_chat_with(
+        pool,
+        seed,
+        df_core::PersonaId::from_uuid(seed.persona),
+        text,
+    )
+    .await
+}
+
+/// Starts a chat of the seeded project with `persona`.
+pub(crate) async fn new_chat_with(
+    pool: &PgPool,
+    seed: &Seed,
+    persona: df_core::PersonaId,
+    text: &str,
+) -> df_db::TaskRow {
+    df_db::chats::create_chat(
+        pool,
+        df_db::chats::NewChat {
+            project_id: df_core::ProjectId::from_uuid(seed.project),
+            persona_id: persona,
+            author: actor().0,
+            text: text.into(),
+        },
+    )
+    .await
+    .unwrap()
+    .0
+}
+
+/// Adds a persona that uses the seeded provider.
+pub(crate) async fn add_persona(
+    pool: &PgPool,
+    seed: &Seed,
+    name: &str,
+    description: &str,
+) -> df_core::PersonaId {
+    use df_db::catalog::{Actor, PersonaInput, save_persona};
+    let (principal, roles) = actor();
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let persona = save_persona(
+        pool,
+        actor,
+        None,
+        &PersonaInput {
+            name: name.into(),
+            description: description.into(),
+            system_prompt: format!("Be {name}."),
+            harness: "claude-code".into(),
+            model: "claude-sonnet-5-5".into(),
+            model_provider_id: seed.provider,
+        },
+    )
+    .await
+    .unwrap();
+    df_core::PersonaId::from_uuid(persona.id)
+}
+
 /// Sets a task's status with SQL and publishes `task_changed`: tests reach states that the task
 /// events get to only through a long history.
 pub(crate) async fn set_task_status(

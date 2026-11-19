@@ -173,6 +173,7 @@ fn policy(forge_port: u16, fingerprints: &[String]) -> Result<Policy> {
         commit_name: "Bot".into(),
         commit_email: BOT.into(),
         rewrite_policy: RewritePolicy::WithLease.into(),
+        read_only: false,
     };
     let sandbox = Sandbox {
         run_id: "run-DF-7".into(),

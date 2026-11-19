@@ -177,6 +177,20 @@ These are compiled in and not configurable.
   `origin/<task_branch>`. If the remote lacks it, prepare fails with `the branch `<name>` does not
   exist on the remote` (`PrepareError::BranchMissing`), nothing is pushed, and the run ends `FAILED`
   with that reason.
+- **`context_compacted` notice.** When the runtime starts a new harness session seeded with a
+  non-empty `Assign.continuation.summary` (the previous session could not be resumed, or there was
+  none to resume), it emits the notice `context_compacted` (level `INFO`, the summary as message)
+  before the first prompt. A resumed session, a first run and an empty summary emit none. See
+  `claude-acp.md`, "`session/load` & Resumption".
+- **Chat runs (read-only workspace).** With `Workspace.read_only` (the runs of a chat) there is
+  no task branch and no WIP branch (`task_branch` and `wip_branch` are empty). Prepare clones if
+  needed, fetches, runs `git checkout --force --detach origin/<base_branch>`, `git reset --hard
+  origin/<base_branch>` and `git clean -fdx`: every run starts at the current base branch and
+  anything an earlier run left (edits, untracked and ignored files) is gone. Hidden paths still
+  apply. The runtime pushes nothing: not after a turn, not at finalize, and it writes no WIP
+  snapshot; the `RunReport` carries empty branch and WIP SHAs. The Git proxy rejects every push of
+  the run with `df:read-only` regardless, so a harness that pushes by itself fails. Results of a
+  chat that should last belong into artifacts or tasks created with `create_task`.
 - **Git retries.** A clone, fetch or push whose output shows HTTP 503 (`returned error: 503`) or a
   connection error (`Failed to connect to`, `Connection refused`, `Connection reset by peer`,
   `Empty reply from server`, and mid-transfer `Operation timed out`,

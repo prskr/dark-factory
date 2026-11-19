@@ -46,6 +46,8 @@ struct Fixture {
     scheme: &'static str,
     /// The project's branch rewrite policy is `with-lease`.
     with_lease: bool,
+    /// The route is a chat's.
+    read_only: bool,
 }
 
 impl Fixture {
@@ -75,6 +77,7 @@ impl Fixture {
             push_idle: None,
             scheme: "https",
             with_lease: false,
+            read_only: false,
         })
     }
 
@@ -151,6 +154,7 @@ impl Fixture {
                 RewritePolicy::Never
             }
             .into(),
+            read_only: self.read_only,
             ..GitRoute::default()
         };
         let sandbox = Sandbox {
@@ -524,6 +528,59 @@ async fn a_push_to_main_is_rejected() -> Result<()> {
             )]
         )]
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_push_from_a_read_only_route_is_rejected_as_read_only_while_fetching_works() -> Result<()>
+{
+    let mut fixture = Fixture::new().await?;
+    fixture.read_only = true;
+    let task_branch = "refs/heads/factory/task/DF-12-CHAT";
+    let recorder = Recorded::new(&fixture, task_branch, false);
+    let upstream = Arc::new(ForgeUpstream::with_roots(fixture.forge_roots.clone())?);
+    let (port, gateway) = fixture
+        .gateway_with(
+            "DF-12-CHAT",
+            fixture.mirrors()?,
+            DEFAULT_MAX,
+            upstream,
+            recorder.clone(),
+        )
+        .await?;
+    let work = fixture.client("client")?;
+    commit(&work, "ONE")?;
+
+    // The route allows this very branch, so only the read-only flag can reject it.
+    let output = push(
+        &work,
+        &fixture.ca,
+        port,
+        "DF-12-CHAT",
+        &["HEAD:refs/heads/factory/task/DF-12-CHAT"],
+    )
+    .await?;
+    let fetch = {
+        let url = format!("https://127.0.0.1:{port}/git/DF-12-CHAT.git");
+        let ca_config = format!("http.sslCAInfo={}", fixture.ca.display());
+        git(&work, &["-c", &ca_config, "fetch", "-q", &url, "main"])
+    };
+    gateway.abort();
+    fixture.forge_task.abort();
+
+    assert!(!output.status.success());
+    let stderr = stderr(&output);
+    assert!(stderr.contains("[remote rejected]"), "{stderr}");
+    assert!(stderr.contains("df:read-only"), "{stderr}");
+    assert_eq!(head_of(&fixture.forge_repo(), task_branch)?, None);
+    assert_eq!(
+        recorder.reasons(),
+        vec![(
+            PushVerdict::Rejected,
+            vec![(task_branch.to_owned(), "df:read-only".to_owned())]
+        )]
+    );
+    fetch?;
     Ok(())
 }
 
