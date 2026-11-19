@@ -1,29 +1,40 @@
-//! Shared rules of `pull-requests.list-open`: the filters that are not supported yet and the
-//! check that a pull request's head branch lives in the repository itself.
+//! Shared rules of `pull-requests.list-open`: which pull request matches a filter, and the check
+//! that a pull request's head branch lives in the repository itself.
 
-/// Which filters beyond `head` a `list-open` call sets.
+/// The filter of `list-open`; all set fields apply together.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct SetFilters {
-    pub head_prefix: bool,
-    pub author: bool,
-    pub label: bool,
-    pub base: bool,
+pub struct OpenFilter<'a> {
+    /// Head branch in the repository itself, never in a fork.
+    pub head: Option<&'a str>,
+    pub head_prefix: Option<&'a str>,
+    /// Login, compared case-insensitively.
+    pub author: Option<&'a str>,
+    pub label: Option<&'a str>,
+    pub base: Option<&'a str>,
 }
 
-/// `Err` with the message for the first filter beyond `head` that is set; the plugins return it as
-/// `invalid-input` until `iter3-ci-tools` adds the filters.
-pub fn reject_unsupported_filters(filters: SetFilters) -> Result<(), String> {
-    let set = [
-        ("head-prefix", filters.head_prefix),
-        ("author", filters.author),
-        ("label", filters.label),
-        ("base", filters.base),
-    ];
-    match set.iter().find(|(_, set)| *set) {
-        Some((name, _)) => Err(format!(
-            "the `{name}` filter of `list-open` is not supported yet"
-        )),
-        None => Ok(()),
+/// What the filter looks at in a pull request.
+#[derive(Debug, Clone, Copy)]
+pub struct Candidate<'a> {
+    pub head: &'a str,
+    /// `owner/name` of the head repository as the forge reports it; `None` for a deleted fork.
+    pub head_repo: Option<&'a str>,
+    pub base: &'a str,
+    pub author: &'a str,
+    pub labels: &'a [String],
+}
+
+impl OpenFilter<'_> {
+    /// Whether `pr` of the repository `owner/name` passes every set field.
+    pub fn matches(&self, owner: &str, name: &str, pr: &Candidate<'_>) -> bool {
+        self.head
+            .is_none_or(|head| pr.head == head && head_in_repo(pr.head_repo, owner, name))
+            && self.head_prefix.is_none_or(|p| pr.head.starts_with(p))
+            && self.base.is_none_or(|b| pr.base == b)
+            && self
+                .author
+                .is_none_or(|a| pr.author.eq_ignore_ascii_case(a))
+            && self.label.is_none_or(|l| pr.labels.iter().any(|x| x == l))
     }
 }
 
@@ -37,21 +48,67 @@ pub fn head_in_repo(full_name: Option<&str>, owner: &str, name: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn pr<'a>(head: &'a str, author: &'a str, labels: &'a [String]) -> Candidate<'a> {
+        Candidate {
+            head,
+            head_repo: Some("o/r"),
+            base: "main",
+            author,
+            labels,
+        }
+    }
+
     #[test]
-    fn only_the_head_filter_is_supported() {
-        assert!(reject_unsupported_filters(SetFilters::default()).is_ok());
-        let both = SetFilters {
-            author: true,
-            base: true,
-            ..SetFilters::default()
+    fn no_filter_matches_everything_including_forks() {
+        let fork = Candidate {
+            head_repo: Some("fork/r"),
+            ..pr("x", "a", &[])
         };
-        let err = reject_unsupported_filters(both).unwrap_err();
-        assert!(err.contains("author"), "{err}");
-        let base = SetFilters {
-            base: true,
-            ..SetFilters::default()
+        assert!(OpenFilter::default().matches("o", "r", &fork));
+    }
+
+    #[test]
+    fn prefix_and_label_apply_together() {
+        let major = ["major".to_string()];
+        let filter = OpenFilter {
+            head_prefix: Some("renovate/"),
+            label: Some("major"),
+            ..OpenFilter::default()
         };
-        assert!(reject_unsupported_filters(base).is_err());
+        assert!(filter.matches("o", "r", &pr("renovate/a", "bot", &major)));
+        assert!(!filter.matches("o", "r", &pr("renovate/b", "bot", &[])));
+        assert!(!filter.matches("o", "r", &pr("fix/login", "bot", &major)));
+    }
+
+    #[test]
+    fn author_ignores_case_and_base_is_exact() {
+        let filter = OpenFilter {
+            author: Some("Renovate[bot]"),
+            base: Some("main"),
+            ..OpenFilter::default()
+        };
+        assert!(filter.matches("o", "r", &pr("a", "renovate[bot]", &[])));
+        assert!(!filter.matches("o", "r", &pr("a", "alice", &[])));
+        let develop = Candidate {
+            base: "develop",
+            ..pr("a", "renovate[bot]", &[])
+        };
+        assert!(!filter.matches("o", "r", &develop));
+    }
+
+    #[test]
+    fn the_head_filter_matches_the_exact_branch_and_never_a_fork() {
+        let filter = OpenFilter {
+            head: Some("fix/login"),
+            ..OpenFilter::default()
+        };
+        assert!(filter.matches("o", "r", &pr("fix/login", "a", &[])));
+        assert!(!filter.matches("o", "r", &pr("fix/login2", "a", &[])));
+        let fork = Candidate {
+            head_repo: Some("fork/r"),
+            ..pr("fix/login", "a", &[])
+        };
+        assert!(!filter.matches("o", "r", &fork));
     }
 
     #[test]

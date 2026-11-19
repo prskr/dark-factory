@@ -109,7 +109,7 @@ tests:
     asserts:
       - matchRegex:
           path: data["config.yaml"]
-          pattern: 'plugins:\n  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    webhookSecret:\n      name: "RELEASE-NAME-dark-factory-webhook-forgejo"\n      key: "secret"\n      generate: true\n  "github":\n    path: "/plugins/github/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    hosts: \[\{"apiUrl":"https://api.github.com","host":"github.com"\}\]\n    authScheme: "bearer"\n    webhookSecret:\n      name: "RELEASE-NAME-dark-factory-webhook-github"\n      key: "secret"\n      generate: true\n'
+          pattern: 'plugins:\n  "forgejo":\n    path: "/plugins/forgejo/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    webhookSecret:\n      name: "RELEASE-NAME-dark-factory-webhook-forgejo"\n      key: "secret"\n      generate: true\n  "github":\n    path: "/plugins/github/plugin.wasm"\n    callTimeoutSeconds: 30\n    memoryMib: 64\n    settings: \{\}\n    hosts: \[\{"apiUrl":"https://api.github.com","host":"github.com"\}\]\n    authScheme: "bearer"\n    extraHosts: \["\*.actions.githubusercontent.com","\*.blob.core.windows.net"\]\n    webhookSecret:\n      name: "RELEASE-NAME-dark-factory-webhook-github"\n      key: "secret"\n      generate: true\n'
 
   - it: renders no GitHub plugin volume when the entry is removed
     template: control-plane-deployment.yaml
@@ -172,6 +172,40 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "authScheme"
+
+  - it: allows the hosts GitHub redirects job logs to by default
+    template: configmap.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'extraHosts: \["\*.actions.githubusercontent.com","\*.blob.core.windows.net"\]'
+
+  - it: writes the extra hosts of a plugin entry and none for one without
+    template: configmap.yaml
+    documentIndex: 0
+    set:
+      plugins.github.extraHosts:
+        - logs.ghe.example.org
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: 'extraHosts: \["logs.ghe.example.org"\]'
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '  "forgejo":\n(    .*\n)+  "github"'
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: '  "forgejo":\n(    .*\n)*    extraHosts:'
+
+  - it: rejects an extra host that is not a host name or a wildcard subdomain
+    template: configmap.yaml
+    set:
+      plugins.github.extraHosts:
+        - "https://logs.example.org/x"
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraHosts"
 
   - it: rejects a plugin host route without an https API URL
     template: configmap.yaml

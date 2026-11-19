@@ -355,6 +355,9 @@ plugins:
     {{- with $plugin.authScheme }}
     authScheme: {{ quote . }}
     {{- end }}
+    {{- with $plugin.extraHosts }}
+    extraHosts: {{ toJson . }}
+    {{- end }}
     {{- $webhook := $plugin.webhookSecret | default dict }}
     webhookSecret:
       name: {{ $webhook.existingSecret | default (printf "%s-webhook-%s" (include "dark-factory.fullname" $) $name) | quote }}

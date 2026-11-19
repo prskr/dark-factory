@@ -50,9 +50,26 @@ pub struct RawResponse {
     /// All headers; names as the host sent them.
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+    /// [`send_tail`] dropped the beginning of the body.
+    pub body_cut: bool,
 }
 
 impl RawResponse {
+    /// The first value of the header `name` (case-insensitive).
+    pub fn header(&self, name: &str) -> Option<String> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.clone())
+    }
+
+    /// First byte of the body within the full resource, from `Content-Range: bytes <first>-…`.
+    pub fn content_range_start(&self) -> Option<u64> {
+        let value = self.header("content-range")?;
+        let range = value.trim().strip_prefix("bytes ")?;
+        range.split_once('-')?.0.parse().ok()
+    }
+
     /// The first value of the header `name` (case-insensitive) as a number, if it is one, e.g.
     /// `Retry-After` in seconds.
     pub fn header_number<N: FromStr>(&self, name: &str) -> Option<N> {
@@ -94,6 +111,19 @@ pub fn request_line(method: Method, target: &str) -> String {
 
 /// Sends `request` and waits for the complete response.
 pub fn send(request: &RawRequest<'_>) -> Result<RawResponse, TransportError> {
+    send_keeping(request, None)
+}
+
+/// Like [`send`], but keeps only the last `max` bytes of the body while reading it, so a huge
+/// body never sits in memory; `body_cut` tells whether the beginning was dropped.
+pub fn send_tail(request: &RawRequest<'_>, max: usize) -> Result<RawResponse, TransportError> {
+    send_keeping(request, Some(max))
+}
+
+fn send_keeping(
+    request: &RawRequest<'_>,
+    keep_tail: Option<usize>,
+) -> Result<RawResponse, TransportError> {
     let headers = Fields::new();
     for (name, value) in request.headers {
         headers
@@ -143,15 +173,17 @@ pub fn send(request: &RawRequest<'_>) -> Result<RawResponse, TransportError> {
         .map(|(name, value)| (name, String::from_utf8_lossy(&value).into_owned()))
         .collect();
     let status = response.status();
-    let body = read_body(
+    let (body, body_cut) = read_body(
         response
             .consume()
             .map_err(|()| internal("response body already consumed"))?,
+        keep_tail,
     )?;
     Ok(RawResponse {
         status,
         headers,
         body,
+        body_cut,
     })
 }
 
@@ -174,17 +206,32 @@ fn write_body(out: OutgoingBody, body: &[u8]) -> Result<(), TransportError> {
     OutgoingBody::finish(out, None).map_err(|e| transport("finishing request body", e))
 }
 
-fn read_body(body: IncomingBody) -> Result<Vec<u8>, TransportError> {
+fn read_body(
+    body: IncomingBody,
+    keep_tail: Option<usize>,
+) -> Result<(Vec<u8>, bool), TransportError> {
     let stream = body.stream().map_err(|()| internal("no response stream"))?;
     let mut data = Vec::new();
+    let mut cut = false;
     loop {
         match stream.blocking_read(64 * 1024) {
-            Ok(chunk) => data.extend_from_slice(&chunk),
+            Ok(chunk) => {
+                data.extend_from_slice(&chunk);
+                if let Some(max) = keep_tail {
+                    // Trim in steps of `max` so the copying stays linear.
+                    if data.len() >= max.saturating_mul(2) {
+                        cut |= crate::log_tail::keep_tail(&mut data, max);
+                    }
+                }
+            }
             Err(StreamError::Closed) => break,
             Err(e) => return Err(transport("reading response", e)),
         }
     }
-    Ok(data)
+    if let Some(max) = keep_tail {
+        cut |= crate::log_tail::keep_tail(&mut data, max);
+    }
+    Ok((data, cut))
 }
 
 fn internal(what: impl Into<String>) -> TransportError {

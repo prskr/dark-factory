@@ -3,7 +3,7 @@
 //! operations.
 
 /// One entry per REST endpoint of `api.rs`; the GraphQL mutations have no such description.
-const OPERATIONS: [&str; 7] = [
+const OPERATIONS: [&str; 10] = [
     "pulls/get",             // GET /repos/{owner}/{repo}/pulls/{pull_number}
     "pulls/create",          // POST /repos/{owner}/{repo}/pulls
     "pulls/list",            // GET /repos/{owner}/{repo}/pulls (find-open)
@@ -11,6 +11,9 @@ const OPERATIONS: [&str; 7] = [
     "issues/get",            // GET /repos/{owner}/{repo}/issues/{issue_number}
     "issues/create-comment", // POST /repos/{owner}/{repo}/issues/{issue_number}/comments
     "repos/get-collaborator-permission-level", // GET /repos/{owner}/{repo}/collaborators/{username}/permission
+    "checks/list-for-ref",                     // GET /repos/{owner}/{repo}/commits/{ref}/check-runs
+    "repos/get-combined-status-for-ref",       // GET /repos/{owner}/{repo}/commits/{ref}/status
+    "actions/download-job-logs-for-workflow-run", // GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs
 ];
 
 #[cfg(test)]

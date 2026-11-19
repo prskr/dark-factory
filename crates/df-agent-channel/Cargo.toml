@@ -30,6 +30,7 @@ df-tls.workspace = true
 futures.workspace = true
 jsonschema.workspace = true
 opentelemetry.workspace = true
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

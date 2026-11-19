@@ -13,10 +13,10 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::ids::{ProjectId, RunId};
 use crate::seams::{
-    AuthorRole, Comment, Feedback, ForgeClient, IntegrationError, Issue, NewPullRequest,
-    PeerIdentity, ProviderError, PullRequest, PullRequestRef, PullRequestState, PullRequestUpdate,
-    RunSandboxSpec, SandboxEvent, SandboxProvider, SecretError, SecretKeyRef, SecretStore,
-    TaskVolumeSpec,
+    AuthorRole, CiJobLog, CiState, CiStatus, Comment, Feedback, ForgeClient, IntegrationError,
+    Issue, ListedPullRequest, NewPullRequest, PeerIdentity, ProviderError, PullRequest,
+    PullRequestFilter, PullRequestRef, PullRequestState, PullRequestUpdate, RunSandboxSpec,
+    SandboxEvent, SandboxProvider, SecretError, SecretKeyRef, SecretStore, TaskVolumeSpec,
 };
 
 // ---------------------------------------------------------------------------
@@ -209,6 +209,22 @@ pub enum ForgeCall {
         project_id: ProjectId,
         head: String,
     },
+    ListPullRequests {
+        project_id: ProjectId,
+        filter: PullRequestFilter,
+    },
+    GetPullRequest {
+        project_id: ProjectId,
+        number: u64,
+    },
+    ReadCiStatus {
+        project_id: ProjectId,
+        git_ref: String,
+    },
+    ReadCiJobLog {
+        project_id: ProjectId,
+        job_id: u64,
+    },
     UpdatePullRequest {
         project_id: ProjectId,
         number: u64,
@@ -263,6 +279,9 @@ struct ForgeState {
     create_pr_results: VecDeque<Result<PullRequest, IntegrationError>>,
     find_open_results: VecDeque<Result<Option<PullRequest>, IntegrationError>>,
     list_open_results: VecDeque<Result<Vec<PullRequest>, IntegrationError>>,
+    list_prs_results: VecDeque<Result<Vec<ListedPullRequest>, IntegrationError>>,
+    ci_status_results: VecDeque<Result<CiStatus, IntegrationError>>,
+    ci_log_results: VecDeque<Result<CiJobLog, IntegrationError>>,
     hang_find_open: bool,
     hang_update_pr: bool,
     find_open_gate: Option<Arc<tokio::sync::Semaphore>>,
@@ -339,6 +358,45 @@ impl FakeForgeClient {
             .lock()
             .expect("lock poisoned")
             .list_open_results
+            .push_back(res);
+    }
+
+    /// Seeds a pull request of `project_id`, which `get_pull_request` returns.
+    pub fn insert_pull_request(&self, project_id: ProjectId, pr: PullRequest) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .pull_requests
+            .insert((project_id, pr.id.number), pr);
+    }
+
+    /// Queues a scripted result for `list_pull_requests`; without one it lists nothing.
+    pub fn push_list_pull_requests_result(
+        &self,
+        res: Result<Vec<ListedPullRequest>, IntegrationError>,
+    ) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .list_prs_results
+            .push_back(res);
+    }
+
+    /// Queues a scripted result for `read_ci_status`; without one the ref has no checks.
+    pub fn push_read_ci_status_result(&self, res: Result<CiStatus, IntegrationError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .ci_status_results
+            .push_back(res);
+    }
+
+    /// Queues a scripted result for `read_ci_job_log`; without one the job is not found.
+    pub fn push_read_ci_job_log_result(&self, res: Result<CiJobLog, IntegrationError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .ci_log_results
             .push_back(res);
     }
 
@@ -575,6 +633,69 @@ impl ForgeClient for FakeForgeClient {
             .collect();
         open.sort_by_key(|pr| pr.id.number);
         Ok(open)
+    }
+
+    async fn list_pull_requests(
+        &self,
+        p: &ProjectId,
+        filter: &PullRequestFilter,
+    ) -> Result<Vec<ListedPullRequest>, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::ListPullRequests {
+            project_id: *p,
+            filter: filter.clone(),
+        });
+        state.list_prs_results.pop_front().unwrap_or(Ok(Vec::new()))
+    }
+
+    async fn get_pull_request(
+        &self,
+        p: &ProjectId,
+        number: u64,
+    ) -> Result<PullRequest, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::GetPullRequest {
+            project_id: *p,
+            number,
+        });
+        state
+            .pull_requests
+            .get(&(*p, number))
+            .cloned()
+            .ok_or_else(|| IntegrationError::NotFound(format!("PR #{number} not found")))
+    }
+
+    async fn read_ci_status(
+        &self,
+        p: &ProjectId,
+        git_ref: &str,
+    ) -> Result<CiStatus, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::ReadCiStatus {
+            project_id: *p,
+            git_ref: git_ref.to_string(),
+        });
+        state.ci_status_results.pop_front().unwrap_or(Ok(CiStatus {
+            state: CiState::None,
+            checks: Vec::new(),
+        }))
+    }
+
+    async fn read_ci_job_log(
+        &self,
+        p: &ProjectId,
+        job_id: u64,
+    ) -> Result<CiJobLog, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::ReadCiJobLog {
+            project_id: *p,
+            job_id,
+        });
+        state.ci_log_results.pop_front().unwrap_or_else(|| {
+            Err(IntegrationError::NotFound(format!(
+                "job {job_id} not found"
+            )))
+        })
     }
 
     async fn update_pull_request(

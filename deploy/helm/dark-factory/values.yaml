@@ -205,6 +205,13 @@ plugins:
     hosts:
       - host: github.com
         apiUrl: https://api.github.com
+    # Hosts the plugin may also reach, without the forge credential: GitHub answers a job log
+    # request with a redirect to short-lived storage URLs on these (`read_ci_log`). `*.x` matches
+    # every subdomain of x. GitHub Enterprise Server hosts need their own storage host here.
+    # Measured 2026-11-19: github.com redirected to productionresultssa7.blob.core.windows.net.
+    extraHosts:
+      - "*.actions.githubusercontent.com"
+      - "*.blob.core.windows.net"
     # draft-mode: native (default) | title-prefix | auto; api-version; wip-prefixes
     # (see plugins/github/README.md).
     settings: {}

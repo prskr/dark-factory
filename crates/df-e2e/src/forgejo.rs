@@ -211,6 +211,35 @@ impl Forgejo {
             .context("pull request number")
     }
 
+    /// Reports commit status `state` (`success`, `pending`, `failure`) for check `context` on commit
+    /// `sha`, as a CI system does; `target_url` is the check's page.
+    pub async fn create_commit_status(
+        &self,
+        sha: &str,
+        state: &str,
+        context: &str,
+        target_url: &str,
+    ) -> Result<()> {
+        self.post(
+            &format!("statuses/{sha}"),
+            &serde_json::json!({ "state": state, "context": context, "target_url": target_url }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Closes pull request `number` without merging it.
+    pub async fn close_pull(&self, number: u64) -> Result<()> {
+        self.call(
+            reqwest::Method::PATCH,
+            &self.repo_path(&format!("pulls/{number}")),
+            Some(&serde_json::json!({ "state": "closed" })),
+            &[],
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Takes pull request `number` out of draft by retitling it (Forgejo refuses to merge a
     /// draft).
     pub async fn retitle_pull(&self, number: u64, title: &str) -> Result<()> {

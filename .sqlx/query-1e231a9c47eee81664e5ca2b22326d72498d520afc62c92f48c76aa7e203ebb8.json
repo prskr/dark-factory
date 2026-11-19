@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!\" FROM transcript_events e JOIN tasks t ON t.id = e.task_id\n         WHERE t.key = $1 AND strpos(e.payload::text, $2) > 0\n           AND strpos(e.payload::text, $3) > 0",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1e231a9c47eee81664e5ca2b22326d72498d520afc62c92f48c76aa7e203ebb8"
+}

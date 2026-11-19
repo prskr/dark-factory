@@ -8,8 +8,9 @@ use async_trait::async_trait;
 use df_core::routing::RoutingTable;
 use df_core::webhooks::ParsedEvent;
 use df_core::{
-    AuthorRole, Comment, CredentialRef, Feedback, ForgeClient, IntegrationError, Issue,
-    NewPullRequest, ProjectId, PullRequest, PullRequestUpdate,
+    AuthorRole, CiJobLog, CiStatus, Comment, CredentialRef, Feedback, ForgeClient,
+    IntegrationError, Issue, ListedPullRequest, NewPullRequest, ProjectId, PullRequest,
+    PullRequestFilter, PullRequestUpdate,
 };
 
 use crate::forge::{PluginForgeClient, RepoTarget, WebhookError};
@@ -137,6 +138,42 @@ impl ForgeClient for ForgeRouter {
     ) -> Result<Vec<PullRequest>, IntegrationError> {
         let (client, target) = self.resolve(p).await?;
         client.list_open_pull_requests(&target, head).await
+    }
+
+    async fn list_pull_requests(
+        &self,
+        p: &ProjectId,
+        filter: &PullRequestFilter,
+    ) -> Result<Vec<ListedPullRequest>, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.list_pull_requests(&target, None, filter).await
+    }
+
+    async fn get_pull_request(
+        &self,
+        p: &ProjectId,
+        number: u64,
+    ) -> Result<PullRequest, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.get_pull_request(&target, number).await
+    }
+
+    async fn read_ci_status(
+        &self,
+        p: &ProjectId,
+        git_ref: &str,
+    ) -> Result<CiStatus, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.ci_status(&target, git_ref).await
+    }
+
+    async fn read_ci_job_log(
+        &self,
+        p: &ProjectId,
+        job_id: u64,
+    ) -> Result<CiJobLog, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.ci_job_log(&target, job_id).await
     }
 
     async fn update_pull_request(

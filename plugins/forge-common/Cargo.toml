@@ -40,4 +40,5 @@ struct_excessive_bools = "allow"
 excessive_nesting = "warn"
 
 [dependencies]
+percent-encoding.workspace = true
 wasip2.workspace = true

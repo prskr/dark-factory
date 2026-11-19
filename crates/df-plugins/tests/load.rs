@@ -63,7 +63,7 @@ fn load_logs_name_path_size_and_compile_time() -> anyhow::Result<()> {
 }
 
 #[test]
-fn github_component_reports_pull_requests_issues_and_webhooks() -> anyhow::Result<()> {
+fn github_component_reports_pull_requests_issues_webhooks_and_ci() -> anyhow::Result<()> {
     let host = PluginHost::from_bytes(
         &PluginEngine::new()?,
         "github",
@@ -77,7 +77,19 @@ fn github_component_reports_pull_requests_issues_and_webhooks() -> anyhow::Resul
             pull_requests: true,
             issues: true,
             webhooks: true,
+            ci: true,
         }
     );
+    Ok(())
+}
+
+#[test]
+fn forgejo_and_probe_components_report_ci() -> anyhow::Result<()> {
+    let engine = PluginEngine::new()?;
+    for (name, component) in [("forgejo", common::forgejo()), ("probe", common::probe())] {
+        let host =
+            PluginHost::from_bytes(&engine, name, &component, Duration::from_secs(30), 64 << 20)?;
+        assert!(host.capabilities().ci, "{name}");
+    }
     Ok(())
 }

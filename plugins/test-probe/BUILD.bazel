@@ -17,6 +17,7 @@ rust_library(
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
     compile_data = ["//contract:wit_integrations"],
+    crate_features = ["ci"],
     crate_name = "test_probe_plugin",
     edition = "2024",
     lint_config = ":lints",
@@ -29,7 +30,22 @@ rust_shared_library(
     srcs = glob(["src/**/*.rs"]),
     aliases = aliases(),
     compile_data = ["//contract:wit_integrations"],
+    crate_features = ["ci"],
     crate_name = "test_probe_plugin",
+    edition = "2024",
+    lint_config = ":lints",
+    platform = "//build/platforms:wasm32_wasip2",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+)
+
+# The probe as a plugin without CI support (world `forge-core`, no feature `ci`).
+rust_shared_library(
+    name = "test-probe-without-ci",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    compile_data = ["//contract:wit_integrations"],
+    crate_name = "test_probe_plugin_without_ci",
     edition = "2024",
     lint_config = ":lints",
     platform = "//build/platforms:wasm32_wasip2",

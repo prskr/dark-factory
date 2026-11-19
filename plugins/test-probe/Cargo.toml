@@ -42,6 +42,12 @@ similar_names = "allow"
 struct_excessive_bools = "allow"
 excessive_nesting = "warn"
 
+[features]
+default = ["ci"]
+# Exports `ci` (world `forge`). Without it the component is built against world `forge-core`, as a
+# plugin without CI support: `cargo build --no-default-features --target-dir target/probe-no-ci`.
+ci = []
+
 [dependencies]
 hex.workspace = true
 wit-bindgen.workspace = true

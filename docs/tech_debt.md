@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-127.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-128.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -112,6 +112,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-122 | low   | `df-web` artifacts | The live appearance of the Artifacts tab has no browser test |
 | TD-125 | low   | `df-gateway` push checks | Other open tasks' existing branches count as already-checked upstream |
 | TD-126 | low   | `df-web` assets | The stylesheet size guard has about 1 KB of headroom |
+| TD-127 | low   | `deploy` Helm, `df-plugins` policy | The GitHub plugin's default `extraHosts` admit every Azure storage account |
 
 ## Entries
 
@@ -789,6 +790,18 @@ The test caps the compiled `app.css` below 52,000 bytes. `ui-settings-list-rows`
 **Matters when:** the next UI change adds variants; the guard fails and invites another raise without a stated ceiling.
 
 **Fix:** state the intended budget in the test, and trim variants (for example one shared focus-ring class instead of three `focus-visible:after:ring-*` classes) before raising the cap again.
+
+Origin of TD-127: code review of `iter3-ci-tools` (`df-plugins`, `plugins/github`, `deploy`, 2026-11-19). The `TD-n (ID)` heading gives the ID used in that review.
+
+### TD-127 (SP2b). The GitHub plugin's default `extraHosts` admit every Azure storage account
+
+`deploy/helm/dark-factory/values.yaml` (`plugins.github.extraHosts`), `crates/df-plugins/src/policy.rs`
+
+GitHub redirects a job log download to a storage account such as `productionresultssa7.blob.core.windows.net` (measured 2026-11-19). `extraHosts` only takes exact hosts or a `*.suffix` wildcard, so the default is `*.blob.core.windows.net`. The host sends no credential there, but the plugin can reach any Azure storage account over HTTPS.
+
+**Matters when:** a plugin is untrusted or compromised and could send forge data it already holds to an outside storage account.
+
+**Fix:** allow a prefix within a host label (for example `productionresultssa*.blob.core.windows.net`) in `extraHosts` matching, or list the known hosts exactly. Add policy tests for the new pattern.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122

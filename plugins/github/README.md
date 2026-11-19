@@ -1,7 +1,7 @@
 # GitHub plugin
 
-WASI component implementing world `forge` of `contract/wit/integrations` (`pull-requests` and
-`issues`) for github.com and GitHub Enterprise Server. Built for `wasm32-wasip2`; run by
+WASI component implementing world `forge` of `contract/wit/integrations` (`pull-requests`,
+`issues`, `webhooks` and `ci`) for github.com and GitHub Enterprise Server. Built for `wasm32-wasip2`; run by
 `df-plugins`. The plugin never sees credentials: the host adds `Authorization`.
 
 ```bash
@@ -9,7 +9,7 @@ cargo build -p github-plugin --target wasm32-wasip2 --release   # target/wasm32-
 wasm-tools component wit target/wasm32-wasip2/release/github_plugin.wasm
 ```
 
-Exports: `pull-requests`, `issues`. Imports: `wasi:http`, `wasi:config`, `wasi:io`, `wasi:clocks`,
+Exports: `pull-requests`, `issues`, `webhooks`, `ci`. Imports: `wasi:http`, `wasi:config`, `wasi:io`, `wasi:clocks`,
 `wasi:cli` (pulled in by `std`) and `darkfactory:integrations/types`.
 
 Title prefixes, timestamps, the stderr log and the `wasi:http` transport are shared with the other forge plugin in `plugins/forge-common`.
@@ -43,6 +43,9 @@ fails as `upstream` until the project's URL is updated.
 | `update` | `GET .../pulls/{number}` when title or draft change, GraphQL `markPullRequestReadyForReview` / `convertPullRequestToDraft` (with the pull request's `node_id`) for the native draft state, `PATCH .../pulls/{number}` for title and body; a final `GET` when only the native draft state changed |
 | `merge` | `GET .../pulls/{number}` (a merged pull request with the same head is success, another head is `conflict`, a closed one `invalid-input`, a moved head `conflict` without a merge request), `GET /repos/{owner}/{repo}` for `allow_merge_commit`, `allow_squash_merge` and `allow_rebase_merge`, then `PUT .../pulls/{number}/merge` with `sha` and `merge_method` (`merge`, else `squash`, else `rebase`); `405` (not mergeable) and `409` (head changed) are `conflict` |
 | `create-branch` | `GET .../git/ref/heads/{from}` for the tip, then `POST .../git/refs` with `ref: refs/heads/{name}` and `sha`; a `422` "Reference already exists" is `conflict`, an unknown `from` is `not-found` |
+| `list-open` | `GET .../pulls?state=open[&head={owner}:{head}][&base={base}]&per_page=100&page=N` until a short page; head prefix, author and label are matched in the plugin (author case-insensitively), from `user.login` and `labels` |
+| `ci.status` | `GET .../commits/{ref}/check-runs?filter=latest&per_page=100&page=N` and `GET .../commits/{ref}/status?per_page=100&page=N`, merged into one list. A check run of the app `github-actions` carries its id as job id. `conclusion` `failure`, `timed_out`, `cancelled` and `action_required` are `failure`, a `status` other than `completed` is `pending`, everything else `success` |
+| `ci.job-log` | `GET .../actions/jobs/{id}/logs` answers `302`; the plugin follows the `Location` once without credential (the host adds none for `extraHosts`) and keeps the last 4 MiB while reading, then removes a leading byte order mark and the timestamp of each line. `404` and `410` (expired) are `not-found`. The redirect hosts must be in the plugin entry's `extraHosts` (the Helm chart sets `*.actions.githubusercontent.com` and `*.blob.core.windows.net`) |
 | issues `get` | `GET .../issues/{number}` |
 | issues `add-comment` | `POST .../issues/{number}/comments` (pull request numbers work as issue numbers) |
 | `list-feedback` | one GraphQL query: `viewer.login`, and the pull request's `comments`, `reviews` and `reviewThreads` (each `last: 100`, the newest items); then `GET .../collaborators/{username}/permission` once per distinct author with association `OWNER`, `MEMBER` or `COLLABORATOR` |
@@ -151,8 +154,8 @@ verified against a delivery from github.com.
 ## Token
 
 A fine-grained personal access token restricted to the project's repositories, with Pull requests
-read/write, Issues read/write, Contents read/write (Git clone and push) and Metadata read. A classic
-token needs `repo`. The route sets `authScheme: bearer`; the host injects the `Authorization` header.
+read/write, Issues read/write, Contents read/write (Git clone and push) and Metadata read; for the CI
+tools also Checks read, Commit statuses read and Actions read. A classic token needs `repo`. The route sets `authScheme: bearer`; the host injects the `Authorization` header.
 
 Status: verified against github.com (`cargo test -p df-plugins --test github_live -- --ignored`,
 2026-10-30) in a private repository of a personal account on GitHub Free with `native` (default),

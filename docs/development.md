@@ -79,6 +79,8 @@ Tests of `df-plugins` and `dark-factory` use prebuilt WebAssembly plugin compone
 
 ```bash
 cargo build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin
+# The probe as a plugin without CI support (`TEST_PROBE_WITHOUT_CI_WASM` under Bazel):
+cargo build --target wasm32-wasip2 --no-default-features -p test-probe-plugin --target-dir target/probe-no-ci
 ```
 
 With direnv, `cargo` and `rustc` on `PATH` are the Bazel-managed wrappers from `.bazel_env/bin`, which only have the host's standard library. Build the plugins with rustup's toolchain instead, as `just plugins` does: `RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin`.

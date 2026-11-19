@@ -582,6 +582,45 @@ done
 }
 
 #[tokio::test]
+async fn a_shell_value_is_passed_to_a_later_call_of_the_turn() {
+    let yaml = r#"
+sessions:
+  new:
+    - - shell_var:
+          shell: "echo abc123"
+          save: sha
+      - mcp:
+          server: factory
+          tool: read_ci_status
+          args:
+            ref: "${sha}"
+      - end: end_turn
+"#;
+    let mock_body = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *initialize*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"factory\",\"version\":\"1.0\"}}}"
+      ;;
+    *notifications/initialized*)
+      ;;
+    *'"ref":"abc123"'*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"got the sha\"}],\"isError\":false}}"
+      ;;
+    *tools/call*)
+      echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"wrong ref\"}],\"isError\":true}}"
+      ;;
+  esac
+done
+"#;
+
+    let received = play_with_mock_mcp(yaml, mock_body).await;
+
+    assert!(tool_result_text(&received[1]).contains("got the sha"));
+}
+
+#[tokio::test]
 async fn a_tool_error_is_reported_failed_and_its_values_are_not_saved() {
     let yaml = r#"
 sessions:
@@ -777,6 +816,113 @@ sessions:
 
     let (client_res, _) = tokio::join!(client_task, agent_task);
     client_res.expect("client panic").expect("client error");
+}
+
+#[tokio::test]
+async fn a_failing_shell_var_ends_the_turn_with_an_error_and_saves_nothing() {
+    let yaml = r#"
+sessions:
+  new:
+    - - shell_var:
+          shell: "echo nope >&2; exit 3"
+          save: sha
+      - say: "not reached"
+"#;
+    let script = Script::from_yaml_str(yaml).expect("script should parse");
+    let temp_session = tempfile::tempdir().expect("tempdir");
+    let cwd = temp_session.path().to_path_buf();
+    let state = Arc::new(Mutex::new(AgentState::new(script, cwd.clone())));
+    let agent = build_agent(state);
+    let (transport, peer) = Channel::duplex();
+
+    let client_task = tokio::spawn(async move {
+        Client
+            .builder()
+            .connect_with(transport, async move |cx| {
+                cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                    .block_task()
+                    .await
+                    .expect("init");
+                let session = cx
+                    .send_request(NewSessionRequest::new(cwd))
+                    .block_task()
+                    .await
+                    .expect("new session");
+                let err = cx
+                    .send_request(PromptRequest::new(
+                        session.session_id,
+                        vec![ContentBlock::Text(TextContent::new("hello"))],
+                    ))
+                    .block_task()
+                    .await
+                    .expect_err("the failing step fails the prompt");
+                let err_data = serde_json::to_string(&err).unwrap();
+                assert!(
+                    err_data.contains("shell_var 'sha' failed") && err_data.contains("exit 3"),
+                    "{err_data}"
+                );
+                Ok(())
+            })
+            .await
+    });
+    let agent_task = tokio::spawn(async move {
+        agent.connect_to(peer).await.ok();
+    });
+
+    let (client_res, _) = tokio::join!(client_task, agent_task);
+    client_res.expect("client panic").expect("client error");
+    assert!(crate::agent::load_vars(temp_session.path()).is_empty());
+}
+
+#[tokio::test]
+async fn a_cancel_during_a_turn_that_fails_does_not_reach_the_next_prompt() {
+    let yaml = r#"
+sessions:
+  new:
+    - - shell_var:
+          shell: "exit 1"
+          save: sha
+"#;
+    let script = Script::from_yaml_str(yaml).expect("script should parse");
+    let temp_session = tempfile::tempdir().expect("tempdir");
+    let cwd = temp_session.path().to_path_buf();
+    let state = Arc::new(Mutex::new(AgentState::new(script, cwd.clone())));
+    // The cancel of the prompt is already set when the failing step runs.
+    state.lock().await.cancelled.store(true, Ordering::SeqCst);
+    let agent = build_agent(Arc::clone(&state));
+    let (transport, peer) = Channel::duplex();
+
+    let client_task = tokio::spawn(async move {
+        Client
+            .builder()
+            .connect_with(transport, async move |cx| {
+                cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                    .block_task()
+                    .await
+                    .expect("init");
+                let session = cx
+                    .send_request(NewSessionRequest::new(cwd))
+                    .block_task()
+                    .await
+                    .expect("new session");
+                cx.send_request(PromptRequest::new(
+                    session.session_id,
+                    vec![ContentBlock::Text(TextContent::new("hello"))],
+                ))
+                .block_task()
+                .await
+                .expect_err("the failing step fails the prompt");
+                Ok(())
+            })
+            .await
+    });
+    let agent_task = tokio::spawn(async move {
+        agent.connect_to(peer).await.ok();
+    });
+
+    let (client_res, _) = tokio::join!(client_task, agent_task);
+    client_res.expect("client panic").expect("client error");
+    assert!(!state.lock().await.cancelled.load(Ordering::SeqCst));
 }
 
 #[tokio::test]

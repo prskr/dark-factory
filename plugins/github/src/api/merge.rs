@@ -1,14 +1,14 @@
 //! `merge` and `create-branch`.
 
-use percent_encoding::utf8_percent_encode;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::darkfactory::integrations::types::{Error, PullRequestRef, RepoRef};
 use crate::exports::darkfactory::integrations::pull_requests::PullRequestState;
 use forge_common::log::Log;
+use forge_common::url;
 
-use super::{Clock, GitHub, Method, REF_PATH, Transport, repo_path};
+use super::{Clock, GitHub, Method, Transport, repo_path};
 
 impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
     /// Merges with the first merge method the repository allows (`merge`, `squash`, `rebase`) if
@@ -45,7 +45,7 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
         let lookup = format!(
             "{}/git/ref/heads/{}",
             repo_path(repo),
-            utf8_percent_encode(from, REF_PATH)
+            url::encode_path(from)
         );
         let origin: ApiRef = self.rest(Method::Get, &lookup, None)?;
         let body = json!({"ref": format!("refs/heads/{name}"), "sha": origin.object.sha});

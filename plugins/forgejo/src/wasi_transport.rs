@@ -29,25 +29,51 @@ impl WasiTransport {
     }
 }
 
-impl Transport for WasiTransport {
-    fn send(&self, request: Request) -> Result<Response, Error> {
-        let raw = http::send(&RawRequest {
+impl WasiTransport {
+    fn raw(&self, request: &Request, tail: Option<usize>) -> Result<http::RawResponse, Error> {
+        let mut headers = vec![
+            ("accept", "application/json"),
+            ("content-type", "application/json"),
+        ];
+        headers.extend(request.headers.iter().map(|(n, v)| (*n, v.as_str())));
+        let raw = RawRequest {
             method: request.method,
             scheme: &self.scheme,
             authority: &self.authority,
             path: &request.path,
-            headers: &[
-                ("accept", "application/json"),
-                ("content-type", "application/json"),
-            ],
+            headers: &headers,
             body: request.body.as_deref(),
-        })
-        .map_err(into_error)?;
+        };
+        match tail {
+            Some(max) => http::send_tail(&raw, max),
+            None => http::send(&raw),
+        }
+        .map_err(into_error)
+    }
+}
+
+impl Transport for WasiTransport {
+    fn send(&self, request: Request) -> Result<Response, Error> {
+        let raw = self.raw(&request, None)?;
         Ok(Response {
             status: raw.status,
             retry_after: raw.header_number("retry-after"),
             body: raw.body,
         })
+    }
+
+    fn send_tail(&self, request: Request, max: usize) -> Result<(Response, bool), Error> {
+        let raw = self.raw(&request, Some(max))?;
+        // A `206` to a `Range` request starts where the server cut the log.
+        let cut = raw.body_cut || raw.content_range_start().is_some_and(|start| start > 0);
+        Ok((
+            Response {
+                status: raw.status,
+                retry_after: raw.header_number("retry-after"),
+                body: raw.body,
+            },
+            cut,
+        ))
     }
 }
 

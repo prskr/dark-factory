@@ -67,6 +67,24 @@ pub(crate) fn probe() -> Vec<u8> {
     component("TEST_PROBE_WASM", "test_probe_plugin.wasm")
 }
 
+/// The probe built without the feature `ci`: a plugin that doesn't export `ci`. Bazel sets
+/// `TEST_PROBE_WITHOUT_CI_WASM`; cargo builds it into its own target directory (README).
+pub(crate) fn probe_without_ci() -> Vec<u8> {
+    let path = std::env::var_os("TEST_PROBE_WITHOUT_CI_WASM").map_or_else(
+        || {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/probe-no-ci/wasm32-wasip2/debug/test_probe_plugin.wasm")
+        },
+        PathBuf::from,
+    );
+    std::fs::read(&path).unwrap_or_else(|e| {
+        panic!(
+            "reading {}: {e}; run `cargo build --target wasm32-wasip2 --no-default-features -p test-probe-plugin --target-dir target/probe-no-ci` first",
+            path.display()
+        )
+    })
+}
+
 pub(crate) struct FixedDirectory {
     pub repo_url: String,
 }

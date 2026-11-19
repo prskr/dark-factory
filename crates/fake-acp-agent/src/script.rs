@@ -81,6 +81,9 @@ pub enum Step {
     Shell(String),
     /// Runs the command like `shell` and says its stdout, so a test can see what it found.
     SayShell(String),
+    /// Runs the command like `shell` and saves its trimmed stdout as `${<name>}` for later `mcp`
+    /// steps, for a value only the workspace knows (a commit SHA).
+    ShellVar(ShellVarStep),
     Fetch(FetchStep),
     Mcp(McpStep),
     Plan(PlanStep),
@@ -134,6 +137,14 @@ pub struct ToolCallStep {
 
 fn default_call_id() -> String {
     "call_1".to_string()
+}
+
+/// Shell command whose output is saved as a variable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ShellVarStep {
+    pub shell: String,
+    /// Variable name.
+    pub save: String,
 }
 
 /// Scripted HTTP(S) GET with `curl`, which uses the sandbox's proxy settings. Retried once a

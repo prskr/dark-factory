@@ -87,6 +87,7 @@ build:
 # cargo: the `cargo` from .bazel_env only has the host's standard library, not wasm32-wasip2.
 plugins:
     RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 -p forgejo-plugin -p test-probe-plugin -p github-plugin
+    RUSTC="$(rustup which rustc)" "$(rustup which cargo)" build --target wasm32-wasip2 --no-default-features -p test-probe-plugin --target-dir target/probe-no-ci
 
 # Run all tests (or the ones whose name contains FILTER) with cargo-nextest, then the doc tests; database tests share one `df-test-postgres` container. Needs `cargo-nextest` (`bazel run //:bazel_env`, docs/development.md).
 test *FILTER: plugins
