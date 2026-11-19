@@ -7,6 +7,7 @@ use crate::testkit::{Seed, TestApp, new_chat, seed, set_task_status};
 mod archive;
 mod details;
 mod dialogs;
+mod head;
 mod list;
 mod live;
 mod pages;

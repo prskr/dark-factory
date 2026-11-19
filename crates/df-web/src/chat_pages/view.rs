@@ -211,9 +211,12 @@ pub(crate) fn head_region(task: &TaskDetail) -> Markup {
                     }
                     @if task.status != TaskStatus::Waiting { (status_badge(task.status)) }
                 }
-                button type="button" aria-label="Details" "x-on:click"="details = true; sheet = 'half'" class={(ICON_BUTTON_CLASS) " ml-auto xl:hidden"} { (icon(Icon::PanelRight)) }
+                // From 768 px the persona block is hidden and nothing grows: "New chat" alone takes
+                // the free space, so "Details" stays at the right edge (a second `ml-auto` would
+                // split it and put "Details" mid-header).
                 button type="button" hx-get=(compose) hx-target="#composer-slot" hx-swap="innerHTML"
                     class={(action_class(ButtonKind::Primary)) " ml-auto max-md:hidden"} { (icon(Icon::Plus)) "New chat" }
+                button type="button" aria-label="Details" "x-on:click"="details = true; sheet = 'half'" class={(ICON_BUTTON_CLASS) " xl:hidden"} { (icon(Icon::PanelRight)) }
             }
         }
     }
