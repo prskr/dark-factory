@@ -86,7 +86,7 @@ fn dependency_row(
             (dot)
             span class="flex min-w-0 flex-1 flex-col" {
                 span class="font-medium" {
-                    a href={"/tasks/" (key)} class="text-accent-text hover:underline" { (key) }
+                    a href=(item_path(key)) class="text-accent-text hover:underline" { (key) }
                     " · " (kind.as_str())
                 }
                 span class="truncate text-xs text-muted" title=(title) { (title) }
