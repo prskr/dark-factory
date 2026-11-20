@@ -129,6 +129,10 @@ Every accepted review, CI failure, mention and closed-without-merge event SHALL 
 - **WHEN** a review is submitted on the PR of `DF-1` in status `in_review` and 10 s later CI fails on its branch
 - **THEN** `DF-1` has two new messages, becomes `queued` once, and its PR is marked draft once
 
+#### Scenario: Structured event stored
+- **WHEN** `alice` submits a review requesting changes on PR #12 of `DF-1`
+- **THEN** the queued message carries kind review, actor `alice`, verdict changes requested, PR #12 and the PR URL
+
 ### Requirement: Only non-final tasks wake
 Events SHALL wake a task in any status except `completed`, `cancelled` and `failed`. An event for a task in one of those statuses SHALL be dropped and logged at debug level.
 
@@ -140,12 +144,23 @@ Events SHALL wake a task in any status except `completed`, `cancelled` and `fail
 - **WHEN** CI fails on the branch of `DF-2` in status `waiting`
 - **THEN** a message is queued and `DF-2` becomes `queued`
 
+### Requirement: Structured event fields
+The wake-up message SHALL carry the event's structured fields (kind, actor, PR or issue number, review verdict or check name, URL) for display.
+
+#### Scenario: Review fields stored
+- **WHEN** `alice` submits a review requesting changes on PR #12 of `DF-1`
+- **THEN** the queued message carries kind review, actor `alice`, verdict changes requested, number 12 and the PR's URL
+
 ### Requirement: Message content
-The wake-up message SHALL name, per event, its kind, the actor's login, the review verdict or the CI check name, and the PR or issue number, and SHALL point to `read_pull_request_feedback` for reviews and comments. It SHALL NOT contain review, comment or CI log text from the payload.
+The wake-up message SHALL name, per event, its kind, the actor's login, the review verdict or the CI check name, and the PR or issue number, and SHALL point to `read_pull_request_feedback` for reviews and comments. It SHALL NOT contain review, comment or CI log text from the payload. Its text SHALL be a hidden content block: delivered to the agent, not shown in the transcript.
 
 #### Scenario: Review message
 - **WHEN** `alice` submits a review requesting changes on PR #12 of `DF-1`
 - **THEN** the message says that `alice` requested changes on PR #12 and to read the feedback with `read_pull_request_feedback`, and contains no part of the review body
+
+#### Scenario: Text hidden in the transcript
+- **WHEN** the message is delivered and `web.showHiddenBlocks` is `false`
+- **THEN** the agent receives the text and the transcript shows no message bubble for it
 
 ### Requirement: Webhook metric
 The control plane SHALL count webhook requests by plugin and outcome (`accepted`, `unauthorized`, `not_found`, `too_large`, `invalid`, `error`). A request for a loaded plugin SHALL be counted under the plugin's name, a request for any other name under `unknown`, so the label set stays bounded by the configuration.
