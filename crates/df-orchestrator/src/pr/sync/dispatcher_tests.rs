@@ -207,6 +207,7 @@ async fn a_message_that_waited_for_the_run_end_keeps_the_pr_a_draft() {
             )),
             hidden: false,
         }],
+        None,
     )
     .await
     .unwrap();

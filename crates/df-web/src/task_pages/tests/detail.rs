@@ -548,6 +548,24 @@ fn tool_rows_share_one_line_between_consecutive_calls() {
     not(df_web_styles),
     ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
 )]
+fn a_tool_call_group_shows_its_rows_only_when_open_or_when_it_has_one_call() {
+    let css = crate::app_css().unwrap();
+    let hidden = css_rule(&css, "[data-tool-group]>[data-group-items]{");
+    assert!(hidden.contains("display:none"), "{hidden}");
+    let shown = css_rule(
+        &css,
+        "[data-tool-group][data-open]>[data-group-items],[data-tool-group]:has(>[data-group-head][data-single])>[data-group-items]{",
+    );
+    assert!(shown.contains("display:block"), "{shown}");
+    let single_head = css_rule(&css, "[data-group-head][data-single]{");
+    assert!(single_head.contains("display:none"), "{single_head}");
+}
+
+#[test]
+#[cfg_attr(
+    not(df_web_styles),
+    ignore = "needs compiled app.css: tailwindcss on PATH (bazel run //:bazel_env)"
+)]
 fn the_runs_fill_the_details_column_and_keep_room_for_two_cards() {
     let css = crate::app_css().unwrap();
     let rule = |selector: &str| css_rule(&css, selector);

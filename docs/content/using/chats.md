@@ -44,7 +44,9 @@ remembered in this browser.
 
 ## Talk to the persona
 
-The center shows the transcript, rendered like a task's, and the message box. Messages reach the
+The center shows the transcript, rendered like a task's (tool call groups, thinking rows and tool
+details included, see [Reading the transcript](tasks.md#reading-the-transcript)), and the message
+box. Messages reach the
 persona at the next turn boundary; **Stop** (in the run card of the details) stops the active run
 and the message box offers **Interrupt** while a turn runs. A chat has no **Cancel** and no **Mark
 done**: it is never completed.

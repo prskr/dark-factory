@@ -3,6 +3,7 @@
 
 use axum::http::StatusCode;
 use df_core::TaskStatus;
+use serde_json::json;
 
 use super::{agent_says, between, idle_chat};
 use crate::testkit::{
@@ -28,6 +29,39 @@ async fn a_chat_opens_with_its_project_and_row_selected_and_its_transcript_shown
     assert!(html.contains("Here is the plan."), "the transcript: {html}");
     assert!(html.contains("hx-sse:connect=\"/chats/DF-1-CHAT/events?after="));
     assert!(html.contains("data-view=\"task\""));
+}
+
+// The chat shares the transcript component of the task page (`transcript-readability`).
+#[tokio::test]
+async fn a_chat_transcript_groups_tool_calls_and_shows_thinking_like_a_task() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let (_, chat) = idle_chat(&app).await;
+    let run: uuid::Uuid =
+        sqlx::query_scalar("SELECT id FROM runs WHERE task_id = $1 ORDER BY number LIMIT 1")
+            .bind(chat.id.as_uuid())
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    let events = [
+        json!({"agentThoughtChunk": {"messageId": "th", "content": {"text": {"text": "Look at the chart"}}}}),
+        json!({"toolCall": {"toolCallId": "c1", "title": "Read Chart.yaml"}}),
+        json!({"toolCall": {"toolCallId": "c2", "title": "Read values.yaml"}}),
+    ];
+    for (seq, event) in (1..).zip(events) {
+        crate::testkit::add_event(&app.pool, chat.id, run, seq, "turn_1", event).await;
+    }
+
+    let html = text(app.get("/chats/DF-1-CHAT", &cookie).await).await;
+
+    assert!(
+        html.contains("2 tool calls") && html.contains("data-tool-group"),
+        "{html}"
+    );
+    assert!(
+        html.contains("Thinking") && html.contains("Look at the chart"),
+        "{html}"
+    );
 }
 
 // Scenario "Default project".

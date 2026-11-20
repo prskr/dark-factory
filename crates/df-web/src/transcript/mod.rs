@@ -11,12 +11,16 @@ use df_db::task_views::StoredEvent;
 use df_proto::transcript::v1::{
     ArtifactWritten, ContentBlock, FactoryActivity, ForgeActivity, NoticeLevel, Plan,
     PlanEntryStatus, PushVerdict, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
-    ToolKind, UserMessage, content_block, event, tool_call_content,
+    ToolKind, UserMessage, WebhookReceived, content_block, event, tool_call_content,
 };
 use maud::{Markup, html};
 
+use crate::components::transcript::ToolStatus;
 use crate::components::{Icon, transcript as c};
 use crate::markdown;
+
+mod tool;
+pub(crate) mod webhook;
 
 /// A rendered element of the transcript.
 #[derive(Debug, Clone, PartialEq)]
@@ -29,6 +33,9 @@ pub struct Item {
     pub author: String,
     /// When the event that created the item was recorded.
     pub at: DateTime<Utc>,
+    /// DOM id of the tool call group the item belongs to (design D3). A group is a streak of
+    /// consecutive items: its tool calls and the thoughts and notices after the first of them.
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +53,8 @@ pub enum ItemKind {
     },
     Thought {
         text: String,
+        /// The turn ended: the text is rendered as Markdown.
+        complete: bool,
     },
     Tool(ToolItem),
     Plan(Vec<PlanItem>),
@@ -87,6 +96,8 @@ pub enum ForgeItem {
         url: String,
         change: PullRequestChange,
     },
+    /// A forge webhook event that woke the task.
+    Webhook(WebhookReceived),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +111,7 @@ pub enum PullRequestChange {
 pub struct ToolItem {
     pub title: String,
     pub kind: String,
-    pub status: String,
+    pub status: ToolStatus,
     pub content: Vec<ToolContent>,
     pub locations: Vec<String>,
     pub raw_input: String,
@@ -157,6 +168,9 @@ pub struct Folder {
     carry: Vec<Change>,
     /// Keep hidden content blocks in user messages (`web.showHiddenBlocks`).
     show_hidden: bool,
+    /// The tool call group that the next item may join: set by a tool call, kept by thoughts and
+    /// notices, ended by anything else.
+    open_group: Option<String>,
 }
 
 impl Folder {
@@ -350,12 +364,14 @@ impl Folder {
         vec![change]
     }
 
-    /// The turn is over: its agent messages are complete and get rendered as Markdown.
+    /// The turn is over: its agent messages and thoughts are complete and get rendered as
+    /// Markdown.
     fn complete_agent_messages(&mut self, turn: &str) -> Vec<Change> {
         let mut changes: Vec<Change> = Vec::new();
         for (index, item) in self.items.iter_mut().enumerate() {
             if item.turn_id == turn
-                && let ItemKind::Agent { complete, .. } = &mut item.kind
+                && let ItemKind::Agent { complete, .. } | ItemKind::Thought { complete, .. } =
+                    &mut item.kind
                 && !*complete
             {
                 *complete = true;
@@ -370,12 +386,14 @@ impl Folder {
 
     fn push(&mut self, dom_id: String, turn_id: String, kind: ItemKind) -> Change {
         if let Some((number, started_at)) = self.run_start.take() {
+            self.open_group = None;
             self.items.push(Item {
                 dom_id: format!("run-{number}"),
                 turn_id: String::new(),
                 kind: ItemKind::RunStart { number, started_at },
                 author: String::new(),
                 at: started_at,
+                group: None,
             });
             self.carry.push(Change {
                 index: self.items.len() - 1,
@@ -389,12 +407,14 @@ impl Folder {
             }
             _ => String::new(),
         };
+        let group = self.group_for(&dom_id, &kind);
         self.items.push(Item {
             dom_id,
             turn_id,
             kind,
             author,
             at: self.now,
+            group,
         });
         Change {
             index: self.items.len() - 1,
@@ -402,9 +422,60 @@ impl Folder {
         }
     }
 
+    /// The group of a new item (design D3): a tool call opens a group or joins the open one; a
+    /// thought or notice joins an open group, so a thought before the first call of a streak
+    /// stays outside; anything else ends the group.
+    fn group_for(&mut self, dom_id: &str, kind: &ItemKind) -> Option<String> {
+        match kind {
+            ItemKind::Tool(_) => Some(
+                self.open_group
+                    .get_or_insert_with(|| format!("grp-{dom_id}"))
+                    .clone(),
+            ),
+            ItemKind::Thought { .. } | ItemKind::Notice { .. } => self.open_group.clone(),
+            _ => {
+                self.open_group = None;
+                None
+            }
+        }
+    }
+
+    /// The tool call group of the item at `index` as a slice of [`Self::items`]: all its members,
+    /// in order. Empty if the item is in no group.
+    pub fn group_members(&self, index: usize) -> &[Item] {
+        group_slice(&self.items, index)
+    }
+
+    /// The DOM id of the element that a request card raised at `card_at` goes before, `None` if it
+    /// goes at the end. A card inside a tool call group goes after the group (design D3), so
+    /// the answer is the element after the group, and for the first item of a group the group.
+    pub fn card_anchor(&self, card_at: DateTime<Utc>) -> Option<String> {
+        let index = self
+            .items
+            .iter()
+            .position(|item| card_goes_before(card_at, item.at))?;
+        let item = self.items.get(index)?;
+        let Some(group) = &item.group else {
+            return Some(item.dom_id.clone());
+        };
+        let first_of_group = self
+            .group_members(index)
+            .first()
+            .is_some_and(|first| first.dom_id == item.dom_id);
+        if first_of_group {
+            return Some(group.clone());
+        }
+        let after = self
+            .items
+            .get(index..)?
+            .iter()
+            .find(|i| i.group.as_ref() != Some(group))?;
+        Some(after.group.clone().unwrap_or_else(|| after.dom_id.clone()))
+    }
+
     fn append_stream(&mut self, dom_id: String, turn: String, text: &str, thought: bool) -> Change {
         if let Some(&index) = self.streams.get(&dom_id) {
-            if let Some(ItemKind::Agent { text: t, .. } | ItemKind::Thought { text: t }) =
+            if let Some(ItemKind::Agent { text: t, .. } | ItemKind::Thought { text: t, .. }) =
                 self.items.get_mut(index).map(|item| &mut item.kind)
             {
                 t.push_str(text);
@@ -417,6 +488,7 @@ impl Folder {
         let kind = if thought {
             ItemKind::Thought {
                 text: text.to_string(),
+                complete: false,
             }
         } else {
             ItemKind::Agent {
@@ -535,15 +607,15 @@ fn tool_kind(kind: i32) -> String {
     )
 }
 
-fn tool_status(status: i32) -> String {
-    ToolCallStatus::try_from(status).map_or_else(
-        |_| "unknown".into(),
-        |s| {
-            s.as_str_name()
-                .trim_start_matches("TOOL_CALL_STATUS_")
-                .to_lowercase()
-        },
-    )
+fn tool_status(status: i32) -> ToolStatus {
+    match ToolCallStatus::try_from(status) {
+        Ok(ToolCallStatus::Unspecified) => ToolStatus::Unspecified,
+        Ok(ToolCallStatus::Pending) => ToolStatus::Pending,
+        Ok(ToolCallStatus::InProgress) => ToolStatus::InProgress,
+        Ok(ToolCallStatus::Completed) => ToolStatus::Completed,
+        Ok(ToolCallStatus::Failed) => ToolStatus::Failed,
+        Err(_unknown) => ToolStatus::Unknown,
+    }
 }
 
 fn plan_status(status: PlanEntryStatus) -> &'static str {
@@ -589,6 +661,11 @@ fn forge_item(activity: &ForgeActivity) -> Option<ForgeItem> {
             url: p.url.clone(),
             change: PullRequestChange::Ready,
         },
+        // An event of a kind this build does not know has no row.
+        Kind::WebhookReceived(w) => {
+            webhook::summary(w)?;
+            ForgeItem::Webhook(w.clone())
+        }
     })
 }
 
@@ -627,16 +704,100 @@ pub(crate) fn card_goes_before(card_at: DateTime<Utc>, item_at: DateTime<Utc>) -
 
 /// Renders the transcript container with all `items`. `cards` (a time and the markup) are
 /// merged in by time (see [`card_goes_before`]).
+/// A card inside a tool call group follows the group: it is merged in before the item after it.
 pub fn render_transcript(items: &[Item], cards: &[(DateTime<Utc>, Markup)]) -> Markup {
     let mut cards = cards.iter().peekable();
     html! {
         div id="transcript" class="flex min-w-0 flex-col gap-3" {
-            @for item in items {
-                @while let Some((_, card)) = cards.next_if(|(at, _)| card_goes_before(*at, item.at)) { (card) }
-                (render_item(item))
+            @for chunk in chunks(items) {
+                @if let Some(first) = chunk.first() {
+                    @while let Some((_, card)) = cards.next_if(|(at, _)| card_goes_before(*at, first.at)) { (card) }
+                    @if first.group.is_some() {
+                        (render_group(chunk))
+                    } @else {
+                        (render_item(first))
+                    }
+                }
             }
             @for (_, card) in cards { (card) }
         }
+    }
+}
+
+/// The items split into the top-level elements of the transcript: a tool call group as one
+/// chunk, every other item alone.
+fn chunks(items: &[Item]) -> Vec<&[Item]> {
+    let mut chunks = Vec::new();
+    let mut rest = items;
+    while let Some(first) = rest.first() {
+        let len = match &first.group {
+            Some(group) => rest
+                .iter()
+                .take_while(|item| item.group.as_ref() == Some(group))
+                .count(),
+            None => 1,
+        };
+        let (chunk, tail) = rest.split_at(len);
+        chunks.push(chunk);
+        rest = tail;
+    }
+    chunks
+}
+
+/// The members of the group at `index`, empty for an item outside a group.
+fn group_slice(items: &[Item], index: usize) -> &[Item] {
+    let Some(group) = items.get(index).and_then(|item| item.group.as_ref()) else {
+        return &[];
+    };
+    let before = items.get(..index).unwrap_or_default();
+    let start = before
+        .iter()
+        .rposition(|item| item.group.as_ref() != Some(group))
+        .map_or(0, |last_other| last_other + 1);
+    let rest = items.get(start..).unwrap_or_default();
+    let len = rest
+        .iter()
+        .take_while(|item| item.group.as_ref() == Some(group))
+        .count();
+    rest.get(..len).unwrap_or_default()
+}
+
+/// The head of a group: its calls, how many failed, whether one is in progress.
+fn group_head(members: &[Item]) -> c::GroupHead {
+    let tools = members.iter().filter_map(|item| match &item.kind {
+        ItemKind::Tool(tool) => Some(tool),
+        _ => None,
+    });
+    let mut head = c::GroupHead {
+        calls: 0,
+        failed: 0,
+        running: false,
+    };
+    for tool in tools {
+        head.calls += 1;
+        head.failed += usize::from(tool.status.is_failed());
+        head.running |= tool.status.is_running();
+    }
+    head
+}
+
+/// A tool call group with all its `members` (design D3).
+pub fn render_group(members: &[Item]) -> Markup {
+    let Some(first) = members.first() else {
+        return Markup::default();
+    };
+    let Some(id) = &first.group else {
+        return Markup::default();
+    };
+    let items = html! { @for item in members { (render_item(item)) } };
+    c::tool_group(id, group_head(members), &items)
+}
+
+/// The head of the group whose `members` are given, to replace the one on the page.
+pub fn render_group_head(members: &[Item]) -> Markup {
+    match members.first().and_then(|first| first.group.as_ref()) {
+        Some(id) => c::tool_group_head(id, group_head(members)),
+        None => Markup::default(),
     }
 }
 
@@ -663,7 +824,7 @@ pub fn render_item(item: &Item) -> Markup {
             c::agent_message(id, author, item.at, body, *complete)
         }
         ItemKind::RunStart { number, started_at } => c::run_divider(id, *number, *started_at),
-        ItemKind::Thought { text } => c::thought(id, text),
+        ItemKind::Thought { text, complete } => c::thought(id, text, *complete),
         ItemKind::Tool(tool) => render_tool(id, tool),
         ItemKind::Plan(entries) => {
             let entries: Vec<(String, String)> = entries
@@ -720,29 +881,28 @@ fn render_forge(id: &str, forge: &ForgeItem) -> Markup {
                 tail,
             )
         }
+        ForgeItem::Webhook(event) => match webhook::summary(event) {
+            Some(s) => c::webhook_row(
+                id,
+                &s.lead,
+                s.link
+                    .as_ref()
+                    .map(|(label, url)| (label.as_str(), url.as_str())),
+                &s.tail,
+            ),
+            None => c::unreadable(id),
+        },
     }
 }
 
 fn render_tool(id: &str, tool: &ToolItem) -> Markup {
-    let mut blocks: Vec<(String, String)> = Vec::new();
-    if !tool.raw_input.is_empty() {
-        blocks.push(("Input".into(), tool.raw_input.clone()));
-    }
-    for content in &tool.content {
-        blocks.push(match content {
-            ToolContent::Text(text) => ("Output".into(), text.clone()),
-            ToolContent::Diff { path, old, new } => (path.clone(), diff_text(old.as_deref(), new)),
-        });
-    }
-    if !tool.raw_output.is_empty() {
-        blocks.push(("Result".into(), tool.raw_output.clone()));
-    }
+    let blocks = tool::blocks(tool);
     let delegation = delegation_title(tool);
     c::tool_row(&c::ToolRow {
         id,
         title: delegation.as_deref().unwrap_or(&tool.title),
         kind: &tool.kind,
-        status: &tool.status,
+        status: tool.status,
         locations: &tool.locations,
         blocks: &blocks,
         truncated: tool.truncated,
@@ -801,6 +961,7 @@ impl Item {
             },
             author: String::new(),
             at,
+            group: None,
         }
     }
 }

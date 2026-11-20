@@ -266,6 +266,9 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Chat / Phone · new chat, persona picker | `/chats?project=DF` | as Chat · new chat, persona picker | 390 |
 | Chat / Phone · archived chats | `/chats?project=DF` | as Archive · list | 390 |
 | Chat / Phone · archived chat | `/chats?project=DF` | as Archive · chat selected, transcript | 390 |
+| Tasks / Desktop · transcript, tool groups | `/tasks/<key>` | manual seed (not built): task DF-12 `running`; a thought before a streak of 12 tool calls (2 failed); an agent message; an open streak of Read, a thought, Edited and a running `cargo test`; a delivered review webhook (alice, changes requested, PR #41); a queued comment webhook. Group of the running streak opened | 1440 |
+| Tasks / Desktop · transcript, tool details | `/tasks/<key>` | as above after the turn ended: an open thought with a `rust` fence; an open streak of Read, Edited (diff opened) and a failed `cargo test` (input with `command`, `console` output, opened); delivered webhooks review, comment, CI failure `test`, PR closed without merge. Board shows the transcript column only | 1440 |
+| Tasks - Phone / Phone · transcript, tool groups | `/tasks/<key>` | as Tasks / Desktop · transcript, tool groups | 390 |
 
 The remaining boards follow the same pattern.
 

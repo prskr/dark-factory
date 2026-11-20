@@ -33,11 +33,11 @@ const MERMAID_ASSET: &str = "vendor/mermaid.min.js";
 pub(crate) const SSE_CLEANUP_SCRIPT: &str = "sse-cleanup.js";
 
 /// htmx keeps the `open` state of `<details>` (tool calls, the runs list) when it morphs an
-/// updated element. No settle step: after a delay it resets each swapped element that has the
+/// updated element, and the `aria-expanded` that Alpine sets on the head of a tool call group.
+/// No settle step: after a delay it resets each swapped element that has the
 /// `id` of an old one to the server's attributes, dropping what Alpine bound in the meantime
 /// (`data-tab` of the details after switching tasks).
-const HTMX_CONFIG: &str =
-    r#"{"morphIgnore":["data-htmx-powered","open","style","aria-current"],"defaultSettleDelay":0}"#;
+const HTMX_CONFIG: &str = r#"{"morphIgnore":["data-htmx-powered","open","style","aria-current","aria-expanded"],"defaultSettleDelay":0}"#;
 
 /// The page of a task or chat: `/tasks/<KEY>`, or `/chats/<KEY>` for the key of a chat. The
 /// routes below it (messages, stop, artifacts, ...) have the same names under both.
@@ -289,6 +289,18 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|a| a == "open")
+        );
+    }
+
+    #[test]
+    fn morph_keeps_the_expanded_state_alpine_sets_on_a_tool_call_group_head() {
+        let config: serde_json::Value = serde_json::from_str(HTMX_CONFIG).unwrap();
+        assert!(
+            config["morphIgnore"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|a| a == "aria-expanded")
         );
     }
 

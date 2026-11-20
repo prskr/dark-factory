@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO task_messages (id, task_id, author, content, forge_event)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING id, task_id, queued_at, delivered_run_id, delivered_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "queued_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "queued_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "delivered_run_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "delivered_run_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "delivered_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "delivered_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "Jsonb",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "57a14cfe3438661d98fce7247fe041c240ad54cdccfca940903b6a51eee91f04"
+}

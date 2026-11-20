@@ -195,6 +195,34 @@ async fn queued_stack_sits_above_the_input_and_not_in_the_transcript() {
 }
 
 #[tokio::test]
+async fn a_queued_webhook_message_shows_the_summary_of_its_event_not_its_hidden_text() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    let task = new_task(&app.pool, &seed, "t").await;
+    let event = df_core::webhooks::WebhookEvent::ReviewSubmitted {
+        number: 12,
+        head: "factory/task/DF-1".into(),
+        actor: "alice".into(),
+        verdict: df_core::seams::ReviewVerdict::ChangesRequested,
+    };
+    let mut tx = app.pool.begin().await.unwrap();
+    df_db::webhooks::queue_event_tx(&mut tx, task.id, &event)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    let page = text(app.get("/tasks/DF-1", &cookie).await).await;
+
+    let stack = &page[page.find("id=\"pending\"").unwrap()..];
+    assert!(
+        stack.contains("Forge events: ") && stack.contains("alice requested changes on PR #12"),
+        "{stack}"
+    );
+    assert!(!stack.contains("Forge event on your task"), "{stack}");
+}
+
+#[tokio::test]
 async fn message_input_can_switch_to_editing_with_cancel_and_save() {
     let app = TestApp::new().await;
     let cookie = app.login().await;

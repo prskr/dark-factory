@@ -69,6 +69,10 @@ fn options() -> comrak::Options<'static> {
     let mut options = comrak::Options::default();
     options.render.escape = true;
     options.render.r#unsafe = false;
+    options.extension.table = true;
+    options.extension.strikethrough = true;
+    options.extension.tasklist = true;
+    options.extension.autolink = true;
     options
 }
 
@@ -123,6 +127,11 @@ pub fn highlight_by_extension(extension: &str, text: &str) -> Markup {
     }
 }
 
+/// Plain text as a code block in the theme's colors, escaped as it is.
+pub fn plain_code(text: &str) -> Markup {
+    html! { pre class="hl-code" { code { (text) } } }
+}
+
 /// A configured code theme is not one of syntect's bundled themes.
 #[derive(Debug, thiserror::Error)]
 pub enum ThemeError {
@@ -139,8 +148,11 @@ pub enum ThemeError {
     },
 }
 
-/// The stylesheet of the highlight classes: the `light` theme as is, the `dark` theme inside
-/// `prefers-color-scheme: dark`. Fenced blocks (`pre.hl-code`) take their theme's colors and
+/// The stylesheet of the highlight classes: the `dark` theme inside `prefers-color-scheme: dark`
+/// and the `light` theme inside its negation (also for a browser without a preference). Each
+/// theme sits in its own media block, because the themes select different scopes: a light rule
+/// outside the block would stay active in dark mode where the dark theme has no rule of its own
+/// (and could win by specificity). Fenced blocks (`pre.hl-code`) take their theme's colors and
 /// background from it. Names are those of syntect's bundled themes; an unknown name is an error
 /// that names the config option.
 fn theme_css(light: &str, dark: &str) -> Result<String, ThemeError> {
@@ -167,7 +179,7 @@ fn theme_css(light: &str, dark: &str) -> Result<String, ThemeError> {
         css("web.codeTheme.dark", dark)?,
     );
     Ok(format!(
-        "{light}\n@media (prefers-color-scheme: dark) {{\n{dark}}}\n"
+        "@media not all and (prefers-color-scheme: dark) {{\n{light}}}\n@media (prefers-color-scheme: dark) {{\n{dark}}}\n"
     ))
 }
 

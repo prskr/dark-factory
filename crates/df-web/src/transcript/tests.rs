@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::components::Icon;
+use crate::testkit::tag_around;
 
 fn stored(id: i64, turn: &str, kind: Value) -> StoredEvent {
     let mut event = json!({"schemaVersion": 1, "turnId": turn});
@@ -429,8 +430,9 @@ fn tool_calls_sit_between_agent_messages_as_agent_items() {
         folder.apply(event);
     }
     let html = render_all(&folder);
-    // Messages and the tool row are `agent`, the board member's message `human`: CSS groups them.
-    assert_eq!(html.matches("data-author=\"agent\"").count(), 3, "{html}");
+    // Messages, the tool group and its row are `agent`, the board member's message `human`: CSS
+    // groups them.
+    assert_eq!(html.matches("data-author=\"agent\"").count(), 4, "{html}");
     assert_eq!(html.matches("data-author=\"human\"").count(), 1);
 }
 
@@ -783,4 +785,523 @@ fn write_artifact_tool_calls_of_every_harness_keep_their_tool_row_above_the_arti
         assert!(tool_at < artifact_at, "{written}");
         assert!(written.contains("\u{b7} Markdown"), "{written}");
     }
+}
+
+const COMPLETED: &str = "TOOL_CALL_STATUS_COMPLETED";
+
+fn tool_call(id: i64, status: &str) -> StoredEvent {
+    stored(
+        id,
+        "t1",
+        json!({"toolCall": {"toolCallId": format!("c{id}"), "title": format!("Call {id}"),
+            "kind": "TOOL_KIND_EXECUTE", "status": status}}),
+    )
+}
+
+fn thought_chunk(id: i64, text: &str) -> StoredEvent {
+    stored(
+        id,
+        "t1",
+        json!({"agentThoughtChunk": {"messageId": format!("th{id}"), "content": {"text": {"text": text}}}}),
+    )
+}
+
+fn notice_event(id: i64) -> StoredEvent {
+    stored(
+        id,
+        "t1",
+        json!({"notice": {"level": "NOTICE_LEVEL_INFO", "code": "x", "message": "m"}}),
+    )
+}
+
+fn groups_of(folder: &Folder) -> Vec<Option<&str>> {
+    folder
+        .items()
+        .iter()
+        .map(|item| item.group.as_deref())
+        .collect()
+}
+
+fn turn_end(id: i64) -> StoredEvent {
+    stored(
+        id,
+        "t1",
+        json!({"turnEnded": {"stopReason": "STOP_REASON_END_TURN"}}),
+    )
+}
+
+#[test]
+fn a_single_tool_call_is_a_group_of_one_whose_head_is_hidden() {
+    let folder = fold(&[
+        chunk(1, "t1", "m1", "hi"),
+        tool_call(2, COMPLETED),
+        chunk(3, "t1", "m2", "ok"),
+    ]);
+
+    // run divider, message, tool, message
+    assert_eq!(groups_of(&folder), [None, None, Some("grp-ev-2"), None]);
+    let html = render_all(&folder);
+    assert!(
+        html.contains("id=\"grp-ev-2-head\" data-group-head data-single"),
+        "{html}"
+    );
+}
+
+#[test]
+fn a_streak_of_tool_calls_with_thoughts_after_the_first_call_is_one_group() {
+    let events = [
+        thought_chunk(1, "before the first call"),
+        tool_call(2, COMPLETED),
+        thought_chunk(3, "between"),
+        tool_call(4, "TOOL_CALL_STATUS_FAILED"),
+        notice_event(5),
+        tool_call(6, COMPLETED),
+        thought_chunk(7, "trailing"),
+        chunk(8, "t1", "m1", "done"),
+    ];
+    let folder = fold(&events);
+
+    // run divider, thought (outside), tool, thought, tool, notice, tool, thought, message
+    let group = Some("grp-ev-2");
+    assert_eq!(
+        groups_of(&folder),
+        [None, None, group, group, group, group, group, group, None]
+    );
+    // Thoughts and notices do not count as tool calls.
+    let html = render_all(&folder);
+    assert!(
+        html.contains("3 tool calls") && html.contains("1 failed"),
+        "{html}"
+    );
+}
+
+#[test]
+fn a_message_splits_a_streak_into_two_groups() {
+    let mut events = vec![
+        tool_call(1, COMPLETED),
+        tool_call(2, COMPLETED),
+        tool_call(3, COMPLETED),
+    ];
+    events.push(chunk(4, "t1", "m1", "between"));
+    events.extend((5..=8).map(|id| tool_call(id, COMPLETED)));
+    let html = render_all(&fold(&events));
+
+    assert!(
+        html.contains("3 tool calls") && html.contains("4 tool calls"),
+        "{html}"
+    );
+    assert!(
+        html.find("3 tool calls").unwrap() < html.find("between").unwrap()
+            && html.find("between").unwrap() < html.find("4 tool calls").unwrap(),
+        "{html}"
+    );
+}
+
+#[test]
+fn a_run_divider_and_other_rows_end_a_group() {
+    let mut folder = fold(&[tool_call(1, COMPLETED), tool_call(2, COMPLETED)]);
+    // The next run starts with a tool call: a new group behind the divider.
+    folder.apply(&stored_in_run(
+        3,
+        2,
+        Some(
+            serde_json::from_value(json!({"schemaVersion": 1, "turnId": "t2",
+                "toolCall": {"toolCallId": "c3", "title": "Call 3"}}))
+            .unwrap(),
+        ),
+    ));
+
+    assert_eq!(
+        groups_of(&folder),
+        [
+            None,
+            Some("grp-ev-1"),
+            Some("grp-ev-1"),
+            None,
+            Some("grp-ev-3")
+        ]
+    );
+}
+
+#[test]
+fn the_head_counts_failed_calls_and_shows_the_running_one() {
+    let folder = fold(&[
+        tool_call(1, "TOOL_CALL_STATUS_FAILED"),
+        tool_call(2, COMPLETED),
+        tool_call(3, "TOOL_CALL_STATUS_IN_PROGRESS"),
+    ]);
+    let html = render_all(&folder);
+
+    assert!(
+        html.contains("3 tool calls") && html.contains("1 failed"),
+        "{html}"
+    );
+    assert!(
+        html.contains("animate-spin") && html.contains("running"),
+        "{html}"
+    );
+
+    let idle = render_all(&fold(&[tool_call(1, COMPLETED), tool_call(2, COMPLETED)]));
+    assert!(
+        !idle.contains("animate-spin") && !idle.contains("failed"),
+        "{idle}"
+    );
+}
+
+#[test]
+fn a_fold_of_all_events_and_one_fed_in_pieces_have_the_same_groups() {
+    let events = [
+        tool_call(1, COMPLETED),
+        thought_chunk(2, "a"),
+        tool_call(3, COMPLETED),
+        chunk(4, "t1", "m1", "x"),
+        tool_call(5, COMPLETED),
+        tool_call(6, COMPLETED),
+    ];
+    let whole = fold(&events);
+    let mut pieces = Folder::default();
+    for chunk in events.chunks(2) {
+        for event in chunk {
+            pieces.apply(event);
+        }
+        // Rendering in between changes nothing.
+        let _ = render_all(&pieces);
+    }
+
+    assert_eq!(groups_of(&whole), groups_of(&pieces));
+    assert_eq!(render_all(&whole), render_all(&pieces));
+}
+
+#[test]
+fn a_change_of_a_member_reports_the_item_and_keeps_its_group() {
+    let mut folder = fold(&[
+        tool_call(1, "TOOL_CALL_STATUS_IN_PROGRESS"),
+        tool_call(2, COMPLETED),
+    ]);
+    let changes = folder.apply(&stored(
+        3,
+        "t1",
+        json!({"toolCallUpdate": {"toolCallId": "c1", "status": "TOOL_CALL_STATUS_FAILED"}}),
+    ));
+
+    assert_eq!(
+        changes,
+        [Change {
+            index: 1,
+            added: false
+        }]
+    );
+    assert_eq!(folder.group_members(1).len(), 2);
+    assert!(render_all(&folder).contains("1 failed"));
+}
+
+fn card_markup(id: &str) -> Markup {
+    html! { div id=(id) {} }
+}
+
+#[test]
+fn a_card_raised_inside_a_streak_follows_the_group() {
+    let mut events: Vec<StoredEvent> = (1..=9).map(|id| tool_call(id, COMPLETED)).collect();
+    events.push(chunk(10, "t1", "m1", "after"));
+    let folder = fold(&events);
+    // Raised between the 4th and 5th call (events 4 and 5 are minutes 4 and 5).
+    let card = (at(4) + chrono::Duration::seconds(30), card_markup("card-1"));
+
+    let html = render_transcript(folder.items(), std::slice::from_ref(&card)).into_string();
+
+    let message = html.find("id=\"msg-r1-m1\"").unwrap();
+    let card_at = html.find("id=\"card-1\"").expect("card");
+    assert!(html.find("9 tool calls").unwrap() < card_at, "{html}");
+    assert!(
+        card_at < message,
+        "the card goes before the message that follows: {html}"
+    );
+    assert!(
+        html.find("id=\"ev-9\"").unwrap() < card_at,
+        "all nine calls are above it: {html}"
+    );
+}
+
+#[test]
+fn a_card_before_a_streak_goes_before_its_group() {
+    let folder = fold(&[tool_call(5, COMPLETED), tool_call(6, COMPLETED)]);
+    let card = (at(1), card_markup("card-1"));
+
+    let html = render_transcript(folder.items(), &[card]).into_string();
+
+    assert!(
+        html.find("id=\"card-1\"").unwrap() < html.find("id=\"grp-ev-5\"").unwrap(),
+        "{html}"
+    );
+}
+
+#[test]
+fn the_live_anchor_of_a_card_is_the_element_after_the_group_it_falls_into() {
+    let mut events: Vec<StoredEvent> = (1..=3).map(|id| tool_call(id, COMPLETED)).collect();
+    events.push(chunk(4, "t1", "m1", "after"));
+    let folder = fold(&events);
+    let inside = at(2) + chrono::Duration::seconds(30);
+
+    assert_eq!(folder.card_anchor(inside).as_deref(), Some("msg-r1-m1"));
+    // Before the first member the card goes before the group, not into it.
+    assert_eq!(folder.card_anchor(at(1)).as_deref(), Some("grp-ev-1"));
+    // Behind everything it goes to the end.
+    assert_eq!(folder.card_anchor(at(30)), None);
+    // A card inside a group that ends the transcript also goes to the end.
+    let open = fold(&[tool_call(1, COMPLETED), tool_call(2, COMPLETED)]);
+    assert_eq!(
+        open.card_anchor(at(1) + chrono::Duration::seconds(30)),
+        None
+    );
+}
+
+#[test]
+fn a_thought_is_a_collapsed_row_with_a_preview_of_its_first_line() {
+    let folder = fold(&[thought_chunk(
+        1,
+        "\nCheck the failing test first\nthen more",
+    )]);
+    let html = render_item(folder.items().last().unwrap()).into_string();
+
+    assert!(
+        html.contains("data-tool") && html.contains("Thinking"),
+        "{html}"
+    );
+    assert!(html.contains(&c_icon(Icon::Brain)), "{html}");
+    let summary = &html[..html.find("</summary>").unwrap()];
+    assert!(
+        summary.contains("Check the failing test first") && !summary.contains("then more"),
+        "{html}"
+    );
+    assert!(!html.contains(" open"), "{html}");
+}
+
+#[test]
+fn a_thought_is_plain_text_while_streaming_and_highlighted_markdown_after_the_turn_ends() {
+    let mut folder = fold(&[thought_chunk(1, "```rust\nlet x = 1;\n```")]);
+    let streaming = render_item(folder.items().last().unwrap()).into_string();
+    assert!(
+        !streaming.contains("hl-") && streaming.contains("```rust"),
+        "{streaming}"
+    );
+
+    let changes = folder.apply(&turn_end(2));
+    assert_eq!(
+        changes,
+        [Change {
+            index: 1,
+            added: false
+        }]
+    );
+    let done = render_item(folder.items().last().unwrap()).into_string();
+    let body = &done[done.find("</summary>").unwrap()..];
+    assert!(
+        body.contains("hl-keyword") && !body.contains("```"),
+        "{done}"
+    );
+}
+
+fn finished_tool(input: &str, output: &str, status: &str) -> String {
+    let call = stored(
+        1,
+        "t1",
+        json!({"toolCall": {"toolCallId": "c1", "title": "Run", "kind": "TOOL_KIND_EXECUTE",
+            "status": status, "rawInputJson": input,
+            "content": [{"content": {"text": {"text": output}}}]}}),
+    );
+    render_all(&fold(&[call]))
+}
+
+#[test]
+fn console_output_of_a_finished_call_is_a_highlighted_block_without_fences() {
+    let html = finished_tool("{}", "```console\n$ cargo test\n```", COMPLETED);
+
+    let output = &html[html
+        .find(">Output<")
+        .or_else(|| html.find("Output"))
+        .expect("output label")..];
+    assert!(
+        output.contains("hl-code") && output.contains("cargo test"),
+        "{output}"
+    );
+    assert!(!output.contains("```"), "{output}");
+}
+
+#[test]
+fn output_of_a_running_call_stays_plain_text() {
+    let html = finished_tool(
+        "{}",
+        "```console\n$ cargo test\n```",
+        "TOOL_CALL_STATUS_IN_PROGRESS",
+    );
+
+    assert!(html.contains("```console"), "{html}");
+    assert!(!html.contains("<p>"), "{html}");
+}
+
+#[test]
+fn script_in_the_output_of_a_finished_call_is_shown_literally() {
+    let html = finished_tool("{}", "<script>alert(1)</script>", COMPLETED);
+
+    assert!(!html.contains("<script>"), "{html}");
+    assert!(
+        html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
+        "{html}"
+    );
+}
+
+#[test]
+fn a_command_input_starts_with_a_shell_line_followed_by_indented_json() {
+    let html = finished_tool(
+        r#"{"command":"cargo test -p df-web","timeout":120000}"#,
+        "ok",
+        COMPLETED,
+    );
+
+    let input = &html[html.find("Input").unwrap()..html.find("Output").unwrap()];
+    let shell = input.find("hl-shell").expect("shell block");
+    let json = input.find("hl-json").expect("json block");
+    assert!(shell < json, "{input}");
+    assert!(
+        input.contains("cargo test -p df-web") && input.contains("120000"),
+        "{input}"
+    );
+    // Pretty-printed: each key on its own line.
+    assert!(input.contains("\n  <span"), "{input}");
+    // Two blocks: the shell line and the JSON each have their own `pre`.
+    assert_eq!(
+        input.matches("<pre class=\"hl-code\">").count(),
+        2,
+        "{input}"
+    );
+}
+
+#[test]
+fn an_input_without_a_command_is_one_json_block() {
+    let html = finished_tool(r#"{"path":"a.rs"}"#, "ok", COMPLETED);
+
+    let input = &html[html.find("Input").unwrap()..html.find("Output").unwrap()];
+    assert_eq!(
+        input.matches("<pre class=\"hl-code\">").count(),
+        1,
+        "{input}"
+    );
+    assert!(!input.contains("hl-shell"), "{input}");
+}
+
+#[test]
+fn an_input_that_is_not_json_is_plain_escaped_text() {
+    let html = finished_tool("not <json>", "ok", COMPLETED);
+
+    assert!(html.contains("not &lt;json&gt;"), "{html}");
+    let input = &html[html.find("Input").unwrap()..html.find("Output").unwrap()];
+    assert!(!input.contains("<span class=\"hl-"), "{input}");
+}
+
+#[test]
+fn a_diff_is_highlighted_as_a_diff_and_the_raw_result_as_json() {
+    let folder = fold(&every_kind()[..7]);
+    let html = render_all(&folder);
+
+    let diff = &html[html.find(">Diff<").or_else(|| html.find("Diff")).unwrap()..];
+    assert!(diff.contains("hl-diff") && diff.contains("a.rs"), "{diff}");
+    let result = &html[html.find("Result").unwrap()..];
+    assert!(result.contains("hl-json"), "{result}");
+}
+
+fn webhook(id: i64, body: Value) -> StoredEvent {
+    forge(id, json!({"webhookReceived": body}))
+}
+
+fn webhook_html(body: Value) -> String {
+    forge_row(&webhook(1, body))
+}
+
+#[test]
+fn a_review_webhook_row_names_the_actor_the_verdict_and_links_the_pull_request() {
+    let html = webhook_html(json!({"reviewSubmitted": {"number": 41, "actor": "alice",
+        "verdict": "WEBHOOK_REVIEW_VERDICT_CHANGES_REQUESTED", "url": "https://forge.example/pr/41"}}));
+
+    assert!(
+        html.contains(&c_icon(Icon::Webhook)) && html.contains("data-system"),
+        "{html}"
+    );
+    assert!(html.contains("alice requested changes on PR <a "), "{html}");
+    let link = tag_around(&html, "href=\"https://forge.example/pr/41\"");
+    assert!(
+        link.contains("underline") && link.contains("text-accent-text"),
+        "{link}"
+    );
+    assert!(html.contains(">#41</a>"), "{html}");
+    // The wake-up text is not shown as a message.
+    assert!(!html.contains("Forge event on your task"), "{html}");
+}
+
+#[test]
+fn webhook_rows_read_like_the_board_for_every_kind() {
+    let comment = webhook_html(
+        json!({"commentCreated": {"number": 41, "isPullRequest": true,
+        "actor": "bob", "url": "https://forge.example/pr/41"}}),
+    );
+    assert!(comment.contains("bob commented on PR <a "), "{comment}");
+
+    let ci = webhook_html(
+        json!({"ciFailed": {"head": "refs/heads/factory/DF-12", "check": "test",
+        "url": "https://ci.example/run/7"}}),
+    );
+    assert!(ci.contains("CI check <a "), "{ci}");
+    assert!(ci.contains(">test</a> failed on factory/DF-12"), "{ci}");
+
+    let closed = webhook_html(json!({"pullRequestClosed": {"number": 41, "actor": "alice",
+        "url": "https://forge.example/pr/41"}}));
+    assert!(
+        closed.contains("alice closed PR <a ") && closed.contains("</a> without merging"),
+        "{closed}"
+    );
+
+    let approved = webhook_html(json!({"reviewSubmitted": {"number": 41, "actor": "alice",
+        "verdict": "WEBHOOK_REVIEW_VERDICT_APPROVED"}}));
+    assert!(approved.contains("alice approved PR #41"), "{approved}");
+}
+
+#[test]
+fn a_webhook_row_with_an_unsafe_url_shows_the_text_without_a_link() {
+    let html = webhook_html(
+        json!({"ciFailed": {"head": "factory/DF-12", "check": "test",
+        "url": "javascript:alert(1)"}}),
+    );
+
+    assert!(
+        !html.contains("<a ") && !html.contains("javascript"),
+        "{html}"
+    );
+    assert!(
+        html.contains("CI check test failed on factory/DF-12"),
+        "{html}"
+    );
+}
+
+#[test]
+fn a_webhook_event_without_a_kind_adds_no_row() {
+    let folder = fold(&[webhook(1, json!({}))]);
+
+    assert!(folder.items().is_empty(), "{:?}", folder.items());
+}
+
+#[test]
+fn the_webhook_summary_is_one_sentence_for_the_queued_stack() {
+    let summary = |body: Value| {
+        let event: WebhookReceived = serde_json::from_value(body).unwrap();
+        webhook::summary(&event).unwrap().text()
+    };
+
+    assert_eq!(
+        summary(json!({"reviewSubmitted": {"number": 12, "actor": "alice",
+            "verdict": "WEBHOOK_REVIEW_VERDICT_CHANGES_REQUESTED"}})),
+        "alice requested changes on PR #12"
+    );
+    assert_eq!(
+        summary(json!({"commentCreated": {"number": 7, "actor": "bob"}})),
+        "bob commented on issue #7"
+    );
 }

@@ -175,6 +175,19 @@ async fn markdown_is_rendered_with_inline_images_of_the_same_task_and_has_a_sour
 }
 
 #[tokio::test]
+async fn a_markdown_artifact_shows_a_table_in_the_preview() {
+    let (app, cookie) = app_with_task().await;
+    write(&app, "DF-1", "t.md", b"| a | b |\n|---|---|\n| 1 | 2 |\n").await;
+
+    let html = text(app.get_htmx("/tasks/DF-1/artifacts/t.md", &cookie).await).await;
+
+    assert!(
+        html.contains("<table>") && html.contains("<th>a</th>"),
+        "{html}"
+    );
+}
+
+#[tokio::test]
 async fn other_text_is_highlighted_by_extension_and_images_have_no_toggle() {
     let (app, cookie) = app_with_task().await;
     write(&app, "DF-1", "sketch.rs", b"fn main() {}").await;

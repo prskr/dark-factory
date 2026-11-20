@@ -77,7 +77,10 @@ sequenceDiagram
 - **Artifact header**: name, type, size and update time, for an image also its size in pixels; a
   Preview/Source toggle for Markdown (Source shows the highlighted text); "Open full page"; Close.
 - **Rendering**: Markdown with code highlighting and Mermaid diagrams, other text highlighted by its
-  extension, images as images.
+  extension, images as images. Markdown supports GitHub tables, strikethrough, task lists and bare
+  URLs (a bare URL becomes a link under the same safety rules as any link: unsafe schemes are not
+  linked, and links carry `rel="noopener noreferrer nofollow"`); raw HTML in the source is shown
+  as text.
 - **Live**: when that row arrives in the live transcript, the tab and an open artifact of that
   name reload, and the first artifact brings the tab in without a reload.
 - **Task list**: from 768 px a button collapses the task list to a strip to make room; the browser

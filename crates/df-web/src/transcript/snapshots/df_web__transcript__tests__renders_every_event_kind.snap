@@ -23,9 +23,34 @@ expression: render_all(&fold(&every_kind()))
 </div>
 <span class="avatar inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent-text">P</span>
 </div>
-<details id="thought-r1-th1" data-author="agent" class="ml-11 text-faint">
-<summary class="flex min-h-11 cursor-pointer items-center text-sm lg:min-h-8">Thinking</summary>
-<div class="whitespace-pre-wrap break-words text-sm">hmm</div>
+<details id="thought-r1-th1" data-author="agent" data-tool class="group ml-11">
+<summary class="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted lg:min-h-8">
+<span class="text-muted">
+<svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+<path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+<path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+<path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/>
+<path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/>
+<path d="M3.477 10.896a4 4 0 0 1 .585-.396"/>
+<path d="M19.938 10.5a4 4 0 0 1 .585.396"/>
+<path d="M6 18a4 4 0 0 1-1.967-.516"/>
+<path d="M19.967 17.484A4 4 0 0 1 18 18"/>
+</svg>
+</span>
+<span class="shrink-0 text-muted">Thinking</span>
+<span class="min-w-0 flex-1 truncate text-xs text-faint">hmm</span>
+<span class="text-faint transition-transform group-open:rotate-180">
+<svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="m6 9 6 6 6-6"/>
+</svg>
+</span>
+</summary>
+<div class="mb-3 rounded-lg bg-sunk p-3 text-sm">
+<div class="md-body md-tool">
+<p>hmm</p>
+</div>
+</div>
 </details>
 <div id="msg-r1-m1" data-author="agent" class="flex items-end gap-2">
 <span class="avatar inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent-text">A</span>
@@ -40,6 +65,25 @@ expression: render_all(&fold(&every_kind()))
 </div>
 </div>
 </div>
+<div id="grp-ev-6" data-author="agent" data-tool data-tool-group class="ml-11" x-data="{ open: false }" :data-open="open ? 'true' : null">
+<div id="grp-ev-6-head" data-group-head data-single>
+<button type="button" x-on:click="open = !open" :aria-expanded="open" class="flex min-h-11 w-full cursor-pointer items-center gap-2 text-left text-sm text-muted lg:min-h-8">
+<span>
+<svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>
+</svg>
+</span>
+<span>1 tool calls</span>
+<span class="min-w-0 flex-1">
+</span>
+<span data-group-chevron class="text-faint transition-transform">
+<svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="m6 9 6 6 6-6"/>
+</svg>
+</span>
+</button>
+</div>
+<div id="grp-ev-6-items" data-group-items class="[&amp;&gt;*]:ml-0">
 <details id="ev-6" data-author="agent" data-tool class="group ml-11">
 <summary class="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted lg:min-h-8">
 <span class="text-muted">
@@ -56,38 +100,88 @@ expression: render_all(&fold(&every_kind()))
 </svg>
 </span>
 </summary>
-<div class="space-y-2 pb-3 text-sm">
+<div class="mb-3 space-y-3 rounded-lg bg-sunk p-3 text-sm">
 <div class="font-mono text-xs text-faint">src/lib.rs:3</div>
 <div>
-<div class="text-xs text-faint">Input</div>
-<pre class="overflow-x-auto rounded bg-app p-2 font-mono text-xs">
-<code>{&quot;cmd&quot;:&quot;cargo test&quot;}</code>
-</pre>
-</div>
-<div>
-<div class="text-xs text-faint">Output</div>
-<pre class="overflow-x-auto rounded bg-app p-2 font-mono text-xs">
-<code>ok &lt;script&gt;x&lt;/script&gt;</code>
-</pre>
-</div>
-<div>
-<div class="text-xs text-faint">a.rs</div>
-<pre class="overflow-x-auto rounded bg-app p-2 font-mono text-xs">
-<code>-old
--line
-+new
+<div class="mb-1 flex items-baseline gap-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Input</div>
+<div class="md-body md-tool">
+<pre class="hl-code">
+<code>
+<span class="hl-source hl-json">
+<span class="hl-meta hl-structure hl-dictionary hl-json">
+<span class="hl-punctuation hl-section hl-dictionary hl-begin hl-json">{</span>
+  <span class="hl-meta hl-structure hl-dictionary hl-key hl-json">
+<span class="hl-string hl-quoted hl-double hl-json">
+<span class="hl-punctuation hl-definition hl-string hl-begin hl-json">&quot;</span>cmd<span class="hl-punctuation hl-definition hl-string hl-end hl-json">&quot;</span>
+</span>
+</span>
+<span class="hl-meta hl-structure hl-dictionary hl-value hl-json">
+<span class="hl-punctuation hl-separator hl-dictionary hl-key-value hl-json">:</span> <span class="hl-string hl-quoted hl-double hl-json">
+<span class="hl-punctuation hl-definition hl-string hl-begin hl-json">&quot;</span>cargo test<span class="hl-punctuation hl-definition hl-string hl-end hl-json">&quot;</span>
+</span>
+</span>
+<span class="hl-punctuation hl-section hl-dictionary hl-end hl-json">}</span>
+</span>
+</span>
 </code>
 </pre>
 </div>
+</div>
 <div>
-<div class="text-xs text-faint">Result</div>
-<pre class="overflow-x-auto rounded bg-app p-2 font-mono text-xs">
-<code>{&quot;exit&quot;:0}</code>
+<div class="mb-1 flex items-baseline gap-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Output</div>
+<div class="md-body md-tool">
+<p>ok &lt;script&gt;x&lt;/script&gt;</p>
+</div>
+</div>
+<div>
+<div class="mb-1 flex items-baseline gap-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Diff<span class="font-mono text-xs font-normal normal-case tracking-normal">a.rs</span>
+</div>
+<div class="md-body md-tool">
+<pre class="hl-code">
+<code>
+<span class="hl-source hl-diff">
+<span class="hl-markup hl-deleted hl-diff">
+<span class="hl-punctuation hl-definition hl-deleted hl-diff">-</span>old
+</span>
+<span class="hl-markup hl-deleted hl-diff">
+<span class="hl-punctuation hl-definition hl-deleted hl-diff">-</span>line
+</span>
+<span class="hl-markup hl-inserted hl-diff">
+<span class="hl-punctuation hl-definition hl-inserted hl-diff">+</span>new
+</span>
+</span>
+</code>
 </pre>
+</div>
+</div>
+<div>
+<div class="mb-1 flex items-baseline gap-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Result</div>
+<div class="md-body md-tool">
+<pre class="hl-code">
+<code>
+<span class="hl-source hl-json">
+<span class="hl-meta hl-structure hl-dictionary hl-json">
+<span class="hl-punctuation hl-section hl-dictionary hl-begin hl-json">{</span>
+  <span class="hl-meta hl-structure hl-dictionary hl-key hl-json">
+<span class="hl-string hl-quoted hl-double hl-json">
+<span class="hl-punctuation hl-definition hl-string hl-begin hl-json">&quot;</span>exit<span class="hl-punctuation hl-definition hl-string hl-end hl-json">&quot;</span>
+</span>
+</span>
+<span class="hl-meta hl-structure hl-dictionary hl-value hl-json">
+<span class="hl-punctuation hl-separator hl-dictionary hl-key-value hl-json">:</span> <span class="hl-constant hl-numeric hl-json">0</span>
+</span>
+<span class="hl-punctuation hl-section hl-dictionary hl-end hl-json">}</span>
+</span>
+</span>
+</code>
+</pre>
+</div>
 </div>
 <div class="text-xs text-status-waiting-fg">Truncated</div>
 </div>
 </details>
+</div>
+</div>
 <div id="ev-8" class="rounded-lg border border-line p-3">
 <div class="mb-1 text-xs uppercase text-faint">Plan</div>
 <ul class="space-y-1 text-sm">

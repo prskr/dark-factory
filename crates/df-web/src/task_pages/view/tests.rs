@@ -151,6 +151,7 @@ fn queued(n: usize) -> Vec<TaskMessageRow> {
             delivered_run_id: None,
             delivered_at: None,
             forwarded_at: None,
+            forge_event: None,
         })
         .collect()
 }

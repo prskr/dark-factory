@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, task_id, author, content, queued_at, delivered_run_id, delivered_at,\n               forwarded_at\n        FROM task_messages\n        WHERE task_id = $1 AND undelivered\n        ORDER BY queued_at ASC, id ASC\n        ",
+  "query": "\n        SELECT id, task_id, author, content, queued_at, delivered_run_id, delivered_at,\n               forwarded_at, forge_event\n        FROM task_messages\n        WHERE task_id = $1 AND undelivered\n        ORDER BY queued_at ASC, id ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -90,6 +90,17 @@
             "name": "forwarded_at"
           }
         }
+      },
+      {
+        "ordinal": 8,
+        "name": "forge_event",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "forge_event"
+          }
+        }
       }
     ],
     "parameters": {
@@ -105,8 +116,9 @@
       false,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "65d382ef0403e5a1f298a1d6abdfb35c252b8485724603247c68444ad4ddf598"
+  "hash": "3b5b000c86e4176e9aea360ab2917ab684e5bd6a39ced98b29e3b7b43af57f3d"
 }

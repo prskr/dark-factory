@@ -337,6 +337,39 @@
   }
 }
 
+/* Tool call groups: the wrapper (`data-tool`) draws the lines around head and nested rows, the
+   rows inside share one line between them. Closed, only the head shows; a group of one call
+   (`data-single` on the head) hides the head and always shows its row, like a plain tool row. */
+@layer components {
+  [data-tool-group] > [data-group-items] {
+    display: none;
+    padding-left: 1.5rem;
+  }
+  [data-tool-group][data-open] > [data-group-items],
+  [data-tool-group]:has(> [data-group-head][data-single]) > [data-group-items] {
+    display: block;
+  }
+  [data-tool-group]:has(> [data-group-head][data-single]) > [data-group-items] {
+    padding-left: 0;
+  }
+  [data-group-head][data-single] {
+    display: none;
+  }
+  [data-tool-group][data-open] [data-group-chevron] {
+    rotate: 180deg;
+  }
+  [data-group-head]:not([data-single]) + [data-group-items] {
+    border-top: 1px solid var(--color-line);
+  }
+  [data-group-items] > :is([data-tool], [data-system]) {
+    border-top-width: 0;
+    border-bottom-width: 0;
+  }
+  [data-group-items] > :is([data-tool], [data-system]) + :is([data-tool], [data-system]) {
+    border-top-width: 1px;
+  }
+}
+
 /* Rendered Markdown of finished agent messages. Wide blocks scroll inside their own box so the
    page itself never scrolls horizontally. */
 @layer components {
@@ -376,7 +409,8 @@
   /* User bubbles are light in the light theme and dark in the dark one, the reverse of the agent
      bubbles: inline code takes the panel color (white on light, near black on dark) instead of
      `code-on-agent`, which would be dark on dark. */
-  .md-user :not(pre) > code {
+  .md-user :not(pre) > code,
+  .md-tool :not(pre) > code {
     @apply bg-panel;
   }
   /* Mermaid fences: the drawn diagram is an iframe; the error line shows under the source. It keeps

@@ -2,7 +2,7 @@
 
 use df_core::seams::ReviewVerdict;
 use df_core::{PersonaId, ProjectId, TaskStatus};
-use df_proto::transcript::v1::content_block;
+use df_proto::transcript::v1::{content_block, webhook_received};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -194,6 +194,154 @@ async fn webhook_message_has_no_payload_text() {
     let text = serde_json::to_string(&messages.last().unwrap().content).unwrap();
     assert!(text.contains("carol commented on PR #12."), "{text}");
     assert!(!text.contains("df-bot"), "{text}");
+}
+
+#[tokio::test]
+async fn webhook_text_is_a_hidden_block_and_the_event_is_stored_with_the_message() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task_id = seed_task(&pool).await;
+    sqlx::query(
+        "UPDATE tasks SET pr_number = 12, pr_url = 'https://forge.example.test/df/pulls/12'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    queue_event(&pool, task_id, &review("alice")).await;
+
+    let messages = list_undelivered_messages(&pool, task_id).await.unwrap();
+    let message = messages.last().unwrap();
+    assert!(message.content.iter().all(|block| block.hidden));
+    let Some(webhook_received::Kind::ReviewSubmitted(review)) =
+        message.forge_event.as_ref().and_then(|e| e.kind.as_ref())
+    else {
+        panic!("expected a stored review event: {:?}", message.forge_event);
+    };
+    assert_eq!(review.actor, "alice");
+    assert_eq!(review.number, 12);
+    assert_eq!(review.url, "https://forge.example.test/df/pulls/12");
+}
+
+#[tokio::test]
+async fn other_system_messages_carry_no_forge_event() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let task_id = seed_task(&pool).await;
+
+    let messages = list_undelivered_messages(&pool, task_id).await.unwrap();
+
+    assert!(!messages.is_empty());
+    assert!(messages.iter().all(|m| m.forge_event.is_none()));
+}
+
+#[test]
+fn every_webhook_kind_maps_to_its_display_fields() {
+    let pr = "https://forge.example.test/df/pulls/12";
+    let kind = |event: &WebhookEvent| {
+        webhook_received(event, Some((12, pr)))
+            .unwrap()
+            .kind
+            .unwrap()
+    };
+
+    let webhook_received::Kind::ReviewSubmitted(review) = kind(&review("alice")) else {
+        panic!("review");
+    };
+    assert_eq!(
+        (review.actor.as_str(), review.number, review.url.as_str()),
+        ("alice", 12, pr)
+    );
+    assert_eq!(review.verdict(), WebhookReviewVerdict::ChangesRequested);
+
+    let comment = WebhookEvent::CommentCreated {
+        number: 12,
+        is_pull_request: true,
+        actor: "bob".into(),
+        mentions: vec!["df-bot".into()],
+    };
+    let webhook_received::Kind::CommentCreated(comment) = kind(&comment) else {
+        panic!("comment");
+    };
+    assert!(comment.is_pull_request && comment.url == pr && comment.actor == "bob");
+
+    let issue_comment = WebhookEvent::CommentCreated {
+        number: 7,
+        is_pull_request: false,
+        actor: "bob".into(),
+        mentions: Vec::new(),
+    };
+    let webhook_received::Kind::CommentCreated(issue_comment) = kind(&issue_comment) else {
+        panic!("comment");
+    };
+    assert!(issue_comment.url.is_empty(), "an issue has no PR url");
+
+    let closed = WebhookEvent::PullRequestClosed {
+        number: 12,
+        head: "factory/task/DF-1".into(),
+        actor: "alice".into(),
+        merged: false,
+    };
+    let webhook_received::Kind::PullRequestClosed(closed) = kind(&closed) else {
+        panic!("closed");
+    };
+    assert!(closed.actor == "alice" && closed.url == pr);
+
+    let webhook_received::Kind::CiFailed(ci) = kind(&ci_failed()) else {
+        panic!("ci");
+    };
+    assert_eq!(
+        (ci.check.as_str(), ci.url.as_str()),
+        ("test", "https://ci.example.test/1")
+    );
+}
+
+#[test]
+fn a_merge_has_no_webhook_row() {
+    let merged = WebhookEvent::PullRequestClosed {
+        number: 12,
+        head: "factory/task/DF-1".into(),
+        actor: "alice".into(),
+        merged: true,
+    };
+
+    assert!(webhook_received(&merged, None).is_none());
+}
+
+#[test]
+fn an_event_about_another_pr_than_the_task_s_gets_no_link() {
+    let task_pr = Some((13, "https://forge.example.test/df/pulls/13"));
+    let url = |event: &WebhookEvent| match webhook_received(event, task_pr).unwrap().kind {
+        Some(webhook_received::Kind::ReviewSubmitted(e)) => e.url,
+        Some(webhook_received::Kind::CommentCreated(e)) => e.url,
+        Some(webhook_received::Kind::PullRequestClosed(e)) => e.url,
+        other => panic!("unexpected kind {other:?}"),
+    };
+    let comment = WebhookEvent::CommentCreated {
+        number: 12,
+        is_pull_request: true,
+        actor: "bob".into(),
+        mentions: Vec::new(),
+    };
+    let closed = WebhookEvent::PullRequestClosed {
+        number: 12,
+        head: "factory/task/DF-1".into(),
+        actor: "alice".into(),
+        merged: false,
+    };
+
+    // `review` names PR #12; the task holds #13.
+    assert_eq!(url(&review("alice")), "");
+    assert_eq!(url(&comment), "");
+    assert_eq!(url(&closed), "");
+}
+
+#[test]
+fn a_task_without_a_pr_gives_no_link() {
+    let Some(webhook_received::Kind::ReviewSubmitted(review)) =
+        webhook_received(&review("alice"), None).unwrap().kind
+    else {
+        panic!("review");
+    };
+    assert_eq!(review.url, "");
 }
 
 async fn set_numbers(pool: &PgPool, task_id: TaskId, pr: Option<i64>, issue: Option<i64>) {

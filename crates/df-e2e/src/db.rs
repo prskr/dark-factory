@@ -8,6 +8,7 @@ use df_core::{RunOutcome, RunState, TaskStatus};
 use df_db::git_pushes::RefUpdate;
 use df_db::push_checks::{ExceptionFinding, PUSH_CHECK_EXCEPTION, request_findings};
 use df_db::requests::RequestState;
+use df_proto::transcript::v1::{Event, ToolCall, ToolCallStatus, ToolKind, event};
 use sqlx::Executor;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use uuid::Uuid;
@@ -74,6 +75,58 @@ pub async fn task_id(pool: &PgPool, key: &str) -> Result<Uuid> {
         .fetch_one(pool)
         .await
         .with_context(|| format!("id of task {key}"))
+}
+
+/// Id of the newest run of task `key`.
+pub async fn latest_run_id(pool: &PgPool, key: &str) -> Result<Uuid> {
+    sqlx::query_scalar!(
+        "SELECT r.id FROM runs r JOIN tasks t ON t.id = r.task_id
+         WHERE t.key = $1 ORDER BY r.number DESC LIMIT 1",
+        key
+    )
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("newest run of task {key}"))
+}
+
+/// Appends a completed tool call to the transcript of the newest run of task `key`, written like
+/// the events of the runtime. For a test that needs a streak of tool calls at a time it chooses
+/// (the fake agent cannot pause between calls). `seq` counts up from a number the runtime never
+/// reaches, so it cannot collide with the runtime's own events of the run.
+pub async fn append_tool_call(
+    pool: &PgPool,
+    key: &str,
+    seq: u64,
+    call_id: &str,
+    title: &str,
+) -> Result<()> {
+    let task = df_core::TaskId::from_uuid(task_id(pool, key).await?);
+    let run = df_core::RunId::from_uuid(latest_run_id(pool, key).await?);
+    let call = Event {
+        schema_version: 1,
+        occurred_at: None,
+        turn_id: "e2e-streak".to_owned(),
+        kind: Some(event::Kind::ToolCall(ToolCall {
+            tool_call_id: call_id.to_owned(),
+            title: title.to_owned(),
+            kind: ToolKind::Read.into(),
+            status: ToolCallStatus::Completed.into(),
+            raw_input_json: serde_json::json!({ "path": "src/lib.rs" }).to_string(),
+            ..ToolCall::default()
+        })),
+    };
+    let prepared = df_db::transcript::prepare(
+        &df_db::PgBlobStore::new(pool.clone()),
+        1_000_000 + seq,
+        call,
+    )
+    .await?;
+    let mut tx = pool.begin().await?;
+    let lock = df_db::transcript::lock_run_and_task(&mut tx, run, task).await?;
+    let mut writer = df_db::transcript::TranscriptWriter::new(&lock);
+    writer.append_runtime(&mut tx, &prepared).await?;
+    writer.finish(&mut tx).await?;
+    tx.commit().await.context("append the tool call")
 }
 
 /// The keys of the tasks created by task `parent`, in creation order.

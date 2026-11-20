@@ -126,6 +126,10 @@ fn theme_css_has_light_rules_and_dark_rules_in_a_media_query() {
     let css = super::theme_css("InspiredGitHub", "base16-ocean.dark").unwrap();
     let dark = css.find("@media (prefers-color-scheme: dark)").unwrap();
     let (light_part, dark_part) = css.split_at(dark);
+    assert!(
+        light_part.starts_with("@media not all and (prefers-color-scheme: dark)"),
+        "{light_part}"
+    );
     // InspiredGitHub is white, base16-ocean.dark is #2b303b.
     assert!(light_part.contains(".hl-code {"), "{light_part}");
     assert!(
@@ -138,6 +142,36 @@ fn theme_css_has_light_rules_and_dark_rules_in_a_media_query() {
     );
     assert!(dark_part.contains(".hl-keyword"), "{dark_part}");
     assert!(dark_part.trim_end().ends_with('}'));
+}
+
+#[test]
+fn the_light_code_theme_does_not_apply_in_dark_mode() {
+    let css = super::theme_css("InspiredGitHub", "base16-ocean.dark").unwrap();
+
+    // Every rule sits inside one of the two media blocks: track the brace depth.
+    let mut depth = 0;
+    let mut outside = String::new();
+    for c in css.chars() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            _ if depth == 0 => outside.push(c),
+            _ => {}
+        }
+    }
+    let blocks: Vec<&str> = outside
+        .split('\n')
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    assert_eq!(
+        blocks,
+        [
+            "@media not all and (prefers-color-scheme: dark)",
+            "@media (prefers-color-scheme: dark)"
+        ],
+        "no rule outside the media blocks: {css}"
+    );
 }
 
 #[tokio::test]
@@ -311,4 +345,45 @@ fn hard_breaks_keep_the_untrusted_input_rules() {
         out.contains(r#"<a rel="noopener noreferrer nofollow" href=""#),
         "{out}"
     );
+}
+
+#[test]
+fn a_table_is_rendered_as_a_table() {
+    let out = html("| a | b |\n|---|---|\n| 1 | <b>2</b> |\n");
+    assert!(
+        out.contains("<table>") && out.contains("<th>a</th>") && out.contains("<td>1</td>"),
+        "{out}"
+    );
+    assert!(
+        out.contains("&lt;b&gt;2&lt;/b&gt;") && !out.contains("<b>"),
+        "{out}"
+    );
+}
+
+#[test]
+fn strikethrough_is_rendered() {
+    assert!(html("~~gone~~").contains("<del>gone</del>"));
+}
+
+#[test]
+fn a_bare_url_becomes_a_link_with_rel() {
+    let out = html("see https://example.com/x now");
+    assert!(
+        out.contains(r#"<a rel="noopener noreferrer nofollow" href="https://example.com/x""#),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_bare_javascript_url_stays_text() {
+    let out = html("see javascript:alert(1) now");
+    assert!(!out.contains("<a "), "{out}");
+}
+
+#[test]
+fn a_task_list_shows_disabled_checkboxes_and_still_escapes_html() {
+    let out = html("- [x] done <script>alert(1)</script>\n- [ ] open\n");
+    assert!(out.contains(r#"type="checkbox""#), "{out}");
+    assert!(out.contains("disabled"), "{out}");
+    assert!(!out.contains("<script>"), "{out}");
 }

@@ -593,6 +593,7 @@ async fn record_decision(
         task_id,
         Principal::system(REQUEST_DECIDED),
         vec![crate::tasks::text_block(message, true)],
+        None,
     )
     .await?;
     publish(

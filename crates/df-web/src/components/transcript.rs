@@ -88,12 +88,31 @@ fn meta(author: &str, at: DateTime<Utc>, class: &str) -> Markup {
     }
 }
 
-/// The agent's reasoning, collapsed.
-pub fn thought(id: &str, text: &str) -> Markup {
+/// The agent's reasoning: a row in the layout of a tool row, collapsed to the brain icon,
+/// "Thinking" and the first non-empty line of `text`. The opened body is the whole thought, plain
+/// text while it streams and rendered Markdown once its turn has ended (`complete`).
+pub fn thought(id: &str, text: &str, complete: bool) -> Markup {
+    let preview = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
     html! {
-        details id=(id) data-author="agent" class="ml-11 text-faint" {
-            summary class="flex min-h-11 cursor-pointer items-center text-sm lg:min-h-8" { "Thinking" }
-            div class="whitespace-pre-wrap break-words text-sm" { (text) }
+        // `data-tool`: the stylesheet draws the lines between consecutive rows.
+        details id=(id) data-author="agent" data-tool class="group ml-11" {
+            summary class="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted lg:min-h-8" {
+                span class="text-muted" { (icon(Icon::Brain)) }
+                span class="shrink-0 text-muted" { "Thinking" }
+                span class="min-w-0 flex-1 truncate text-xs text-faint" { (preview) }
+                span class="text-faint transition-transform group-open:rotate-180" { (icon(Icon::ChevronDown)) }
+            }
+            div class="mb-3 rounded-lg bg-sunk p-3 text-sm" {
+                @if complete {
+                    div class="md-body md-tool" { (markdown::render(text)) }
+                } @else {
+                    div class="whitespace-pre-wrap break-words" { (text) }
+                }
+            }
         }
     }
 }
@@ -179,23 +198,73 @@ pub fn queued_message(
     }
 }
 
+/// Where a tool call stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ToolStatus {
+    #[default]
+    Unspecified,
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+    /// A status this build does not know.
+    Unknown,
+}
+
+impl ToolStatus {
+    /// The word the row shows.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Unspecified => "unspecified",
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// The call ended, successfully or not: its output is final.
+    pub const fn is_finished(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed)
+    }
+
+    pub const fn is_failed(self) -> bool {
+        matches!(self, Self::Failed)
+    }
+
+    /// The call has not ended yet.
+    pub const fn is_running(self) -> bool {
+        matches!(self, Self::Pending | Self::InProgress)
+    }
+}
+
 /// What a tool-call row shows.
 pub struct ToolRow<'a> {
     pub id: &'a str,
     pub title: &'a str,
     pub kind: &'a str,
-    pub status: &'a str,
+    pub status: ToolStatus,
     pub locations: &'a [String],
-    /// Labelled code blocks: input, output, diffs, result.
-    pub blocks: &'a [(String, String)],
+    /// The details: input, output, diffs, result.
+    pub blocks: &'a [ToolBlock],
     pub truncated: bool,
+}
+
+/// One section of the details of a tool call, under a small uppercase `label` (and the `caption`,
+/// for example the path of a diff). `parts` are ready-made blocks: highlighted code, rendered
+/// Markdown or plain text.
+pub struct ToolBlock {
+    pub label: &'static str,
+    pub caption: Option<String>,
+    pub parts: Vec<Markup>,
 }
 
 /// A tool call: one line, expandable to its input and output.
 pub fn tool_row(row: &ToolRow<'_>) -> Markup {
     let status_class = match row.status {
-        "completed" => "text-status-completed-fg",
-        "failed" => "text-status-failed-fg",
+        ToolStatus::Completed => "text-status-completed-fg",
+        ToolStatus::Failed => "text-status-failed-fg",
         _ => "text-faint",
     };
     html! {
@@ -205,24 +274,32 @@ pub fn tool_row(row: &ToolRow<'_>) -> Markup {
                 span class="text-muted" { (icon(Icon::Wrench)) }
                 span class="min-w-0 flex-1 truncate font-mono text-xs" { (row.title) }
                 span class="text-xs text-faint" { (row.kind) }
-                span class={"text-xs " (status_class)} { (row.status) }
+                span class={"text-xs " (status_class)} { (row.status.label()) }
                 span class="text-faint transition-transform group-open:rotate-180" { (icon(Icon::ChevronDown)) }
             }
-            div class="space-y-2 pb-3 text-sm" {
+            // The sunk panel, as under an opened thought.
+            div class="mb-3 space-y-3 rounded-lg bg-sunk p-3 text-sm" {
                 @for location in row.locations { div class="font-mono text-xs text-faint" { (location) } }
-                @for (label, text) in row.blocks { (code_block(label, text)) }
+                @for block in row.blocks { (tool_block(block)) }
                 @if row.truncated { div class="text-xs text-status-waiting-fg" { "Truncated" } }
             }
         }
     }
 }
 
-/// A labelled block of preformatted text that scrolls inside itself.
-pub fn code_block(label: &str, text: &str) -> Markup {
+fn tool_block(block: &ToolBlock) -> Markup {
     html! {
         div {
-            div class="text-xs text-faint" { (label) }
-            pre class="overflow-x-auto rounded bg-app p-2 font-mono text-xs" { code { (text) } }
+            div class="mb-1 flex items-baseline gap-2 text-[11px] font-semibold uppercase tracking-wide text-faint" {
+                (block.label)
+                @if let Some(caption) = &block.caption {
+                    span class="font-mono text-xs font-normal normal-case tracking-normal" { (caption) }
+                }
+            }
+            // `md-body` styles the code blocks and the Markdown output; `md-tool` the inline code.
+            div class="md-body md-tool" {
+                @for part in &block.parts { (part) }
+            }
         }
     }
 }
@@ -284,14 +361,86 @@ pub fn system_row(
             (icon(glyph))
             span class="min-w-0 flex-1 truncate" {
                 (lead)
-                @if let Some((label, url)) = link {
-                    @if url.starts_with("https://") || url.starts_with("http://") {
-                        a href=(url) class="underline" rel="noopener noreferrer" target="_blank" { (label) }
-                    } @else {
-                        (label)
+                @if let Some((label, url)) = link { (safe_link(label, url, "underline")) }
+                (tail)
+            }
+        }
+    }
+}
+
+/// A received webhook event, in the notice layout: the webhook icon and the link in the strong
+/// accent color, the text around it muted. `link` is the label and URL of the PR or CI check;
+/// the label is only a link for an `http(s)` URL.
+pub fn webhook_row(id: &str, lead: &str, link: Option<(&str, &str)>, tail: &str) -> Markup {
+    html! {
+        div id=(id) data-author="agent" data-system class="ml-11 flex min-h-11 items-center gap-2 text-sm text-muted lg:min-h-8" {
+            span class="text-accent-text" { (icon(Icon::Webhook)) }
+            span class="min-w-0 flex-1 truncate" {
+                (lead)
+                @if let Some((label, url)) = link { (safe_link(label, url, "text-accent-text underline")) }
+                (tail)
+            }
+        }
+    }
+}
+
+/// `label` as a link to `url` in a new tab, but only for an `http(s)` URL; any other URL (an
+/// agent or a forge can name one) leaves the label as plain text.
+fn safe_link(label: &str, url: &str, class: &str) -> Markup {
+    html! {
+        @if url.starts_with("https://") || url.starts_with("http://") {
+            a href=(url) class=(class) rel="noopener noreferrer" target="_blank" { (label) }
+        } @else {
+            (label)
+        }
+    }
+}
+
+/// What the head of a tool call group shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupHead {
+    pub calls: usize,
+    pub failed: usize,
+    /// A call of the group is in progress.
+    pub running: bool,
+}
+
+/// A streak of tool calls: a wrapper with the head and the container of the nested rows
+/// (`items`). The wrapper holds the open state (Alpine) and is never morphed by live updates;
+/// they replace the head (`<id>-head`) and append to `<id>-items`. A group of one call hides its
+/// head and shows the row like a plain tool row (stylesheet, `data-single`).
+pub fn tool_group(id: &str, head: GroupHead, items: &Markup) -> Markup {
+    html! {
+        // `data-tool`: the stylesheet draws the lines around the group; the rows inside it have none.
+        div id=(id) data-author="agent" data-tool data-tool-group class="ml-11"
+            x-data="{ open: false }" ":data-open"="open ? 'true' : null" {
+            (tool_group_head(id, head))
+            div id={(id) "-items"} data-group-items class="[&>*]:ml-0" { (items) }
+        }
+    }
+}
+
+/// The head row of the group `id`: wrench, "N tool calls", the failed count, the running
+/// indicator and the chevron, as the button that opens the group.
+pub fn tool_group_head(id: &str, head: GroupHead) -> Markup {
+    html! {
+        div id={(id) "-head"} data-group-head data-single[head.calls < 2] {
+            // The open state is Alpine's: `aria-expanded` is skipped when morphing (`HTMX_CONFIG`).
+            button type="button" "x-on:click"="open = !open" ":aria-expanded"="open"
+                class="flex min-h-11 w-full cursor-pointer items-center gap-2 text-left text-sm text-muted lg:min-h-8" {
+                span { (icon(Icon::Wrench)) }
+                span { (head.calls) " tool calls" }
+                @if head.failed > 0 {
+                    span class="text-xs text-status-failed-fg" { "\u{b7} " (head.failed) " failed" }
+                }
+                span class="min-w-0 flex-1" {}
+                @if head.running {
+                    span class="flex items-center gap-1 text-xs text-status-running-fg" {
+                        span class="animate-spin [&>svg]:size-3.5" { (icon(Icon::Loader)) }
+                        "running"
                     }
                 }
-                (tail)
+                span data-group-chevron class="text-faint transition-transform" { (icon(Icon::ChevronDown)) }
             }
         }
     }
@@ -523,12 +672,16 @@ mod tests {
 
     #[test]
     fn tool_row_summary_is_a_touch_target_and_shows_blocks() {
-        let blocks = vec![("Input".to_string(), "{}".to_string())];
+        let blocks = vec![ToolBlock {
+            label: "Input",
+            caption: None,
+            parts: vec![html! { "{}" }],
+        }];
         let html = tool_row(&ToolRow {
             id: "ev-2",
             title: "Run tests",
             kind: "execute",
-            status: "failed",
+            status: ToolStatus::Failed,
             locations: &["src/lib.rs:3".to_string()],
             blocks: &blocks,
             truncated: true,
@@ -545,7 +698,7 @@ mod tests {
             id: "ev-2",
             title: "Run tests",
             kind: "execute",
-            status: "completed",
+            status: ToolStatus::Completed,
             locations: &[],
             blocks: &[],
             truncated: false,
@@ -616,6 +769,205 @@ mod tests {
             plan("p", &[("pending".into(), "do".into())])
                 .into_string()
                 .contains("[pending]")
+        );
+    }
+
+    #[test]
+    fn a_thought_is_a_tool_row_with_the_brain_a_preview_and_a_chevron() {
+        let text = "\n  Check the failing test first\nthen the rest";
+        let html = thought("th-1", text, false).into_string();
+
+        assert!(
+            html.starts_with(
+                "<details id=\"th-1\" data-author=\"agent\" data-tool class=\"group ml-11\""
+            ),
+            "{html}"
+        );
+        let summary = &html[..html.find("</summary>").unwrap()];
+        let brain = summary
+            .find(&icon(Icon::Brain).into_string())
+            .expect("brain");
+        let label = summary.find("Thinking").expect("label");
+        let preview = summary
+            .find("Check the failing test first")
+            .expect("preview");
+        let chevron = summary
+            .find(&icon(Icon::ChevronDown).into_string())
+            .expect("chevron");
+        assert!(
+            brain < label && label < preview && preview < chevron,
+            "{html}"
+        );
+        assert!(
+            !summary.contains("then the rest"),
+            "only the first line: {summary}"
+        );
+        assert!(summary.contains("truncate") && html.contains("group-open:rotate-180"));
+        // The open body sits in the sunk panel of an opened tool row, plain while streaming.
+        assert!(
+            html.contains("bg-sunk") && html.contains("whitespace-pre-wrap"),
+            "{html}"
+        );
+        assert!(!html.contains("md-body"), "{html}");
+    }
+
+    #[test]
+    fn a_finished_thought_body_is_markdown() {
+        let html = thought("th-1", "x", true).into_string();
+
+        assert!(
+            html.contains("md-body") && !html.contains("whitespace-pre-wrap"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn a_tool_group_head_counts_calls_failures_and_the_running_call() {
+        let head = |calls, failed, running| {
+            tool_group_head(
+                "grp-ev-1",
+                GroupHead {
+                    calls,
+                    failed,
+                    running,
+                },
+            )
+            .into_string()
+        };
+
+        let plain = head(12, 0, false);
+        assert!(plain.contains("12 tool calls"), "{plain}");
+        assert!(
+            !plain.contains("failed") && !plain.contains("running"),
+            "{plain}"
+        );
+        assert!(plain.contains("aria-hidden") && plain.contains(":aria-expanded=\"open\""));
+        assert!(plain.contains("<button type=\"button\""), "{plain}");
+
+        let failed = head(12, 2, false);
+        let tint = &failed[failed.find("text-status-failed-fg").expect("failed tint")..];
+        assert!(tint.contains("2 failed"), "{failed}");
+
+        let running = head(3, 0, true);
+        let spinner = running.find("animate-spin").expect("spinner");
+        assert!(running.contains("text-status-running-fg") && running.contains("running"));
+        let chevron = running.find("data-group-chevron").unwrap();
+        assert!(spinner < chevron, "the chevron is last: {running}");
+        assert!(
+            running.find(&icon(Icon::Wrench).into_string()).unwrap()
+                < running.find("3 tool calls").unwrap()
+        );
+    }
+
+    #[test]
+    fn a_group_of_one_call_marks_its_head_single() {
+        let one = tool_group_head(
+            "g",
+            GroupHead {
+                calls: 1,
+                failed: 0,
+                running: false,
+            },
+        )
+        .into_string();
+        let two = tool_group_head(
+            "g",
+            GroupHead {
+                calls: 2,
+                failed: 0,
+                running: false,
+            },
+        )
+        .into_string();
+
+        assert!(one.contains("data-single"), "{one}");
+        assert!(!two.contains("data-single"), "{two}");
+    }
+
+    #[test]
+    fn a_tool_group_wrapper_holds_the_open_state_and_the_ids_live_updates_target() {
+        let head = GroupHead {
+            calls: 2,
+            failed: 0,
+            running: false,
+        };
+        let html = tool_group("grp-ev-1", head, &html! { div id="ev-1" {} }).into_string();
+
+        assert!(
+            html.starts_with("<div id=\"grp-ev-1\" data-author=\"agent\" data-tool data-tool-group class=\"ml-11\""),
+            "{html}"
+        );
+        assert!(html.contains("x-data=\"{ open: false }\""), "{html}");
+        assert!(html.contains("id=\"grp-ev-1-head\"") && html.contains("id=\"grp-ev-1-items\""));
+        assert!(html.find("-head").unwrap() < html.find("-items").unwrap());
+        assert!(
+            html.contains("[&amp;&gt;*]:ml-0"),
+            "nested rows are indented by the container: {html}"
+        );
+    }
+
+    #[test]
+    fn a_webhook_row_has_the_webhook_icon_and_an_accented_underlined_link() {
+        let html = webhook_row(
+            "ev-3",
+            "alice requested changes on PR ",
+            Some(("#41", "https://forge.example/pr/41")),
+            "",
+        )
+        .into_string();
+
+        assert!(
+            html.contains("data-system")
+                && html.contains("ml-11")
+                && html.contains("data-author=\"agent\""),
+            "{html}"
+        );
+        assert!(html.contains(&icon(Icon::Webhook).into_string()), "{html}");
+        let link = tag_around(&html, "href=\"https://forge.example/pr/41\"");
+        assert!(
+            link.contains("text-accent-text") && link.contains("underline"),
+            "{link}"
+        );
+        assert!(html.contains("alice requested changes on PR <a "), "{html}");
+    }
+
+    #[test]
+    fn a_webhook_row_links_only_http_urls() {
+        for url in ["javascript:alert(1)", "", "ftp://x"] {
+            let html =
+                webhook_row("ev-3", "CI check ", Some(("test", url)), " failed on x").into_string();
+
+            assert!(
+                !html.contains("<a ") && !html.contains("javascript"),
+                "{html}"
+            );
+            assert!(html.contains("CI check test failed on x"), "{html}");
+        }
+    }
+
+    #[test]
+    fn tool_details_label_their_blocks_in_small_uppercase() {
+        let blocks = vec![ToolBlock {
+            label: "Diff",
+            caption: Some("src/lib.rs".into()),
+            parts: vec![html! { "d" }],
+        }];
+        let html = tool_row(&ToolRow {
+            id: "ev-2",
+            title: "Edit",
+            kind: "edit",
+            status: ToolStatus::Completed,
+            locations: &[],
+            blocks: &blocks,
+            truncated: false,
+        })
+        .into_string();
+
+        let label = tag_around(&html, "Diff");
+        assert!(label.contains("uppercase"), "{label}");
+        assert!(
+            html.contains("src/lib.rs") && html.contains("bg-sunk"),
+            "{html}"
         );
     }
 }

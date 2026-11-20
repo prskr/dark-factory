@@ -8,7 +8,8 @@ use df_core::{
     PromptId, RunId, RunState, TITLE_MAX_CHARS, TaskId, TaskKey, TaskKind, TaskStatus, TitleSource,
     is_satisfied, placeholder_title, sanitize_title, system_reason, title_too_long,
 };
-use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
+use df_proto::prost::Message;
+use df_proto::transcript::v1::{ContentBlock, TextContent, WebhookReceived, content_block};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgExecutor, PgPool};
 use uuid::Uuid;
@@ -178,6 +179,9 @@ pub struct TaskMessageRow {
     pub delivered_at: Option<DateTime<Utc>>,
     /// Set when the message was handed to the run's runtime; held-back messages are `None`.
     pub forwarded_at: Option<DateTime<Utc>>,
+    /// The structured event of a webhook message, shown instead of its hidden text.
+    #[serde(default)]
+    pub forge_event: Option<WebhookReceived>,
 }
 
 impl TaskMessageRow {
@@ -583,27 +587,30 @@ async fn enqueue_assignment_prompt(
 ) -> Result<TaskMessageRow, DbError> {
     let author = Principal::system(system_reason::TASK_ASSIGNED);
     let content = format_assignment_prompt(user_title, description);
-    insert_message(tx, task_id, author, content).await
+    insert_message(tx, task_id, author, content, None).await
 }
 
-/// Inserts an undelivered message at the end of the queue of the task.
+/// Inserts an undelivered message at the end of the queue of the task, with the structured
+/// event of a webhook message if there is one.
 pub(crate) async fn insert_message(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: TaskId,
     author: Principal,
     content: Vec<ContentBlock>,
+    forge_event: Option<WebhookReceived>,
 ) -> Result<TaskMessageRow, DbError> {
     let prompt_id = PromptId::new();
     let msg_row = sqlx::query!(
         r#"
-        INSERT INTO task_messages (id, task_id, author, content)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO task_messages (id, task_id, author, content, forge_event)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id, task_id, queued_at, delivered_run_id, delivered_at
         "#,
         prompt_id.as_uuid(),
         task_id.as_uuid(),
         serde_json::to_value(&author)?,
-        serde_json::to_value(&content)?
+        serde_json::to_value(&content)?,
+        forge_event.as_ref().map(Message::encode_to_vec)
     )
     .fetch_one(&mut **tx)
     .await?;
@@ -617,6 +624,7 @@ pub(crate) async fn insert_message(
         delivered_run_id: msg_row.delivered_run_id.map(RunId::from_uuid),
         delivered_at: msg_row.delivered_at,
         forwarded_at: None,
+        forge_event,
     })
 }
 
@@ -636,7 +644,7 @@ pub async fn queue_message(
     content: Vec<ContentBlock>,
 ) -> Result<TaskMessageRow, DbError> {
     let mut tx = pool.begin().await?;
-    let row = queue_message_tx(&mut tx, task_id, author, content).await?;
+    let row = queue_message_tx(&mut tx, task_id, author, content, None).await?;
     tx.commit().await?;
     Ok(row)
 }
@@ -646,11 +654,15 @@ pub async fn queue_message(
 /// A message that moves the task out of `in_review` or `completed` while it has an unmerged pull
 /// request enqueues a [`MARK_DRAFT_KIND`] job, so the forge shows the task is working on it again
 /// (`iter3-webhooks` design D5). The job leaves a closed pull request alone.
+///
+/// A webhook message carries its `forge_event`, which is stored with it and becomes the
+/// transcript row when the message is delivered; every other message passes `None`.
 pub async fn queue_message_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: TaskId,
     author: Principal,
     content: Vec<ContentBlock>,
+    forge_event: Option<WebhookReceived>,
 ) -> Result<TaskMessageRow, DbError> {
     reject_taken_branch(tx, task_id).await?;
     apply_task_event(tx, task_id, TaskEvent::MessageQueued, &author)
@@ -659,7 +671,7 @@ pub async fn queue_message_tx(
             DbError::Sqlx(error) => branch_violation(error),
             other => other,
         })?;
-    insert_message(tx, task_id, author, content).await
+    insert_message(tx, task_id, author, content, forge_event).await
 }
 
 /// A message reopens a final task only if no other open task holds its branch
@@ -854,6 +866,7 @@ struct MessageRecord {
     delivered_run_id: Option<Uuid>,
     delivered_at: Option<DateTime<Utc>>,
     forwarded_at: Option<DateTime<Utc>>,
+    forge_event: Option<Vec<u8>>,
 }
 
 impl TryFrom<MessageRecord> for TaskMessageRow {
@@ -869,8 +882,42 @@ impl TryFrom<MessageRecord> for TaskMessageRow {
             delivered_run_id: r.delivered_run_id.map(RunId::from_uuid),
             delivered_at: r.delivered_at,
             forwarded_at: r.forwarded_at,
+            forge_event: r
+                .forge_event
+                .as_deref()
+                .map(decode_forge_event)
+                .transpose()?,
         })
     }
+}
+
+fn decode_forge_event(bytes: &[u8]) -> Result<WebhookReceived, DbError> {
+    WebhookReceived::decode(bytes)
+        .map_err(|error| DbError::InvalidData(format!("stored webhook event: {error}")))
+}
+
+/// The structured webhook event stored with the message `prompt_id` of `task_id` if `run_id` is
+/// the run that delivered it first; `None` for every other message and for a message that an
+/// earlier run delivered already.
+pub async fn message_forge_event(
+    executor: impl PgExecutor<'_>,
+    task_id: TaskId,
+    prompt_id: PromptId,
+    run_id: RunId,
+) -> Result<Option<WebhookReceived>, DbError> {
+    sqlx::query_scalar!(
+        "SELECT forge_event FROM task_messages
+         WHERE id = $1 AND task_id = $2 AND delivered_run_id = $3",
+        prompt_id.as_uuid(),
+        task_id.as_uuid(),
+        run_id.as_uuid()
+    )
+    .fetch_optional(executor)
+    .await?
+    .flatten()
+    .as_deref()
+    .map(decode_forge_event)
+    .transpose()
 }
 
 /// Lists all undelivered prompts for `task_id` in queue order.
@@ -882,7 +929,7 @@ pub async fn list_undelivered_messages(
         MessageRecord,
         r#"
         SELECT id, task_id, author, content, queued_at, delivered_run_id, delivered_at,
-               forwarded_at
+               forwarded_at, forge_event
         FROM task_messages
         WHERE task_id = $1 AND undelivered
         ORDER BY queued_at ASC, id ASC
@@ -910,7 +957,7 @@ pub async fn claim_held_back_messages(
           -- unarchive (decided in this statement, so a concurrent archive cannot be missed).
           AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = $1 AND t.archived_at IS NOT NULL)
         RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at,
-                  forwarded_at
+                  forwarded_at, forge_event
         "#,
         task_id.as_uuid()
     )
