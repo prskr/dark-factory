@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-128.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-130.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -113,6 +113,8 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-125 | low   | `df-gateway` push checks | Other open tasks' existing branches count as already-checked upstream |
 | TD-126 | low   | `df-web` assets | The stylesheet size guard has about 1 KB of headroom |
 | TD-127 | low   | `deploy` Helm, `df-plugins` policy | The GitHub plugin's default `extraHosts` admit every Azure storage account |
+| TD-128 | low   | `df-web` egress dialogs | Scope values `task:<KEY>` / `project:<KEY>` are built and parsed with string operations |
+| TD-129 | low   | design file (PenPot) | Project settings boards keep a white panel in the Dark theme preview |
 
 ## Entries
 
@@ -802,6 +804,28 @@ GitHub redirects a job log download to a storage account such as `productionresu
 **Matters when:** a plugin is untrusted or compromised and could send forge data it already holds to an outside storage account.
 
 **Fix:** allow a prefix within a host label (for example `productionresultssa*.blob.core.windows.net`) in `extraHosts` matching, or list the known hosts exactly. Add policy tests for the new pattern.
+
+Origin of TD-128 to TD-129: code review of `egress-rule-editing` (`df-web`, design file, 2026-11-20). The `TD-n (ID)` headings give the IDs used in that review.
+
+### TD-128 (S7). Scope values are built and parsed with string operations
+
+`crates/df-web/src/egress/allowlist/dialogs.rs`, `crates/df-web/src/egress/project_tab.rs`
+
+The "Applies to" value `task:<KEY>` is built with `format!` and parsed with `strip_prefix` / `trim_start_matches` in four places. The `return=project:<KEY>` value is built by hand although `Origin` owns that format.
+
+**Matters when:** another scope kind is added or a key format changes; every site must change in step.
+
+**Fix:** one small `ScopeValue` type with parse and format, used by the dialogs, `resolve_scope` and `Origin`; let `Origin` produce the `return` value for `hx-vals`. Add round-trip tests.
+
+### TD-129 (design). Project settings boards keep a white panel in the Dark theme preview
+
+PenPot file "App Design", page "Config - Projects"
+
+The panel of every project settings board (the older ones and the Egress boards of `egress-rule-editing`) has a fixed white fill instead of the surface token, so the Dark theme preview shows a white panel. The app renders correctly.
+
+**Matters when:** someone checks a dark-mode implementation against these boards.
+
+**Fix:** bind the panel fill to the surface token on the project settings boards and check them in the Dark theme.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122

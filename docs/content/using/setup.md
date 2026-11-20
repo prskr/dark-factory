@@ -40,7 +40,7 @@ empty count is left blank. On a phone the project is a card with an edit icon.
 project is edited on its **settings page** at `/projects/<key>` (its row in the list on a desktop, its
 edit icon on a phone). The page has a back link to the list, the project's key, name and forge icon, tabs and one
 **Save project** button. After a save the page stays open and says **Project saved**. The open tab
-is part of the URL (`?tab=security`, `?tab=integrations`), so a tab can be linked. After a save with an error the tab with the first error opens and the URL follows it.
+is part of the URL (`?tab=security`, `?tab=egress`, `?tab=integrations`), so a tab can be linked. After a save with an error the tab with the first error opens and the URL follows it.
 
 The **General** tab and the new-project form group the fields:
 
@@ -65,6 +65,12 @@ The **Security** tab has two groups (the second also holds the subtask merge set
 | Branches | Branch rewrites | Whether agents may rebase their task branch: *With lease (default)* or *Never*. A change applies from the next run of each task and is audited with the before and after value. See [Rebase with lease](existing-branches.md#rebase-with-lease). |
 | | Subtask merges | Who merges the pull requests of a task's subtasks into the task's branch: *Human (default)*, or *Parent agent*, which lets the agent of the parent task merge them with `merge_subtask_pr` ([Build a feature in iterations](build-a-feature.md)). Merges into the default branch always stay with humans. Changes apply to the next call and are audited with the before and after value (`subtask_merge`). |
 | | Agent branches | One glob per line (`*` stops at `/`, `**` crosses it). The existing branches an agent may start tasks on with `create_task`. Default `renovate/**` and `dependabot/**` for new projects and the migrated ones; an empty field means agents cannot use existing branches. Board members can pick any branch in the composer. The globs are checked when the task is created, so a change does not affect existing tasks. An invalid line is refused with its line number. Changes are audited. See [Agent branches](existing-branches.md#agent-branches). |
+
+The **Egress** tab lists the project's [egress rules](network-access.md#rules-of-one-project) (its own
+rules and those of its tasks), with **New egress rule**, **Add cluster service**, edit and delete, and
+below them the read-only instance rules under **Also applies (instance)**. It saves with its own
+dialogs, so **Save project** is not shown on it. Rules of the same host in several projects get the
+hint **Also allowed for project …** with **Make global**.
 
 Users with the role `admin` also see the last tab, **Integrations**, with two groups:
 

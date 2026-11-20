@@ -95,9 +95,86 @@ pub(crate) fn project_input(
     }
 }
 
-/// The projects of the end-to-end suite.
-fn projects() -> [SeedProject; 16] {
-    let project = |key, name, script| SeedProject {
+/// The projects of the suite that run a script on `factory/demo` with the default settings: key,
+/// name and script.
+const PLAIN_PROJECTS: [(&str, &str, &str); 15] = [
+    (data::PROJECT_KEY, data::PROJECT_NAME, data::DEMO_SCRIPT),
+    (
+        data::RATE_LIMIT_PROJECT_KEY,
+        data::RATE_LIMIT_PROJECT_NAME,
+        data::RATE_LIMIT_SCRIPT,
+    ),
+    (
+        data::RATE_LIMIT_SHORT_PROJECT_KEY,
+        data::RATE_LIMIT_SHORT_PROJECT_NAME,
+        data::RATE_LIMIT_SHORT_SCRIPT,
+    ),
+    (
+        data::NETWORK_PROJECT_KEY,
+        data::NETWORK_PROJECT_NAME,
+        data::NETWORK_SCRIPT,
+    ),
+    (
+        data::SECRET_PROJECT_KEY,
+        data::SECRET_PROJECT_NAME,
+        data::SECRET_SCRIPT,
+    ),
+    (
+        data::PROTECTED_PROJECT_KEY,
+        data::PROTECTED_PROJECT_NAME,
+        data::PROTECTED_SCRIPT,
+    ),
+    (
+        data::WEBHOOK_PROJECT_KEY,
+        data::WEBHOOK_PROJECT_NAME,
+        data::WEBHOOK_SCRIPT,
+    ),
+    (
+        data::LIFECYCLE_PROJECT_KEY,
+        data::LIFECYCLE_PROJECT_NAME,
+        data::DEMO_SCRIPT,
+    ),
+    (
+        data::CHAT_PROJECT_KEY,
+        data::CHAT_PROJECT_NAME,
+        data::CHAT_SCRIPT,
+    ),
+    (
+        data::DELEGATION_PROJECT_KEY,
+        data::DELEGATION_PROJECT_NAME,
+        data::DELEGATION_SCRIPT,
+    ),
+    (
+        data::RESEARCH_PROJECT_KEY,
+        data::RESEARCH_PROJECT_NAME,
+        data::RESEARCH_SCRIPT,
+    ),
+    (
+        data::INTERRUPT_PROJECT_KEY,
+        data::INTERRUPT_PROJECT_NAME,
+        data::INTERRUPT_SCRIPT,
+    ),
+    (
+        data::LANDLOCK_PROJECT_KEY,
+        data::LANDLOCK_PROJECT_NAME,
+        data::LANDLOCK_SCRIPT,
+    ),
+    (
+        data::EGRESS_PROJECT_KEY,
+        data::EGRESS_PROJECT_NAME,
+        data::DEMO_SCRIPT,
+    ),
+    (
+        data::EGRESS_OTHER_PROJECT_KEY,
+        data::EGRESS_OTHER_PROJECT_NAME,
+        data::DEMO_SCRIPT,
+    ),
+];
+
+/// The projects of the end-to-end suite: the plain ones and the three with their own settings (a
+/// hidden path, another repository, merges by the parent agent).
+fn projects() -> Vec<SeedProject> {
+    let project = |(key, name, script)| SeedProject {
         key,
         name,
         script,
@@ -105,93 +182,34 @@ fn projects() -> [SeedProject; 16] {
         hidden: &[],
         subtask_merge: df_core::SubtaskMerge::default(),
     };
-    [
-        project(data::PROJECT_KEY, data::PROJECT_NAME, data::DEMO_SCRIPT),
-        project(
-            data::RATE_LIMIT_PROJECT_KEY,
-            data::RATE_LIMIT_PROJECT_NAME,
-            data::RATE_LIMIT_SCRIPT,
-        ),
-        project(
-            data::RATE_LIMIT_SHORT_PROJECT_KEY,
-            data::RATE_LIMIT_SHORT_PROJECT_NAME,
-            data::RATE_LIMIT_SHORT_SCRIPT,
-        ),
-        project(
-            data::NETWORK_PROJECT_KEY,
-            data::NETWORK_PROJECT_NAME,
-            data::NETWORK_SCRIPT,
-        ),
-        project(
-            data::SECRET_PROJECT_KEY,
-            data::SECRET_PROJECT_NAME,
-            data::SECRET_SCRIPT,
-        ),
-        project(
-            data::PROTECTED_PROJECT_KEY,
-            data::PROTECTED_PROJECT_NAME,
-            data::PROTECTED_SCRIPT,
-        ),
+    let mut all: Vec<SeedProject> = PLAIN_PROJECTS.into_iter().map(project).collect();
+    all.extend([
         SeedProject {
             hidden: &[data::HIDDEN_GLOB],
-            ..project(
+            ..project((
                 data::HIDDEN_PROJECT_KEY,
                 data::HIDDEN_PROJECT_NAME,
                 data::HIDDEN_SCRIPT,
-            )
+            ))
         },
-        project(
-            data::WEBHOOK_PROJECT_KEY,
-            data::WEBHOOK_PROJECT_NAME,
-            data::WEBHOOK_SCRIPT,
-        ),
         SeedProject {
             repository: data::FORGE_EXISTING_BRANCH_REPO,
-            ..project(
+            ..project((
                 data::EXISTING_BRANCH_PROJECT_KEY,
                 data::EXISTING_BRANCH_PROJECT_NAME,
                 data::EXISTING_BRANCH_SCRIPT,
-            )
+            ))
         },
-        project(
-            data::LIFECYCLE_PROJECT_KEY,
-            data::LIFECYCLE_PROJECT_NAME,
-            data::DEMO_SCRIPT,
-        ),
-        project(
-            data::CHAT_PROJECT_KEY,
-            data::CHAT_PROJECT_NAME,
-            data::CHAT_SCRIPT,
-        ),
-        project(
-            data::DELEGATION_PROJECT_KEY,
-            data::DELEGATION_PROJECT_NAME,
-            data::DELEGATION_SCRIPT,
-        ),
-        project(
-            data::RESEARCH_PROJECT_KEY,
-            data::RESEARCH_PROJECT_NAME,
-            data::RESEARCH_SCRIPT,
-        ),
         SeedProject {
             subtask_merge: df_core::SubtaskMerge::ParentAgent,
-            ..project(
+            ..project((
                 data::TASK_TREE_PROJECT_KEY,
                 data::TASK_TREE_PROJECT_NAME,
                 data::TASK_TREE_SCRIPT,
-            )
+            ))
         },
-        project(
-            data::INTERRUPT_PROJECT_KEY,
-            data::INTERRUPT_PROJECT_NAME,
-            data::INTERRUPT_SCRIPT,
-        ),
-        project(
-            data::LANDLOCK_PROJECT_KEY,
-            data::LANDLOCK_PROJECT_NAME,
-            data::LANDLOCK_SCRIPT,
-        ),
-    ]
+    ]);
+    all
 }
 
 /// The forge and model credentials, the model providers and the persona `e2e`. Returns the id of

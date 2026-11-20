@@ -10,17 +10,24 @@ use df_proto::pbjson_types::Timestamp;
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 
+use df_db::EntryKind;
+
 use super::log::{Context, Filter, Viewer};
 use super::{FlowSource, LookupError, ServiceLookup};
 use crate::testkit::{TestApp, form};
 
 mod allow;
+mod cluster_highlight;
 mod deny_log;
 mod deny_rules;
+mod dialog_form;
+mod edit;
 mod flows;
+mod header;
 mod icons;
 mod log;
 mod paging;
+mod project_tab;
 mod rules;
 
 /// Replays `events` to every viewer and then stays open.
@@ -125,6 +132,50 @@ async fn add_task_host(app: &TestApp, task: uuid::Uuid, host: &str) -> df_db::En
     .unwrap();
     tx.commit().await.unwrap();
     entry
+}
+
+/// Adds the project `key` (named after its key) with its own repository.
+async fn add_project(app: &TestApp, key: &str) {
+    let (principal, roles) = crate::testkit::actor();
+    let actor = df_db::catalog::Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    df_db::catalog::save_project(
+        &app.pool,
+        actor,
+        None,
+        &df_db::catalog::ProjectInput {
+            key: key.into(),
+            name: key.into(),
+            repo_url: format!("https://git.example.org/peter/{key}.git"),
+            issue_tracker_url: None,
+            image: "img:latest".into(),
+            base_branch: "main".into(),
+            adapter_command: vec![],
+            forge_credential_id: None,
+            webhook_wake: df_core::webhooks::WebhookWake::Members,
+            branch_rewrite_policy: df_core::RewritePolicy::default(),
+            agent_branch_globs: df_core::default_agent_branch_globs(),
+            subtask_merge: df_core::SubtaskMerge::default(),
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// The id of the first rule for `host` (or the deny rule for it).
+async fn rule_id(app: &TestApp, host: &str) -> uuid::Uuid {
+    df_db::list_entries(&app.pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|entry| match &entry.kind {
+            EntryKind::HttpHost { host: h, .. } | EntryKind::HttpDeny { host: h } => h == host,
+            EntryKind::ClusterService { .. } => false,
+        })
+        .unwrap_or_else(|| panic!("no rule for {host}"))
+        .id
 }
 
 /// Adds a deny rule directly in the database.

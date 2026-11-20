@@ -29,7 +29,57 @@ the **Requests** inbox, with the host and port. Three ways to allow it:
 2. **From the traffic view**: on a blocked row or graph node choose **Allow**, then the scope.
 3. **On the Egress rules page** (**Settings → Egress rules**): **New egress rule**, host, port and scope.
 
-Any new host rule settles the pending requests it covers.
+Any new or edited host rule settles the pending requests it covers.
+
+## Edit a rule
+
+Each row of the **Egress rules** page has an edit button (pencil) next to the delete button; it
+opens the rule's dialog, **Edit egress rule** or **Edit cluster service**, filled with the stored
+values. **Save rule** changes the rule in place and keeps the search and page of the list.
+
+| Rule | You can change | Fixed |
+| --- | --- | --- |
+| Host | host, port, **Applies to** | the effect (Allow) |
+| Cluster service | namespace, Service, ports, cluster DNS, **Applies to** | the effect (Allow) |
+| Deny rule | host | the effect (Deny), every project and port |
+
+- **Applies to** moves a rule between the instance ("Every project (instance)") and a project. A
+  task rule offers its task first ("Task DF-7"), then the instance and the projects; it moves to a
+  project or the instance, never to another task.
+- **Fix a typo:** change the host. The rule keeps its place in the history: the audit entry
+  `egress_allowlist.update` (`egress_deny_rule.update` for a deny rule) holds the old and the new
+  values.
+- A rule that would equal another rule is refused in the dialog (**this entry already exists**, or **this deny rule already exists** for a deny rule). A
+  rule that another board member deleted meanwhile says **This rule no longer exists**; nothing is
+  created.
+- An edit that narrows access (instance to project, another host) has the effect of removing the
+  rule: the next policy snapshot applies, see
+  [Rule changes reach running sandboxes](../security/egress-gateway.md#rule-changes-reach-running-sandboxes).
+  An edit that allows a host settles the pending requests it now covers, and an edited deny rule
+  denies the pending requests it now matches.
+
+## Rules of one project
+
+The **Egress** tab of a project's settings page (**Settings → Projects → project → Egress**,
+`/projects/<key>?tab=egress`) lists the rules of that project and of its tasks, with the same
+columns, edit and delete buttons as the Egress rules page. **New egress rule** and **Add cluster
+service** open the dialogs with the project preselected; saving keeps you on the tab. The tab has
+no **Save project** button: every change is saved by its own dialog. A project without rules shows
+**No rules for this project yet**. On a phone the rules are cards.
+
+Below the rules, **Also applies (instance)** (collapsed, with the number of rules) lists the
+instance rules and the deny rules read-only. A row links to the rule on the Egress rules page.
+
+Two hints appear under the host of a rule:
+
+- **Also allowed for project OPS**: other projects have a rule for the same host and port.
+  **Make global** replaces all of them by one instance rule. The row asks first (**Make global?
+  The rules of DF and OPS are replaced by one instance rule; every project may then reach it.**);
+  **Cancel** changes nothing. The change is one transaction: every deleted rule and the new rule are
+  audited. Task rules do not count and stay as they are. A wildcard and an exact host are not the
+  same rule.
+- **Already allowed everywhere**: an instance rule covers the host and port. **Remove** deletes
+  the project or task rule.
 
 ## Silence a host that should never be allowed
 
@@ -57,8 +107,9 @@ What a deny rule does:
 | An allow rule for the host exists | The allow rule still wins: the deny rule only silences requests. |
 | Traffic page | Matching rows show "Deny rule" and offer no actions. Open pages pick up a new rule when the stream reconnects. |
 
-Deleting the rule makes the host raise requests again. Creating and deleting are audited as
-`egress_deny_rule.create` and `egress_deny_rule.delete`.
+Deleting the rule makes the host raise requests again. Creating, editing and deleting are audited as
+`egress_deny_rule.create`, `egress_deny_rule.update` and `egress_deny_rule.delete`. Every change
+publishes a policy update, so gateways pick it up within a second.
 
 ## Network traffic page
 

@@ -146,6 +146,10 @@ A project `http-host` rule on the Egress tab whose host and port equal a project
 - **WHEN** projects `DF` and `OPS` both have rule `registry.npmjs.org:443`
 - **THEN** the Egress tab of `DF` shows "Also allowed for project OPS" at that rule
 
+#### Scenario: Confirmation in the row
+- **WHEN** a board member activates "Make global" at rule `registry.npmjs.org:443` on the Egress tab of `DF`
+- **THEN** that row is replaced by a confirmation naming `DF` and `OPS` with the buttons "Cancel" and "Make global", and nothing changes until "Make global" is confirmed
+
 #### Scenario: Make global
 - **WHEN** a board member confirms "Make global" for `registry.npmjs.org:443` on the Egress tab of `DF`
 - **THEN** neither project has a rule for it, one instance rule `registry.npmjs.org:443` exists, audit entries record two deletions and one creation, and one `egress_policy` notification is published

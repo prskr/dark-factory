@@ -34,7 +34,7 @@ async fn the_page_shows_sidebar_back_link_header_tabs_and_save() {
             && heading.contains("data-forge=\"git\""),
         "{heading}"
     );
-    assert_eq!(tab_labels(&html), ["General", "Security"]);
+    assert_eq!(tab_labels(&html), ["General", "Security", "Egress"]);
     assert_eq!(open_tab(&html), "general");
     assert!(html.contains(">Save project</button>"), "{html}");
     // On phones no bottom bar and no create button.

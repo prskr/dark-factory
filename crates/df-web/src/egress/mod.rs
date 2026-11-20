@@ -9,10 +9,12 @@ use futures::stream::BoxStream;
 
 use crate::WebState;
 use crate::components::ProjectHosts;
+use allowlist::dialogs;
 use log::Context;
 
 mod allowlist;
 mod log;
+pub(crate) mod project_tab;
 #[cfg(test)]
 mod tests;
 
@@ -70,11 +72,20 @@ async fn context(state: &WebState) -> Context {
 pub fn routes() -> Router<WebState> {
     Router::new()
         .route("/egress/allowlist", get(allowlist::list))
-        .route("/egress/allowlist/host/new", get(allowlist::new_host))
-        .route("/egress/allowlist/host", post(allowlist::add_host))
-        .route("/egress/allowlist/service/new", get(allowlist::new_service))
-        .route("/egress/allowlist/service", post(allowlist::add_service))
-        .route("/egress/allowlist/{id}", delete(allowlist::remove))
+        .route("/egress/allowlist/host/new", get(dialogs::new_host))
+        .route("/egress/allowlist/host", post(dialogs::add_host))
+        .route("/egress/allowlist/service/new", get(dialogs::new_service))
+        .route("/egress/allowlist/service", post(dialogs::add_service))
+        .route(
+            "/egress/allowlist/make-global",
+            post(project_tab::make_global),
+        )
+        .route(
+            "/egress/allowlist/{id}",
+            delete(dialogs::remove).post(dialogs::update),
+        )
+        .route("/egress/allowlist/{id}/edit", get(dialogs::edit))
+        .route("/projects/{key}/egress", get(project_tab::region))
         .route("/egress/log", get(log::page))
         .route("/egress/log/events", get(log::events))
         .route(log::ALLOW, get(log::allow_dialog).post(log::allow))

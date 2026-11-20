@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM egress_allowlist\n         WHERE kind = 'http-host' AND host = $1 AND port = $2\n           AND project_id IS NOT NULL AND task_id IS NULL\n         ORDER BY created_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "egress_allowlist",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a58c2133e3ec4dd4da430fefda0a5890c4b34f1e98efe427cad086ed74fa3609"
+}

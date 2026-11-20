@@ -502,11 +502,13 @@ fn provider_form(
         Tab {
             id: "general",
             label: "General",
+            saves: true,
             panel: general,
         },
         Tab {
             id: MODELS_TAB,
             label: "Models",
+            saves: true,
             panel: models::panel(&values.models, errors, !create),
         },
     ];

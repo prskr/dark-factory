@@ -53,6 +53,17 @@ Rules live in PostgreSQL. A change is pushed through the control plane to every 
 the run. Removing a host closes the run's open tunnels to it. The per-run NetworkPolicies are
 re-rendered when rules or the referenced Services change, and manual edits to them are overwritten.
 
+Editing a rule changes it in place (the Egress rules page, or the **Egress** tab of a project, see
+[Projects](../using/setup.md#projects) in the setup guide) and
+counts as one change: it writes an audit entry with the old and the new values
+(`egress_allowlist.update` for allow rules and cluster services, `egress_deny_rule.update` for
+deny rules) and publishes one policy update. An edit that narrows what a run may reach, such as moving
+a rule from the instance to one project or changing its host, acts like removing the old rule
+(above). **Make global** on a project's
+Egress tab replaces the project rules for one host and port by one instance rule in one
+transaction, so gateways see one update. How to edit rules and what the tab shows:
+[Network access](../using/network-access.md#edit-a-rule).
+
 ## Live traffic
 
 Each gateway pod keeps the latest connection events in memory (nothing is persisted per event). The

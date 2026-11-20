@@ -802,6 +802,31 @@ pub fn button(page: &Page, name: &str) -> Locator {
     )
 }
 
+/// The button inside `scope` with the accessible name `name` (exactly).
+pub fn button_in(scope: &Locator, name: &str) -> Locator {
+    scope.get_by_role(
+        AriaRole::Button,
+        Some(GetByRoleOptions::default().name(name).exact(true)),
+    )
+}
+
+/// Fails when `page` scrolls sideways: the document is wider than the viewport. `when` names the
+/// situation in the failure message (`at 390 px`).
+pub async fn assert_no_sideways_scroll(page: &Page, when: &str) -> Result<()> {
+    let overflows = within_for(
+        UI_TIMEOUT,
+        "read the page scroll width",
+        page.evaluate_value(
+            "document.documentElement.scrollWidth > document.documentElement.clientWidth",
+        ),
+    )
+    .await?;
+    if overflows != "false" {
+        return Err(anyhow!("the page scrolls sideways {when}"));
+    }
+    Ok(())
+}
+
 /// Cancels the task open on `page`: Status menu, "Cancel task…", then the confirmation.
 async fn cancel_task_on(page: &Page) -> Result<()> {
     // CSS: the accessible name of the status menu button is the current status, which varies.

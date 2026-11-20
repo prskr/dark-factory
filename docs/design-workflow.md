@@ -122,7 +122,7 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 - After *Create rule* the traffic page shows the "Rule created" toast only; rows keep their verdict (no "Rule added" state): a row is an event that already happened.
 - Approval cards show the summary line and the scope picker only for a registered approval type. `serve` registers none yet, so approvals render with the reason, the comment field and the buttons only.
 - Tool rows show title, kind and status. The values on the right of the board's tool rows (duration "0.1s", `+1 −1` of an edit, "2 failed · 18s") are not built; the transcript carries no timings or diff statistics per tool call.
-- The tab "Context" (board "Projects · settings page, context") is not built (`iter3-project-context`); the page has three tabs (General, Security, Integrations).
+- The tab "Context" (board "Projects · settings page, context") is not built (`iter3-project-context`); the page has four tabs (General, Security, Egress, Integrations).
 - The key panel of the "Lifecycle events" group uses the white panel surface with a border; the boards fill it grey. The primary button of the subscription editor is the accent button of the form footer; the boards draw it dark.
 - After a rejected subscription (422) submitted with Enter, the focused URL input keeps its previous value, not the submitted one. This is the htmx morph behavior of every form of the dialog (the project form behaves the same); the submit button keeps the value.
 - The task counts of the project list stay underlined accent links in mono; the board "Settings · projects, two-line rows (1350)" draws them as plain numbers in status tones (`ui-settings-list-rows`).
@@ -148,6 +148,11 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Network / Egress rules · new rule, deny | `/egress/allowlist` | "New egress rule" clicked, Deny selected | 1440 |
 | Network / Egress rules · search and pages | `/egress/allowlist?page=2` | manual seed (not built): 33 rules, the last of them deny rule `*.datadoghq.com` | 1440 |
 | Network / Egress rules · search results | `/egress/allowlist?q=github` | as Egress rules · search and pages | 1440 |
+| Network / Egress rules · edit rule | `/egress/allowlist` | as Egress rules · table with task entries; edit button of `registry.npmjs.org` (Project DF) clicked | 1440 |
+| Network / Egress rules · edit rule, task | `/egress/allowlist` | as above; edit button of task rule `pypi.org` (DF-7) clicked, "Applies to" opened | 1440 |
+| Network / Egress rules · edit deny rule | `/egress/allowlist` | deny rule `*.datadoghq.co`; its edit button clicked | 1440 |
+| Network / Egress rules · edit cluster service | `/egress/allowlist` | project cluster service `nativelink/scheduler` (port 8980) of `DF`; its edit button clicked | 1440 |
+| Network / Egress rules · edit rule, already exists | `/egress/allowlist` | instance rule `github.com:443` and project rule `github.com:443` of `DF`; the project rule edited to "Every project (instance)" and saved | 1440 |
 | Network - Graph / Network · deny rule and deny always | `/egress/log` | `--demo-flows` and deny rule `*.datadoghq.com`; a denied event of a matching host | 1440 |
 | Tasks / Desktop · light | `/tasks/<id>` | fixture task DF-12 (not built) | 1440 |
 | Tasks - Status / Desktop · in review | `/tasks/<id>` | manual seed (not built): task `in_review`, Status menu open | 1440 |
@@ -206,6 +211,11 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Config - Projects / Projects · settings page, integrations, unrestricted URLs | `/projects/<key>?tab=integrations` | control plane started with `--unrestricted-project-subscriptions` (`dev-tools` build) | 1440 |
 | Config - Projects / Phone · project settings page, general | `/projects/<key>` | as Projects · settings page, general | 390 |
 | Config - Projects / Phone · project settings page, integrations | `/projects/<key>?tab=integrations` | as Projects · settings page, integrations | 390 |
+| Config - Projects / Projects · settings page, egress | `/projects/<key>?tab=egress` | manual seed (not built): `DF` rules `*.crates.io`, `registry.npmjs.org`, `github.com`, task rule `pypi.org` (DF-7); `OPS` rule `registry.npmjs.org`; instance rules `api.anthropic.com`, `github.com`, deny rule `*.datadoghq.com` | 1440 |
+| Config - Projects / Projects · settings page, egress, instance rules open | `/projects/<key>?tab=egress` | as above; "Also applies (instance)" expanded | 1440 |
+| Config - Projects / Projects · settings page, egress, empty | `/projects/<key>?tab=egress` | project without own rules; instance rules as above | 1440 |
+| Config - Projects / Projects · settings page, egress, make global | `/projects/<key>?tab=egress` | as Projects · settings page, egress; "Make global" of `registry.npmjs.org` clicked | 1440 |
+| Config - Projects / Phone · project settings page, egress | `/projects/<key>?tab=egress` | as Projects · settings page, egress | 390 |
 | Config - Projects / Phone · projects | `/projects` | projects (not built) | 390 |
 | Flows (filter, new task) / Desktop · task list sort | `/tasks` | fixture tasks (not built); pointer on the sort button (tooltip) | 1440 |
 | Flows (filter, new task) / Desktop · task list sort open | `/tasks` | as above; sort button clicked | 1440 |

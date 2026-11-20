@@ -743,7 +743,7 @@ async fn notifications_before_marker(
 }
 
 #[tokio::test]
-async fn deny_rules_are_audited_with_the_actor_and_not_published_to_the_gateways() {
+async fn deny_rules_are_audited_with_the_actor_and_published_to_the_gateways() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
     let notifier = crate::notify::Notifier::start(&pool).await.unwrap();
     let mut notifications = notifier.subscribe();
@@ -779,7 +779,7 @@ async fn deny_rules_are_audited_with_the_actor_and_not_published_to_the_gateways
     }
     let published = notifications_before_marker(&pool, &mut notifications).await;
     assert!(
-        !published.contains(&Notification::EgressPolicy),
+        published.contains(&Notification::EgressPolicy),
         "{published:?}"
     );
     // Deleted rules raise requests again.
@@ -815,6 +815,143 @@ async fn a_denial_handled_while_a_deny_rule_is_created_leaves_no_pending_request
     rule.commit().await.unwrap();
 
     assert_eq!(denial.await.unwrap().unwrap(), DenialOutcome::DenyRule);
+    assert!(pending_for(&pool, &df7).await.is_empty());
+}
+
+async fn edit(pool: &PgPool, id: Uuid, scope: HostScope, kind: &EntryKind) {
+    let (principal, roles) = (human(), roles());
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    crate::egress::update_entry(pool, actor, id, scope, kind)
+        .await
+        .unwrap();
+}
+
+fn host_kind(host: &str) -> EntryKind {
+    EntryKind::HttpHost {
+        host: host.into(),
+        port: 443,
+    }
+}
+
+#[tokio::test]
+async fn fixing_a_typo_in_a_project_entry_approves_the_pending_request_it_now_covers() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df = project(&pool, "DF").await;
+    let df7 = task(&pool, df).await;
+    let asked = request(&pool, &df7, json!({ "host": "pypi.org" })).await;
+    add_host_entry(&pool, HostScope::Project(df.as_uuid()), "pypi.orgg", 443).await;
+    let typo = crate::egress::list_entries(&pool).await.unwrap().remove(0);
+    assert_eq!(reload(&pool, &asked).await.state, RequestState::Pending);
+
+    edit(
+        &pool,
+        typo.id,
+        HostScope::Project(df.as_uuid()),
+        &host_kind("pypi.org"),
+    )
+    .await;
+
+    let decided = reload(&pool, &asked).await;
+    assert_eq!(decided.state, RequestState::Approved);
+    assert_eq!(decided.scope(), Some(Scope::Project));
+    assert_eq!(decided_messages(&pool, df7.id).await, 1);
+}
+
+#[tokio::test]
+async fn widening_a_project_entry_to_instance_scope_approves_requests_of_other_projects() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df = project(&pool, "DF").await;
+    let ops3 = task(&pool, project(&pool, "OPS").await).await;
+    let asked = request(&pool, &ops3, json!({ "host": "github.com" })).await;
+    add_host_entry(&pool, HostScope::Project(df.as_uuid()), "github.com", 443).await;
+    let entry = crate::egress::list_entries(&pool).await.unwrap().remove(0);
+    assert_eq!(reload(&pool, &asked).await.state, RequestState::Pending);
+
+    edit(
+        &pool,
+        entry.id,
+        HostScope::Instance,
+        &host_kind("github.com"),
+    )
+    .await;
+
+    let decided = reload(&pool, &asked).await;
+    assert_eq!(decided.state, RequestState::Approved);
+    assert_eq!(decided.scope(), Some(Scope::Instance));
+}
+
+#[tokio::test]
+async fn editing_a_deny_rule_denies_the_pending_requests_it_now_matches() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df7 = task(&pool, project(&pool, "DF").await).await;
+    let asked = request(&pool, &df7, json!({ "host": DATADOG })).await;
+    add_deny_rule(&pool, "*.datadoghq.co").await;
+    assert_eq!(reload(&pool, &asked).await.state, RequestState::Pending);
+    let rule = crate::egress::list_entries(&pool).await.unwrap().remove(0);
+
+    edit(
+        &pool,
+        rule.id,
+        HostScope::Instance,
+        &EntryKind::HttpDeny {
+            host: "*.datadoghq.com".into(),
+        },
+    )
+    .await;
+
+    let denied = reload(&pool, &asked).await;
+    assert_eq!(denied.state, RequestState::Denied);
+    assert_eq!(
+        denied.comment(),
+        Some("Denied by deny rule *.datadoghq.com")
+    );
+}
+
+#[tokio::test]
+async fn a_denial_handled_while_an_entry_is_edited_leaves_no_pending_request() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let df = project(&pool, "DF").await;
+    let df7 = task(&pool, df).await;
+    let run_id = run(&pool, &df7, "running").await;
+    add_host_entry(&pool, HostScope::Project(df.as_uuid()), "pypi.orgg", 443).await;
+    let typo = crate::egress::list_entries(&pool).await.unwrap().remove(0);
+
+    // Whichever of the two takes the allowlist lock first, the request ends up settled.
+    let editing = tokio::spawn({
+        let pool = pool.clone();
+        let (principal, roles) = (human(), roles());
+        async move {
+            let actor = Actor {
+                principal: &principal,
+                roles: &roles,
+            };
+            crate::egress::update_entry(
+                &pool,
+                actor,
+                typo.id,
+                HostScope::Project(df.as_uuid()),
+                &host_kind("pypi.org"),
+            )
+            .await
+        }
+    });
+    let denial = tokio::spawn({
+        let pool = pool.clone();
+        async move { raise_from_denial(&pool, run_id, "pypi.org", 443).await }
+    });
+    editing.await.unwrap().unwrap();
+    let outcome = denial.await.unwrap().unwrap();
+
+    assert!(
+        matches!(
+            outcome,
+            DenialOutcome::Raised(Raised::AlreadyGranted | Raised::Request { .. })
+        ),
+        "{outcome:?}"
+    );
     assert!(pending_for(&pool, &df7).await.is_empty());
 }
 

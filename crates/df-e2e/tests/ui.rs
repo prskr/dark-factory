@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use df_e2e::browser::{Session, button};
+use df_e2e::browser::{Session, assert_no_sideways_scroll, button};
 use df_e2e::fixture::{self, World};
 use df_e2e::wait::{RUN_TIMEOUT, eventually};
 use df_e2e::{E2eEnv, data};
@@ -169,16 +169,7 @@ async fn assert_project_table_fits(session: &Session, row: &str) -> Result<()> {
         )
         .await?;
     assert_eq!(overflows, "false", "the project table scrolls sideways");
-    let page_overflows = session
-        .page
-        .evaluate_value(
-            "document.documentElement.scrollWidth > document.documentElement.clientWidth",
-        )
-        .await?;
-    assert_eq!(
-        page_overflows, "false",
-        "the page scrolls sideways at 1350 px"
-    );
+    assert_no_sideways_scroll(&session.page, "at 1350 px").await?;
     let all_done_inside = session
         .page
         .evaluate_value(
@@ -900,14 +891,7 @@ async fn phone_sort_menu_body(world: Arc<World>) -> Result<()> {
         .to_be_visible()
         .await
         .context("the newer task is listed before the older one")?;
-    let overflows = session
-        .page
-        .evaluate_value(
-            "document.documentElement.scrollWidth > document.documentElement.clientWidth",
-        )
-        .await?;
-    assert_eq!(overflows, "false", "the page scrolls sideways at 390 px");
-    Ok(())
+    assert_no_sideways_scroll(&session.page, "at 390 px").await
 }
 
 /// egress-log: pause and resume, the divider (keyboard, reset, drag, remembered width) and the

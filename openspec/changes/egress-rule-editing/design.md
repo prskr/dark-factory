@@ -61,12 +61,14 @@ Dialogs carry a hidden field `return`: `allowlist` (with the current `q` and `pa
 
 ### D5 — Project tab from the full list
 
-The tab calls `list_entries` and filters in Rust. `EntryRecord` gets `task_project_key: Option<String>` (one more `LEFT JOIN projects` in the existing queries, regenerated `.sqlx/`), so a task rule can be assigned to its project without a task-key convention. Own rules: `project_key == key || task_project_key == key`. Instance section: rules with neither key. Hints are computed from the same list:
+The tab calls `list_entries` and filters in Rust. `EntryRecord` gets `task_project_key: Option<String>` (one more `LEFT JOIN projects` in the existing queries, regenerated `.sqlx/`), so a task rule can be assigned to its project without a task-key convention, and `task_id: Option<Uuid>`, so the edit handler can resolve the rule's own task. Both are left out of the audit details (`#[serde(skip)]`). The dialogs load one rule with `get_entry`. Own rules: `project_key == key || task_project_key == key`. Instance section: rules with neither key. Hints are computed from the same list:
 
 - "Also allowed for project …": other `http-host` rules with the same host and port, `project_key` set and different, `task_key` unset;
 - "Already allowed everywhere": an `http-host` instance rule with the same host and port; it takes precedence, so "Make global" is not shown together with it.
 
-The tab content is rendered outside the project `<form>` (like the subscription editor), so its dialogs and buttons post on their own and "Save project" is hidden while the Egress tab is open.
+The tab is a lazy panel inside the project `<form>`, like the lifecycle group of the Integrations tab: a placeholder loads `GET /projects/{key}/egress` (`#project-egress`) when the tab is first shown. Its dialogs mount in `#composer-slot` outside the form and its buttons are `type="button"` htmx requests. "Save project" is hidden while the Egress tab is open by CSS: the tab button carries `data-nosave` and both save buttons carry `group-has-[[data-nosave][aria-selected=true]]/page:hidden` (the page root is the group `page`; Alpine keeps `aria-selected` current).
+
+htmx 4 sends the enclosing form of every request that has a body (`POST`, `PUT`, `PATCH`) and none for `GET` and `DELETE`. The project's fields would therefore ride along with "Make global". Its button belongs to an empty `<form id="egress-actions">` outside the project form (`form` attribute, as the subscription editor does), so it sends only `host`, `port` and `return`. Deletes and "Remove" are `DELETE` requests and send their own query only.
 
 ### D6 — "Make global"
 
@@ -76,7 +78,7 @@ The tab content is rendered outside the project `<form>` (like the subscription 
 
 PostgreSQL delivers identical `NOTIFY` payloads of one transaction once, so the several `egress_policy` publications collapse into one notification without extra code.
 
-Route: `POST /egress/allowlist/make-global` with `host`, `port`, `return`. The confirmation names the affected project keys (`hx-confirm`, unless the PenPot board defines a dialog).
+Route: `POST /egress/allowlist/make-global` with `host`, `port`, `return`. The confirmation is inline in the row (or card) and names the affected project keys, as the PenPot board defines it; it is not `hx-confirm`.
 
 ### D7 — Permissions
 
@@ -85,7 +87,7 @@ Editing, "Remove" and "Make global" need the same role as adding rules today (`b
 ## Risks / Trade-offs
 
 - [Two board members edit the same rule] → last save wins; both edits are audited with before and after.
-- [An edit narrows a rule (instance → project) while runs use it] → same as a delete today: the next policy snapshot applies, open connections are not cut. Documented in the egress docs.
+- [An edit narrows a rule (instance → project) while runs use it] → same as a delete today: the next policy snapshot applies and the gateway closes the open tunnels that the new snapshot no longer allows (`Tunnels::close_disallowed` in `df-gateway`). Documented in the egress docs.
 - [`list_entries` loads all rules for each project tab render] → fine for the expected few hundred rules; backlog row "SQL paging of the egress rules" covers growth.
 - [The project tab shows rules but the egress pages are desktop-only in navigation] → the tab exists at all widths; the PenPot board defines the phone layout (rows stacked, no horizontal page scroll).
 

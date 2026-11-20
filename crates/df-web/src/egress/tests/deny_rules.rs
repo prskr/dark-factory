@@ -84,10 +84,10 @@ async fn saving_deny_creates_an_instance_wide_rule_ignoring_project_and_port() {
             host: "*.datadoghq.com".into()
         }
     );
-    // A deny rule is not published: the gateway does not know it.
+    // A deny rule is published, so gateways end held connections within a second.
     let published = notifications_before_marker(&app, &mut notifications).await;
     assert!(
-        !published.contains(&Notification::EgressPolicy),
+        published.contains(&Notification::EgressPolicy),
         "{published:?}"
     );
     let duplicate = add_deny(&app, &cookie, "*.datadoghq.com").await;
@@ -135,7 +135,7 @@ async fn deny_rules_are_listed_with_effect_any_port_everywhere_and_a_delete_butt
 }
 
 #[tokio::test]
-async fn deleting_a_deny_rule_is_audited_without_a_policy_notification() {
+async fn deleting_a_deny_rule_is_audited_and_published() {
     let app = app_with_egress(vec![]).await;
     let cookie = app.login().await;
     add_deny(&app, &cookie, "*.datadoghq.com").await;
@@ -161,7 +161,7 @@ async fn deleting_a_deny_rule_is_audited_without_a_policy_notification() {
     );
     let published = notifications_before_marker(&app, &mut notifications).await;
     assert!(
-        !published.contains(&Notification::EgressPolicy),
+        published.contains(&Notification::EgressPolicy),
         "{published:?}"
     );
 }
