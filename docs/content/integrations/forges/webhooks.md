@@ -24,6 +24,18 @@ it is. Tasks in `completed`, `cancelled` or `failed` are not woken. The message 
 mention also tells the agent to pass the `next_since` of its last read as `since`, so it reads only
 what is new ([Review feedback](_index.md#review-feedback)).
 
+The text of that message is a hidden block: the agent receives it, the transcript does not show it
+as a message bubble (unless `web.showHiddenBlocks` is set, which shows the delivered message with its
+hidden text as a bubble next to the row). Together with the message the control plane stores the event's display
+fields (kind, login, number, verdict or check name, and the link: the task's pull request, or the
+CI run). When the message is delivered to the agent, the transcript gets one row for it, with the
+webhook icon and a link to the pull request or check ("alice requested changes on PR #41"), once
+per message even if the runtime reports the delivery twice. A message that has not been delivered
+yet shows the same sentence in the stack of queued messages under the prefix **Forge events**. The
+row never carries review, comment or CI log text, and only the control plane writes it. Messages
+stored before this change keep their bubble. A comment on an issue (not a pull request) has no
+link. See [Reading the transcript](../../using/tasks.md#reading-the-transcript).
+
 ```mermaid
 sequenceDiagram
     participant F as Forge

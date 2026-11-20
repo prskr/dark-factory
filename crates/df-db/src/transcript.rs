@@ -7,14 +7,14 @@
 
 use chrono::{DateTime, Utc};
 use df_core::{RunId, TaskId};
-use df_proto::transcript::v1::{Event, FactoryActivity, ForgeActivity, event};
+use df_proto::transcript::v1::{Event, FactoryActivity, ForgeActivity, event, forge_activity};
 use serde_json::Value;
 use sqlx::{PgExecutor, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::notify::{Notification, publish};
 use crate::pool::DbError;
-use crate::tasks::mark_prompt_delivered;
+use crate::tasks::{mark_prompt_delivered, message_forge_event};
 
 mod runtime;
 
@@ -147,6 +147,18 @@ impl<'l> TranscriptWriter<'l> {
         if let (Some(_), Some(prompt_id)) = (id, event.prompt_id) {
             mark_prompt_delivered(&mut **tx, self.lock.task_id, prompt_id, self.lock.run_id)
                 .await?;
+            // The event comes from the stored message, never from the runtime's event.
+            // Only the run that delivered the prompt first writes the row.
+            if let Some(received) =
+                message_forge_event(&mut **tx, self.lock.task_id, prompt_id, self.lock.run_id)
+                    .await?
+            {
+                let activity = ForgeActivity {
+                    kind: Some(forge_activity::Kind::WebhookReceived(received)),
+                };
+                self.append_control(tx, &format!("webhook:{prompt_id}"), &forge_event(activity))
+                    .await?;
+            }
         }
         self.newest = self.newest.max(id);
         Ok(id)

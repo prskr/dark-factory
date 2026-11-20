@@ -1,10 +1,15 @@
 //! Applying forge webhook events to tasks (`iter3-webhooks` design D3, D4, D8): a message per
 //! event, or the completion of the task of a merged pull request.
 
+use df_core::seams::ReviewVerdict;
 use df_core::system_reason::WEBHOOK;
 use df_core::task_transition::{DoneBy, TaskEvent};
 use df_core::webhooks::{Target, WebhookEvent, WebhookWake, render_message};
 use df_core::{Principal, ProjectId, StatusGroup, StatusSet, TaskId, TaskStatus};
+use df_proto::transcript::v1::{
+    WebhookCiFailed, WebhookCommentCreated, WebhookPullRequestClosed, WebhookReceived,
+    WebhookReviewSubmitted, WebhookReviewVerdict, webhook_received,
+};
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::pool::DbError;
@@ -140,23 +145,94 @@ pub async fn queue_event_tx(
     task_id: TaskId,
     event: &WebhookEvent,
 ) -> Result<bool, DbError> {
-    let status = sqlx::query_scalar!(
-        "SELECT status FROM tasks WHERE id = $1 FOR UPDATE",
+    let task = sqlx::query!(
+        "SELECT status, pr_number, pr_url FROM tasks WHERE id = $1 FOR UPDATE",
         task_id.as_uuid()
     )
     .fetch_optional(&mut **tx)
     .await?;
-    let Some(status) = status else {
+    let Some(task) = task else {
         return Ok(false);
     };
-    let status: TaskStatus = status.parse()?;
+    let status: TaskStatus = task.status.parse()?;
     if status.group() == StatusGroup::Done {
         tracing::debug!(task_id = %task_id, %status, "webhook event of a finished task dropped");
         return Ok(false);
     }
-    let content = vec![text_block(render_message(event), false)];
-    queue_message_tx(tx, task_id, Principal::system(WEBHOOK), content).await?;
+    // Hidden: the agent gets the text, the transcript shows the stored event once it is delivered.
+    let content = vec![text_block(render_message(event), true)];
+    let task_pr = task
+        .pr_number
+        .and_then(|number| u64::try_from(number).ok())
+        .zip(task.pr_url.as_deref());
+    let received = webhook_received(event, task_pr);
+    queue_message_tx(tx, task_id, Principal::system(WEBHOOK), content, received).await?;
     Ok(true)
+}
+
+/// The display fields of `event` for the transcript row. The forge events carry no URL of their
+/// own except a CI run's, so the URL of `task_pr`, the task's pull request as `(number, url)`, is
+/// the link of reviews, pull request comments and closes, but only for an event about that same
+/// number: an event routed by branch can name an older pull request of the task. `None` for a
+/// merge, which completes the task and queues nothing.
+pub fn webhook_received(
+    event: &WebhookEvent,
+    task_pr: Option<(u64, &str)>,
+) -> Option<WebhookReceived> {
+    let pr_link = |number: u64| {
+        task_pr
+            .filter(|(task_number, _)| *task_number == number)
+            .map_or_else(String::new, |(_, url)| url.to_owned())
+    };
+    let kind = match event {
+        WebhookEvent::ReviewSubmitted {
+            number,
+            actor,
+            verdict,
+            ..
+        } => webhook_received::Kind::ReviewSubmitted(WebhookReviewSubmitted {
+            number: *number,
+            actor: actor.clone(),
+            verdict: match verdict {
+                ReviewVerdict::Approved => WebhookReviewVerdict::Approved,
+                ReviewVerdict::ChangesRequested => WebhookReviewVerdict::ChangesRequested,
+                ReviewVerdict::Commented => WebhookReviewVerdict::Commented,
+            }
+            .into(),
+            url: pr_link(*number),
+        }),
+        WebhookEvent::CommentCreated {
+            number,
+            is_pull_request,
+            actor,
+            ..
+        } => webhook_received::Kind::CommentCreated(WebhookCommentCreated {
+            number: *number,
+            is_pull_request: *is_pull_request,
+            actor: actor.clone(),
+            url: if *is_pull_request {
+                pr_link(*number)
+            } else {
+                String::new()
+            },
+        }),
+        WebhookEvent::PullRequestClosed { merged: true, .. } => return None,
+        WebhookEvent::PullRequestClosed { number, actor, .. } => {
+            webhook_received::Kind::PullRequestClosed(WebhookPullRequestClosed {
+                number: *number,
+                actor: actor.clone(),
+                url: pr_link(*number),
+            })
+        }
+        WebhookEvent::CiFailed { head, check, url } => {
+            webhook_received::Kind::CiFailed(WebhookCiFailed {
+                head: head.clone(),
+                check: check.clone(),
+                url: url.clone(),
+            })
+        }
+    };
+    Some(WebhookReceived { kind: Some(kind) })
 }
 
 #[cfg(test)]

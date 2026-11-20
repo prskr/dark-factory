@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO task_messages (id, task_id, author, content)\n        VALUES ($1, $2, $3, $4)\n        RETURNING id, task_id, queued_at, delivered_run_id, delivered_at\n        ",
+  "query": "SELECT id, task_id, author, content, queued_at, delivered_run_id,\n                              delivered_at, forwarded_at, forge_event\n                       FROM task_messages WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,28 @@
       },
       {
         "ordinal": 2,
+        "name": "author",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "author"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "queued_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -37,7 +59,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 5,
         "name": "delivered_run_id",
         "type_info": "Uuid",
         "origin": {
@@ -48,7 +70,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 6,
         "name": "delivered_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -57,23 +79,46 @@
             "name": "delivered_at"
           }
         }
+      },
+      {
+        "ordinal": 7,
+        "name": "forwarded_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "forwarded_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "forge_event",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "forge_event"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Jsonb",
-        "Jsonb"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      false,
+      false,
+      true,
+      true,
       true,
       true
     ]
   },
-  "hash": "67151789caa7ad6d049a62566cb730006b222f3263ea1894d471284be890ae0d"
+  "hash": "3e27dac72fe6997e37646a4d28e79ef8cceca2155ad2491bf2964f6d05d049d5"
 }

@@ -15,7 +15,7 @@ use playwright_rs::protocol::{
 use playwright_rs::{Playwright, expect, expect_page};
 
 use crate::env::E2eEnv;
-use crate::wait::UI_TIMEOUT;
+use crate::wait::{UI_TIMEOUT, eventually};
 
 /// How long taking the screenshot of a failed test may take.
 const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(60);
@@ -711,6 +711,45 @@ impl Session {
             .inner_text()
             .await
             .with_context(|| format!("text of {selector}"))
+    }
+
+    /// Asserts that the open task's transcript ends at its last item: the page does not scroll,
+    /// the transcript is scrolled to its end, the last item (a request card, for example) is fully
+    /// in view and nothing blank follows it. Retries for `UI_TIMEOUT`, because the view settles
+    /// after the stream's first update and after fonts load.
+    pub async fn expect_transcript_ends_at_last_item(&self) -> Result<()> {
+        let script = r"(() => {
+            const page = document.scrollingElement;
+            const scroll = document.querySelector('#transcript-scroll');
+            const last = document.querySelector('#transcript').lastElementChild;
+            if (!scroll || !last) return 'no transcript';
+            const box = last.getBoundingClientRect();
+            const view = scroll.getBoundingClientRect();
+            const padding = parseFloat(getComputedStyle(scroll).paddingBottom);
+            const blank = view.bottom - padding - box.bottom;
+            if (page.scrollHeight > page.clientHeight || page.scrollTop !== 0) return 'the page scrolls: ' + page.scrollTop + ' of ' + (page.scrollHeight - page.clientHeight);
+            if (box.top < view.top || box.bottom > view.bottom) return 'the last item is not in view: ' + box.top + '..' + box.bottom + ' in ' + view.top + '..' + view.bottom;
+            if (Math.abs(blank) > 2) return 'blank space of ' + blank + 'px follows the last item';
+            return 'ok';
+        })()";
+        eventually(
+            "the transcript ends at its last item",
+            UI_TIMEOUT,
+            || async {
+                let answer = within_for(
+                    UI_TIMEOUT,
+                    "measure the transcript",
+                    self.page.evaluate_value(script),
+                )
+                .await?;
+                let answer = answer.trim_matches('"');
+                if answer == "ok" {
+                    return Ok(Some(()));
+                }
+                anyhow::bail!("{answer}")
+            },
+        )
+        .await
     }
 
     /// Waits until the open task shows `text` (a transcript line, a status).

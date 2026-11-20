@@ -24,7 +24,7 @@ use crate::run_events::{RunEnv, apply_run_event};
 use crate::runs::active_run_of_task;
 use crate::tasks::{
     MARK_DRAFT_KIND, MarkDraftJob, PR_SYNC_KIND, PrSyncJob, clock_under_task_lock,
-    lock_runs_then_task, request_stop_tx,
+    lock_runs_then_task, queue_message_tx, request_stop_tx,
 };
 
 /// Work that an effect leaves for another task, applied after the current task's writes.
@@ -192,14 +192,9 @@ pub(crate) async fn execute_effects(
             Effect::SetArchived(by) => set_archived(tx, task_id, by.as_ref()).await?,
             Effect::QueueMessage { author, text } => {
                 let content = vec![crate::tasks::text_block(text.clone(), false)];
+                let author = author.clone();
                 // The message arm sets the status: async recursion needs the box.
-                Box::pin(crate::tasks::queue_message_tx(
-                    tx,
-                    task_id,
-                    author.clone(),
-                    content,
-                ))
-                .await?;
+                Box::pin(queue_message_tx(tx, task_id, author, content, None)).await?;
             }
         }
     }

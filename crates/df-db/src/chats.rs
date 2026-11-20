@@ -106,7 +106,7 @@ async fn insert_first_message(
     text: String,
 ) -> Result<TaskMessageRow, DbError> {
     let content = vec![text_block(text, false), text_block(ask_for_title(), true)];
-    insert_message(tx, chat.id, author.clone(), content).await
+    insert_message(tx, chat.id, author.clone(), content, None).await
 }
 
 /// A board member archives a chat: the chat keeps its status and records when and by whom. A

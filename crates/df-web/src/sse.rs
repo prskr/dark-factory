@@ -34,7 +34,7 @@ use crate::task_pages::{
     head_region, interruptible, load_detail, pending_region, runs_region, subtasks_panel,
     task_rows,
 };
-use crate::transcript::{Change, Folder, ItemKind, card_goes_before, render_item};
+use crate::transcript::{Change, Folder, ItemKind, render_group, render_group_head, render_item};
 
 /// Chunks of one message that arrive within this window are sent as one update.
 const COALESCE: Duration = Duration::from_millis(150);
@@ -146,18 +146,7 @@ impl DetailStream {
                 .await?;
         let full = i64::try_from(rows.len()).is_ok_and(|n| n >= BATCH);
         let (touched, streamed) = self.fold(&rows);
-        let mut partials = Vec::new();
-        for change in &touched {
-            let Some(item) = self.folder.items().get(change.index) else {
-                continue;
-            };
-            let rendered = render_item(item);
-            partials.push(if change.added {
-                partial("#transcript", "beforeend", &rendered)
-            } else {
-                partial(&format!("#{}", item.dom_id), "outerMorph", &rendered)
-            });
-        }
+        let mut partials = self.transcript_partials(&touched);
         if self.check_regions {
             self.check_regions = false;
             partials.extend(self.changed_regions().await?);
@@ -182,6 +171,47 @@ impl DetailStream {
             event = event.id(self.cursor.to_string());
         }
         Ok(Some(event))
+    }
+
+    /// The partials for the touched items (design D3). An item outside a tool call group is
+    /// appended to the transcript or morphed. The first call of a streak appends the whole group.
+    /// A later call goes `beforeend` into the items of its group and a changed member is morphed,
+    /// and the head of every touched group is replaced once. The wrapper of a group is never
+    /// morphed, so its open state survives.
+    fn transcript_partials(&self, touched: &[Change]) -> Vec<Markup> {
+        let items = self.folder.items();
+        let mut partials = Vec::new();
+        let mut created: Vec<&str> = Vec::new();
+        let mut dirty: Vec<(&str, usize)> = Vec::new();
+        for change in touched {
+            let Some(item) = items.get(change.index) else {
+                continue;
+            };
+            let Some(group) = item.group.as_deref() else {
+                partials.push(item_partial(item, change.added, "#transcript"));
+                continue;
+            };
+            if created.contains(&group) {
+                continue;
+            }
+            let members = self.folder.group_members(change.index);
+            if change.added && members.first().is_some_and(|m| m.dom_id == item.dom_id) {
+                created.push(group);
+                partials.push(partial("#transcript", "beforeend", &render_group(members)));
+                continue;
+            }
+            partials.push(item_partial(item, change.added, &format!("#{group}-items")));
+            if !dirty.iter().any(|(g, _)| *g == group) {
+                dirty.push((group, change.index));
+            }
+        }
+        for (group, index) in dirty {
+            if !created.contains(&group) {
+                let head = render_group_head(self.folder.group_members(index));
+                partials.push(partial(&format!("#{group}-head"), "outerMorph", &head));
+            }
+        }
+        partials
     }
 
     /// Folds `rows`; returns the changes to send (deduplicated) and whether agent text streamed.
@@ -317,7 +347,8 @@ impl DetailStream {
 
     /// The request cards that changed. The first send of a card by this connection removes the
     /// card (the page may show it already) and inserts it by time, as `render_transcript` does:
-    /// before the first item it goes before ([`card_goes_before`]), else at the end. That is idempotent, so a reconnect
+    /// before the first item it goes before (`Folder::card_anchor`; after the group for a card
+    /// inside a tool call group), else at the end. That is idempotent, so a reconnect
     /// or a card the page raced with cannot duplicate or misplace it. It runs once the fold has
     /// caught up with the transcript (events up to `start` are folded silently), so every
     /// neighbour is known. Later changes morph the card in place.
@@ -339,19 +370,10 @@ impl DetailStream {
                 Some(_) => changed.push(partial(&target, "outerMorph", &markup)),
                 None => {
                     changed.push(partial(&target, "delete", &Markup::default()));
-                    changed.push(
-                        match self
-                            .folder
-                            .items()
-                            .iter()
-                            .find(|item| card_goes_before(card.row.created_at, item.at))
-                        {
-                            Some(next) => {
-                                partial(&format!("#{}", next.dom_id), "beforebegin", &markup)
-                            }
-                            None => partial("#transcript", "beforeend", &markup),
-                        },
-                    );
+                    changed.push(match self.folder.card_anchor(card.row.created_at) {
+                        Some(next) => partial(&format!("#{next}"), "beforebegin", &markup),
+                        None => partial("#transcript", "beforeend", &markup),
+                    });
                 }
             }
         }
@@ -530,6 +552,17 @@ pub(crate) async fn chat_list_events(
             }
         },
     )
+}
+
+/// The partial of one item: a new item goes `beforeend` into `container`, a changed one replaces
+/// itself in place.
+fn item_partial(item: &crate::transcript::Item, added: bool, container: &str) -> Markup {
+    let rendered = render_item(item);
+    if added {
+        partial(container, "beforeend", &rendered)
+    } else {
+        partial(&format!("#{}", item.dom_id), "outerMorph", &rendered)
+    }
 }
 
 /// Wraps `inner` in a partial that htmx swaps into `target`.

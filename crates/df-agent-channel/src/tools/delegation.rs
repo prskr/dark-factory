@@ -197,7 +197,7 @@ pub(super) async fn send_message(
     };
     let content = vec![df_db::text_block(text, false)];
     let mut tx = ctx.pool.begin().await?;
-    let message = match df_db::queue_message_tx(&mut tx, child, agent(rc), content).await {
+    let message = match df_db::queue_message_tx(&mut tx, child, agent(rc), content, None).await {
         Ok(message) => message,
         Err(held @ DbError::BranchHeld { .. }) => return Ok(Outcome::error(held.to_string())),
         Err(e) => return Err(e.into()),

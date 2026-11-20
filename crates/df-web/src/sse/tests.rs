@@ -161,6 +161,134 @@ async fn replay_after_an_id_has_no_gaps_and_no_duplicates() {
     );
 }
 
+fn tool(call: &str) -> serde_json::Value {
+    json!({"toolCall": {"toolCallId": call, "title": format!("Call {call}")}})
+}
+
+#[tokio::test]
+async fn consecutive_tool_calls_grow_one_group_by_appending_and_morphing_its_head() {
+    let f = fixture().await;
+    let mut sse = f.events("/tasks/DF-1/events").await;
+
+    // The first call arrives as a group of one: the wrapper with a hidden head.
+    let e1 = f.add(1, "t1", tool("c1")).await;
+    let first = sse.next_within(LIVE).await;
+    assert!(
+        first
+            .data
+            .contains(r##"hx-target="#transcript" hx-swap="beforeend""##)
+            && first.data.contains(&format!("id=\"grp-ev-{e1}\""))
+            && first.data.contains("data-single"),
+        "{}",
+        first.data
+    );
+
+    // The second only appends to the items and morphs the head; the wrapper stays untouched.
+    let e2 = f.add(2, "t1", tool("c2")).await;
+    let second = sse.next_within(LIVE).await;
+    assert!(
+        second.data.contains(&format!(
+            "hx-target=\"#grp-ev-{e1}-items\" hx-swap=\"beforeend\""
+        )) && second.data.contains(&format!("id=\"ev-{e2}\"")),
+        "{}",
+        second.data
+    );
+    assert!(
+        second.data.contains(&format!(
+            "hx-target=\"#grp-ev-{e1}-head\" hx-swap=\"outerMorph\""
+        )) && second.data.contains("2 tool calls")
+            && !second.data.contains("data-single"),
+        "{}",
+        second.data
+    );
+    assert!(
+        !second.data.contains(&format!("hx-target=\"#grp-ev-{e1}\"")),
+        "the wrapper is never targeted: {}",
+        second.data
+    );
+
+    f.add(3, "t1", tool("c3")).await;
+    let third = sse.next_within(LIVE).await;
+    assert!(third.data.contains("3 tool calls"), "{}", third.data);
+    assert_eq!(third.data.matches("data-tool-group").count(), 0);
+}
+
+#[tokio::test]
+async fn a_failed_call_updates_the_group_head() {
+    let f = fixture().await;
+    let mut sse = f.events("/tasks/DF-1/events").await;
+    f.add(1, "t1", tool("c1")).await;
+    sse.next_within(LIVE).await;
+    let e2 = f.add(2, "t1", tool("c2")).await;
+    sse.next_within(LIVE).await;
+
+    f.add(
+        3,
+        "t1",
+        json!({"toolCallUpdate": {"toolCallId": "c2", "status": "TOOL_CALL_STATUS_FAILED"}}),
+    )
+    .await;
+    let frame = sse.next_within(LIVE).await;
+
+    assert!(
+        frame
+            .data
+            .contains(&format!("hx-target=\"#ev-{e2}\" hx-swap=\"outerMorph\"")),
+        "{}",
+        frame.data
+    );
+    assert!(
+        frame.data.contains("-head\" hx-swap=\"outerMorph\"") && frame.data.contains("1 failed"),
+        "{}",
+        frame.data
+    );
+}
+
+#[tokio::test]
+async fn a_streak_stored_before_the_stream_starts_arrives_as_one_group() {
+    let f = fixture().await;
+    let e1 = f.add(1, "t1", tool("c1")).await;
+    f.add(2, "t1", tool("c2")).await;
+    f.add(3, "t1", tool("c3")).await;
+
+    let frame = f.events("/tasks/DF-1/events?after=0").await.next().await;
+
+    assert_eq!(
+        frame.data.matches(&format!("id=\"grp-ev-{e1}\"")).count(),
+        1,
+        "{}",
+        frame.data
+    );
+    assert!(frame.data.contains("3 tool calls"), "{}", frame.data);
+    assert!(
+        !frame.data.contains("-items\" hx-swap=\"beforeend\""),
+        "{}",
+        frame.data
+    );
+}
+
+#[tokio::test]
+async fn a_call_after_a_message_starts_a_new_group() {
+    let f = fixture().await;
+    let mut sse = f.events("/tasks/DF-1/events").await;
+    f.add(1, "t1", tool("c1")).await;
+    sse.next_within(LIVE).await;
+    f.add(2, "t1", chunk("m1", "done")).await;
+    sse.next_within(LIVE).await;
+
+    let e3 = f.add(3, "t1", tool("c3")).await;
+    let frame = sse.next_within(LIVE).await;
+
+    assert!(
+        frame
+            .data
+            .contains(r##"hx-target="#transcript" hx-swap="beforeend""##)
+            && frame.data.contains(&format!("id=\"grp-ev-{e3}\"")),
+        "{}",
+        frame.data
+    );
+}
+
 #[tokio::test]
 async fn forge_activity_written_by_the_control_plane_reaches_the_stream_in_order() {
     use df_proto::transcript::v1::{ForgeActivity, PullRequestOpened, forge_activity};

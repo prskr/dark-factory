@@ -21,6 +21,7 @@ use crate::components::{
 use crate::components::{ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
 use crate::layout::{Shell, item_path};
 use crate::transcript::block_parts;
+use crate::transcript::webhook::summary;
 
 const CHIP_SELECT: &str =
     "min-h-11 rounded-[10px] border border-line bg-panel px-3 text-sm text-muted lg:min-h-8";
@@ -404,7 +405,7 @@ pub(crate) fn pending_region(
     // A message of only hidden blocks has nothing to show without the option: no row, no count.
     let queued: Vec<(&TaskMessageRow, Vec<(String, bool)>)> = messages
         .iter()
-        .map(|m| (m, block_parts(&m.content, show_hidden)))
+        .map(|m| (m, queued_parts(m, show_hidden)))
         .filter(|(_, parts)| !parts.is_empty())
         .collect();
     let padding = if queued.is_empty() && error.is_none() {
@@ -430,6 +431,15 @@ pub(crate) fn pending_region(
                 }
             }
         }
+    }
+}
+
+/// The text of a queued message as `(text, hidden)` parts. A webhook message shows the summary
+/// of its event, as its transcript row will, not its hidden text.
+fn queued_parts(message: &TaskMessageRow, show_hidden: bool) -> Vec<(String, bool)> {
+    match message.forge_event.as_ref().and_then(summary) {
+        Some(summary) => vec![(summary.text(), false)],
+        None => block_parts(&message.content, show_hidden),
     }
 }
 

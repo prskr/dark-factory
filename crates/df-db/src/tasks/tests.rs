@@ -1079,7 +1079,7 @@ async fn sql_and_rust_agree_on_which_messages_are_editable() {
             let row: TaskMessageRow = sqlx::query_as!(
                 MessageRecord,
                 r#"SELECT id, task_id, author, content, queued_at, delivered_run_id,
-                              delivered_at, forwarded_at
+                              delivered_at, forwarded_at, forge_event
                        FROM task_messages WHERE id = $1"#,
                 message.id.as_uuid()
             )
@@ -1383,7 +1383,7 @@ where
         .unwrap();
     let blocked = tokio::spawn(op(pool.clone()));
     wait_for_lock_waiter(pool).await;
-    queue_message_tx(&mut message_tx, task, human(), text("waiting"))
+    queue_message_tx(&mut message_tx, task, human(), text("waiting"), None)
         .await
         .unwrap();
     message_tx.commit().await.unwrap();
@@ -1466,7 +1466,7 @@ async fn a_message_after_mark_done_is_queued_after_the_ready_time() {
         .await
         .unwrap();
     mark_task_done(&pool, task.id, human()).await.unwrap();
-    queue_message_tx(&mut message_tx, task.id, human(), text("later"))
+    queue_message_tx(&mut message_tx, task.id, human(), text("later"), None)
         .await
         .unwrap();
     message_tx.commit().await.unwrap();

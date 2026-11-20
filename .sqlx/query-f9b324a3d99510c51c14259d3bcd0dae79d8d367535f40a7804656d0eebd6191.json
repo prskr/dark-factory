@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, task_id, author, content, queued_at, delivered_run_id,\n                              delivered_at, forwarded_at\n                       FROM task_messages WHERE id = $1",
+  "query": "\n        UPDATE task_messages SET forwarded_at = now()\n        WHERE task_id = $1 AND held_back\n          -- An archived chat takes no prompt, whatever run is alive: the message waits for the\n          -- unarchive (decided in this statement, so a concurrent archive cannot be missed).\n          AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = $1 AND t.archived_at IS NOT NULL)\n        RETURNING id, task_id, author, content, queued_at, delivered_run_id, delivered_at,\n                  forwarded_at, forge_event\n        ",
   "describe": {
     "columns": [
       {
@@ -90,6 +90,17 @@
             "name": "forwarded_at"
           }
         }
+      },
+      {
+        "ordinal": 8,
+        "name": "forge_event",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "task_messages",
+            "name": "forge_event"
+          }
+        }
       }
     ],
     "parameters": {
@@ -105,8 +116,9 @@
       false,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "07395cc51b6803165b86884561a1c388b343235d1385330561bac852573663fa"
+  "hash": "f9b324a3d99510c51c14259d3bcd0dae79d8d367535f40a7804656d0eebd6191"
 }

@@ -449,6 +449,141 @@ async fn a_stored_user_message_marks_its_queued_prompt_delivered() {
     assert_eq!(delivered_by, Some(f.run.as_uuid()));
 }
 
+/// Queues a webhook message for `f.task` and returns its prompt id.
+async fn queue_review(f: &Fixture) -> df_core::PromptId {
+    let event = df_core::webhooks::WebhookEvent::ReviewSubmitted {
+        number: 12,
+        head: "factory/task/DF-1".into(),
+        actor: "alice".into(),
+        verdict: df_core::seams::ReviewVerdict::ChangesRequested,
+    };
+    let mut tx = f.pool.begin().await.unwrap();
+    assert!(
+        crate::webhooks::queue_event_tx(&mut tx, f.task, &event)
+            .await
+            .unwrap()
+    );
+    tx.commit().await.unwrap();
+    crate::list_undelivered_messages(&f.pool, f.task)
+        .await
+        .unwrap()
+        .last()
+        .unwrap()
+        .id
+}
+
+async fn webhook_event_keys(pool: &PgPool) -> Vec<String> {
+    sqlx::query_scalar("SELECT source_key FROM transcript_events WHERE source_key LIKE 'webhook:%'")
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn delivering_a_webhook_message_appends_one_webhook_event() {
+    let f = Fixture::new().await;
+    let prompt = queue_review(&f).await;
+
+    f.append_runtime(f.run, &[f.prepared(1, user_message(prompt)).await])
+        .await;
+
+    assert_eq!(
+        webhook_event_keys(&f.pool).await,
+        [format!("webhook:{prompt}")]
+    );
+    let (payload, run): (Value, Uuid) = sqlx::query_as(
+        "SELECT payload, run_id FROM transcript_events WHERE kind = 'forge_activity'",
+    )
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    let review = &payload["forgeActivity"]["webhookReceived"]["reviewSubmitted"];
+    assert_eq!(review["actor"], "alice", "{payload}");
+    assert_eq!(
+        review["verdict"],
+        "WEBHOOK_REVIEW_VERDICT_CHANGES_REQUESTED"
+    );
+    // 64-bit numbers are JSON strings in the proto JSON mapping.
+    assert_eq!(review["number"], "12", "{payload}");
+    assert_eq!(
+        run,
+        f.run.as_uuid(),
+        "the event belongs to the delivering run"
+    );
+}
+
+#[tokio::test]
+async fn a_prompt_delivered_in_an_earlier_run_gets_no_webhook_event_in_a_later_run() {
+    let f = Fixture::new().await;
+    let prompt = queue_review(&f).await;
+    f.append_runtime(f.run, &[f.prepared(1, user_message(prompt)).await])
+        .await;
+    sqlx::query("UPDATE runs SET state = 'succeeded' WHERE id = $1")
+        .bind(f.run.as_uuid())
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let run2 = seed_run(&f.pool, f.task, 2).await;
+
+    f.append_runtime(run2, &[f.prepared(1, user_message(prompt)).await])
+        .await;
+
+    assert_eq!(webhook_event_keys(&f.pool).await.len(), 1);
+}
+
+#[tokio::test]
+async fn redelivering_a_webhook_message_appends_no_second_event() {
+    let f = Fixture::new().await;
+    let prompt = queue_review(&f).await;
+
+    f.append_runtime(f.run, &[f.prepared(1, user_message(prompt)).await])
+        .await;
+    f.append_runtime(f.run, &[f.prepared(2, user_message(prompt)).await])
+        .await;
+
+    assert_eq!(webhook_event_keys(&f.pool).await.len(), 1);
+}
+
+#[tokio::test]
+async fn delivering_other_messages_appends_no_webhook_event() {
+    let f = Fixture::new().await;
+
+    // The assignment (`task.assigned`) carries no stored event.
+    f.append_runtime(f.run, &[f.prepared(1, user_message(f.prompt)).await])
+        .await;
+
+    assert!(webhook_event_keys(&f.pool).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_runtime_user_message_cannot_forge_a_webhook_event() {
+    let f = Fixture::new().await;
+    let plain = crate::queue_message(
+        &f.pool,
+        f.task,
+        df_core::Principal::human(df_core::UserId::new(), "Ada"),
+        Vec::new(),
+    )
+    .await
+    .unwrap();
+    let forged = Kind::UserMessage(df_proto::transcript::v1::UserMessage {
+        prompt_id: plain.id.to_string(),
+        author: Some(df_proto::transcript::v1::Principal {
+            kind: Some(df_proto::transcript::v1::principal::Kind::System(
+                df_proto::transcript::v1::SystemPrincipal {
+                    reason: "webhook".into(),
+                },
+            )),
+        }),
+        content: Vec::new(),
+    });
+
+    f.append_runtime(f.run, &[f.prepared(1, forged).await])
+        .await;
+
+    assert!(webhook_event_keys(&f.pool).await.is_empty());
+}
+
 #[tokio::test]
 async fn a_duplicate_seq_carrying_another_prompt_marks_nothing() {
     let f = Fixture::new().await;

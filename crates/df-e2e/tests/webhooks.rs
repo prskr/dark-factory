@@ -54,11 +54,14 @@ async fn member_review_wakes_the_task_in_review_and_its_pr_is_a_draft_again() ->
                 )
                 .await?;
 
+            // The agent gets the long text; the UI shows the event as one sentence, first in the
+            // stack of queued messages and, once delivered, as a row of the transcript.
             let line = format!(
                 "{} submitted a review on PR #{number}: changes requested.",
                 data::FORGE_REVIEWER
             );
-            world.session.expect_text(&line, UI_TIMEOUT).await?;
+            let sentence = format!("{} requested changes on PR #{number}", data::FORGE_REVIEWER);
+            world.session.expect_text(&sentence, UI_TIMEOUT).await?;
             let messages =
                 db::system_messages(&world.pool, &key, df_core::system_reason::WEBHOOK).await?;
             assert_eq!(messages.len(), 1, "{messages:?}");
@@ -82,6 +85,23 @@ async fn member_review_wakes_the_task_in_review_and_its_pr_is_a_draft_again() ->
                 .session
                 .expect_text("Read the review; waiting for more.", RUN_TIMEOUT)
                 .await?;
+            // Delivered: the transcript has the row with the link to the pull request, and no
+            // bubble with the hidden wake-up text.
+            world
+                .session
+                .expect_region_text("#transcript", &sentence, UI_TIMEOUT)
+                .await?;
+            // The rows of the pull request itself link to it too: pick the webhook row by its text.
+            let link = world.session.page.locator(format!(
+                "#transcript [data-system]:has-text('{sentence}') a[href$='/pulls/{number}']"
+            ));
+            expect(link)
+                .with_timeout(UI_TIMEOUT)
+                .to_contain_text(&format!("#{number}"))
+                .await
+                .context("the row links to the pull request")?;
+            let transcript = world.session.region_text("#transcript").await?;
+            assert!(!transcript.contains(&line), "{transcript}");
             let pull = world
                 .forgejo
                 .pull_of(data::BASE_BRANCH, &branch)

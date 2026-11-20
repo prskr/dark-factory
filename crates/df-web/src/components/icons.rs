@@ -88,6 +88,12 @@ pub enum Icon {
     Archive,
     /// Back out of an archived chat or artifact (Lucide `arrow-left`).
     ArrowLeft,
+    /// The agent's reasoning in the transcript (Lucide `brain`).
+    Brain,
+    /// A received webhook event in the transcript (Lucide `webhook`).
+    Webhook,
+    /// A call in progress; spun by the caller (Lucide `loader-circle`).
+    Loader,
 }
 
 /// Inner elements of the factory mark (Lucide `factory`, ISC licence); `assets/logo.svg` has the
@@ -149,6 +155,9 @@ impl Icon {
         Self::Chat,
         Self::Archive,
         Self::ArrowLeft,
+        Self::Brain,
+        Self::Webhook,
+        Self::Loader,
     ];
 
     /// Inner SVG elements of the 24x24 icon.
@@ -253,6 +262,13 @@ impl Icon {
                 "<rect width=\"20\" height=\"5\" x=\"2\" y=\"3\" rx=\"1\"/><path d=\"M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8\"/><path d=\"M10 12h4\"/>"
             }
             Self::ArrowLeft => "<path d=\"m12 19-7-7 7-7\"/><path d=\"M19 12H5\"/>",
+            Self::Loader => "<path d=\"M21 12a9 9 0 1 1-6.219-8.56\"/>",
+            Self::Brain => {
+                "<path d=\"M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z\"/><path d=\"M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z\"/><path d=\"M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4\"/><path d=\"M17.599 6.5a3 3 0 0 0 .399-1.375\"/><path d=\"M6.003 5.125A3 3 0 0 0 6.401 6.5\"/><path d=\"M3.477 10.896a4 4 0 0 1 .585-.396\"/><path d=\"M19.938 10.5a4 4 0 0 1 .585.396\"/><path d=\"M6 18a4 4 0 0 1-1.967-.516\"/><path d=\"M19.967 17.484A4 4 0 0 1 18 18\"/>"
+            }
+            Self::Webhook => {
+                "<path d=\"M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2\"/><path d=\"m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06\"/><path d=\"m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8\"/>"
+            }
             Self::PullRequestDraft => {
                 "<circle cx=\"18\" cy=\"18\" r=\"3\"/><circle cx=\"6\" cy=\"6\" r=\"3\"/><path d=\"M18 6V5\"/><path d=\"M18 11v-1\"/><line x1=\"6\" x2=\"6\" y1=\"9\" y2=\"21\"/>"
             }

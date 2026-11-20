@@ -262,7 +262,58 @@ message ForgeActivity {
     BranchPushed branch_pushed = 1;
     PullRequestOpened pull_request_opened = 2;
     PullRequestReady pull_request_ready = 3;
+    WebhookReceived webhook_received = 4;
   }
+}
+
+// A forge webhook event that woke the task, written when its wake-up message is
+// delivered. Holds display fields only, never review, comment or CI log text.
+message WebhookReceived {
+  oneof kind {
+    WebhookReviewSubmitted review_submitted = 1;
+    WebhookCommentCreated comment_created = 2;
+    // Closed without merging (a merge completes the task and shows no row).
+    WebhookPullRequestClosed pull_request_closed = 3;
+    WebhookCiFailed ci_failed = 4;
+  }
+}
+
+message WebhookReviewSubmitted {
+  uint64 number = 1;
+  string actor = 2;
+  WebhookReviewVerdict verdict = 3;
+  // Pull request URL; empty if unknown.
+  string url = 4;
+}
+
+enum WebhookReviewVerdict {
+  WEBHOOK_REVIEW_VERDICT_UNSPECIFIED = 0;
+  WEBHOOK_REVIEW_VERDICT_APPROVED = 1;
+  WEBHOOK_REVIEW_VERDICT_CHANGES_REQUESTED = 2;
+  WEBHOOK_REVIEW_VERDICT_COMMENTED = 3;
+}
+
+message WebhookCommentCreated {
+  uint64 number = 1;
+  bool is_pull_request = 2;
+  string actor = 3;
+  // Pull request URL; empty for an issue comment or an unknown URL.
+  string url = 4;
+}
+
+message WebhookPullRequestClosed {
+  uint64 number = 1;
+  string actor = 2;
+  string url = 3;
+}
+
+message WebhookCiFailed {
+  // Head branch of the failed check.
+  string head = 1;
+  // Name of the failed check.
+  string check = 2;
+  // URL of the check run; empty if the forge sent none.
+  string url = 3;
 }
 
 // A push to the run's task branch, as the gateway recorded it.

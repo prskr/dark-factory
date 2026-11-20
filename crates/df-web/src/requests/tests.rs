@@ -597,6 +597,49 @@ async fn a_card_is_placed_by_time_among_the_items_when_the_stream_starts() {
 }
 
 #[tokio::test]
+async fn a_card_raised_inside_a_tool_call_streak_is_placed_after_its_group() {
+    let f = fixture().await;
+    let run = insert_run(&f.app.pool, f.task, 1, "running").await;
+    let call = |seq: i64| {
+        add_event(
+            &f.app.pool,
+            f.task,
+            run,
+            seq,
+            "t1",
+            json!({"toolCall": {"toolCallId": format!("c{seq}"), "title": "Run"}}),
+        )
+    };
+    call(1).await;
+    let id = f.ask("Postgres?", &[]).await;
+    call(2).await;
+    let after = add_event(
+        &f.app.pool,
+        f.task,
+        run,
+        3,
+        "t1",
+        json!({"userMessage": {"promptId": "p3", "content": [{"text": {"text": "go"}}]}}),
+    )
+    .await;
+
+    let mut sse = f.events(&format!("/tasks/DF-1/events?after={after}")).await;
+    let mut frame = sse.next().await;
+    while !frame.data.contains(&format!("request-{id}")) {
+        frame = sse.next().await;
+    }
+
+    // Not before the second call, which is a member of the group above: before the message.
+    assert!(
+        frame.data.contains(&format!(
+            "hx-target=\"#ev-{after}\" hx-swap=\"beforebegin\""
+        )),
+        "{}",
+        frame.data
+    );
+}
+
+#[tokio::test]
 async fn a_reconnect_shows_a_card_raised_and_decided_meanwhile_exactly_once() {
     let f = fixture().await;
     let page = f.page("/tasks/DF-1").await;

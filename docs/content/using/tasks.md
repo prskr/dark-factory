@@ -30,8 +30,10 @@ counts hold tasks only; [chats](chats.md) have their own pages under **Chats**.
   happen. Forge activity appears in between: pushes to the task branch (with the commit range, or
   the reason if the push was rejected), and the pull request being opened and marked ready, with a
   link to it. Stored artifacts appear as a row with the artifact name (see
-  [Artifacts](artifacts.md)). These rows come from the control plane and
-  the gateway, not from the agent, and are never sent to the agent.
+  [Artifacts](artifacts.md)). A forge event that woke the task appears as a row too
+  ([webhook rows](#reading-the-transcript)). These rows come from the control plane and
+  the gateway, not from the agent, and are never sent to the agent. Tool calls, thinking and the
+  other rows are described under [Reading the transcript](#reading-the-transcript).
 - **Messages**: type into the message box at any time. A message reaches the agent at the next
   turn boundary, without restarting anything; while it waits it is shown as queued and can be
   edited or removed. A message to a finished task reopens it. A message to a task that awaits its dependencies is
@@ -63,6 +65,40 @@ readable names instead of internal reason codes: **Task assignment**, **Resume**
 [Request decisions](requests.md#what-happens-on-a-decision) appear on their cards; their delivery
 messages are hidden by default.
 
+## Reading the transcript
+
+The transcript is the same in a task and in a [chat](chats.md). It keeps the agent's messages and
+yours in view; everything the agent does in between is collapsed into rows.
+
+- **Tool call groups**: two or more consecutive tool calls form one row, "12 tool calls", with the
+  number of failed calls as "· 2 failed" in the error color and, while a call is in progress, a
+  spinner with "running". Thoughts and notices that come after the first call of the streak are part
+  of the group; a thought before it stays outside, and the count only counts tool calls. Any
+  other row ends the group: an agent or user message, a push or pull request row, an
+  artifact row and the divider of the next run. A question or approval card that is raised during a
+  streak appears after the group, so the group keeps growing above it. A single tool call looks
+  like a plain tool row. Click or tap the group row (or focus it and press Enter) to open the
+  calls nested below it, each collapsed and expandable. A group and its open rows stay as you
+  left them while new calls arrive, and a reload shows the same groups as the live view.
+- **Thinking**: the agent's reasoning is a row with a brain icon, "Thinking" and the first line as
+  a preview. Opening it shows the whole thought, as plain text while it streams and as Markdown
+  (with highlighted code) once its turn ended.
+- **Tool call details**: an opened tool call shows labelled sections. **Input** is the call's JSON,
+  indented and highlighted; when it has a `command`, the command comes first as a highlighted shell
+  line. **Output** is rendered as Markdown (highlighted code, tables, lists) once the call is
+  completed or failed, and stays plain text while it runs. **Diff** shows edits highlighted as a
+  diff with the file path, and **Result** the raw result as indented JSON. Input that is not valid
+  JSON is shown as plain text. The safety rules of
+  [agent messages](#agent-messages-markdown-code-and-diagrams) apply: nothing in a tool call runs
+  in the page.
+- **Forge events**: when a [forge webhook](../integrations/forges/webhooks.md) wakes the task, the
+  row appears when the message is delivered to the agent, with the webhook icon and a link to the
+  pull request or CI check, for example "alice requested changes on PR #41" or "CI check test
+  failed on factory/task/DF-12". Review and comment text is not shown (the agent reads it with
+  `read_pull_request_feedback`). The link is only shown for an `http` or `https` URL. While the
+  message waits in the queued stack it shows the same sentence after the prefix **Forge events**.
+  Events that woke the task before this row existed keep their message bubble.
+
 ## Agent messages: Markdown, code and diagrams
 
 An agent message is plain text while it streams and is rendered as Markdown when its turn ends.
@@ -70,6 +106,10 @@ An agent message is plain text while it streams and is rendered as Markdown when
 - **Safety**: the text is untrusted. HTML in it is shown as text, images appear as links (the
   browser loads nothing an agent names), links with unsafe schemes are dropped and every link opens
   with `rel="noopener noreferrer nofollow"`.
+- **GitHub Markdown**: tables, ~~strikethrough~~, task lists (`- [x]`, shown as disabled
+  checkboxes) and bare URLs (`https://…`, `www.…`) are rendered. A bare URL becomes an ordinary
+  link: unsafe schemes are not linked and the `rel` above applies. The same renderer shows
+  request cards, the requests inbox, tool output and [artifacts](artifacts.md).
 - **Code**: a fenced block is highlighted when its info string names a language or file extension
   (` ```rust `, ` ```rs `). Blocks without a language, with an unknown one or over 64 KiB stay
   plain; the language is never guessed from the content. The theme follows the browser's light or

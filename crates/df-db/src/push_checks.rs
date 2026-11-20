@@ -558,6 +558,7 @@ async fn push_rejected(
         task.id,
         Principal::system(PUSH_REJECTED),
         vec![text_block(text)],
+        None,
     )
     .await?;
     sqlx::query!(

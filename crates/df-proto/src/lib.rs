@@ -10,6 +10,7 @@
 )]
 
 pub use pbjson_types;
+pub use prost;
 
 pub mod transcript {
     pub mod v1 {
