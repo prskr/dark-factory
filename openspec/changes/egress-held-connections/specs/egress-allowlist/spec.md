@@ -18,8 +18,12 @@ Board members SHALL list, add and remove deny rules. A deny rule SHALL name one 
 - **THEN** runs of `DF-7` may connect to it and runs of other tasks may not
 
 ### Requirement: Deny rule changes are audited
-Creating or deleting a deny rule SHALL write an audit entry (`egress_deny_rule.create` or `egress_deny_rule.delete`) and publish an `egress_policy` notification in the same transaction.
+Creating, editing or deleting a deny rule SHALL write an audit entry (`egress_deny_rule.create`, `egress_deny_rule.update` or `egress_deny_rule.delete`) and publish an `egress_policy` notification in the same transaction.
 
 #### Scenario: Deny rule added
 - **WHEN** a board member adds deny rule `*.datadoghq.com`
 - **THEN** an audit entry `egress_deny_rule.create` naming the board member and the host exists and an `egress_policy` notification is published
+
+#### Scenario: Deny rule edited
+- **WHEN** a board member changes deny rule `*.datadoghq.co` to `*.datadoghq.com`
+- **THEN** an audit entry `egress_deny_rule.update` names both hosts and an `egress_policy` notification is published
