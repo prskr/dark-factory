@@ -310,9 +310,14 @@ pub(crate) fn wider_modal(title: &str, form: Markup) -> Response {
 
 /// Answer of a successful save: the updated list replaces the old one and the modal closes.
 pub(crate) fn saved(list: Markup) -> Response {
-    let mut response = list.into_response();
+    saved_into("#config-list", list)
+}
+
+/// [`saved`] for a region other than `#config-list`: `target` is the selector of the region.
+pub(crate) fn saved_into(target: &'static str, region: Markup) -> Response {
+    let mut response = region.into_response();
     let headers = response.headers_mut();
-    headers.insert("HX-Retarget", HeaderValue::from_static("#config-list"));
+    headers.insert("HX-Retarget", HeaderValue::from_static(target));
     headers.insert("HX-Reswap", HeaderValue::from_static("outerHTML"));
     headers.insert("HX-Trigger", HeaderValue::from_static("modal-close"));
     response
@@ -377,6 +382,11 @@ pub(crate) fn list_header_with_subtitle(
     )
 }
 
+/// Hides a save button of a settings page while a tab without save (`data-nosave`) is open: the
+/// page's root is the group `page`, the open tab is the one with `aria-selected`, which Alpine keeps
+/// current.
+const HIDE_SAVE: &str = "group-has-[[data-nosave][aria-selected=true]]/page:hidden";
+
 /// The back link of a settings page: the list it belongs to.
 pub(crate) struct SettingsBack<'a> {
     pub(crate) href: &'a str,
@@ -396,7 +406,7 @@ pub(crate) fn settings_page_frame(
     body: Markup,
 ) -> Markup {
     html! {
-        div id=(id) class="max-w-7xl" {
+        div id=(id) class="group/page max-w-7xl" {
             a href=(back.href) class="mb-3 inline-flex min-h-11 items-center gap-1 text-sm text-muted hover:text-ink lg:min-h-9" {
                 (icon(Icon::ChevronLeft)) (back.label)
             }
@@ -405,7 +415,7 @@ pub(crate) fn settings_page_frame(
                 div class="flex items-center gap-3" {
                     div id="save-status" role="status" aria-live="polite" class="text-sm" {}
                     span class="hidden md:block" {
-                        button type="submit" form="form" class=(action_class(ButtonKind::Primary)) { (save_label) }
+                        button type="submit" form="form" class={(action_class(ButtonKind::Primary)) " " (HIDE_SAVE)} { (save_label) }
                     }
                 }
             }
@@ -461,6 +471,9 @@ fn footer(class: &str, submit_label: &str) -> Markup {
 pub(crate) struct Tab {
     pub(crate) id: &'static str,
     pub(crate) label: &'static str,
+    /// Whether the form's save buttons show while the tab is open; a tab with its own dialogs and
+    /// actions has none (`data-nosave`).
+    pub(crate) saves: bool,
     pub(crate) panel: Markup,
 }
 
@@ -515,7 +528,7 @@ pub(crate) fn tabbed_form(
                 div role="tablist" aria-label="Sections" "x-on:keydown"="move($event)" class=(list_class) {
                     @for tab in tabs {
                         @let selected = tab.id == open;
-                        button type="button" role="tab" id={"tab-" (tab.id)} data-tab=(tab.id) aria-controls={"panel-" (tab.id)}
+                        button type="button" role="tab" id={"tab-" (tab.id)} data-tab=(tab.id) data-nosave[!tab.saves] aria-controls={"panel-" (tab.id)}
                             aria-selected=(selected) tabindex=(if selected { "0" } else { "-1" })
                             ":aria-selected"={"tab === '" (tab.id) "'"} ":tabindex"={"tab === '" (tab.id) "' ? 0 : -1"}
                             "x-on:click"={"tab = '" (tab.id) "'"}
@@ -535,7 +548,7 @@ pub(crate) fn tabbed_form(
             }
             @if page {
                 div class="pt-2 pb-5 md:hidden" {
-                    button type="submit" class={(action_class(ButtonKind::Primary)) " w-full"} { (submit) }
+                    button type="submit" class={(action_class(ButtonKind::Primary)) " w-full " (HIDE_SAVE)} { (submit) }
                 }
             } @else {
                 (footer("border-t border-line px-4 pt-3 pb-5 md:px-6", submit))
@@ -957,11 +970,13 @@ fn project_form(
         Tab {
             id: "general",
             label: "General",
+            saves: true,
             panel: general,
         },
         Tab {
             id: "security",
             label: "Security",
+            saves: true,
             panel: html! {
                 (form_group("Push checks", push_policy::panel(&values.push, errors)))
                 (form_group("Branches", branches::group(
@@ -973,10 +988,19 @@ fn project_form(
             },
         },
     ];
+    if let Some(project) = project {
+        tabs.push(Tab {
+            id: "egress",
+            label: "Egress",
+            saves: false,
+            panel: crate::egress::project_tab::placeholder(&project.key),
+        });
+    }
     if let (Editing::AsAdmin, Some(project)) = (editing, project) {
         tabs.push(Tab {
             id: "integrations",
             label: "Integrations",
+            saves: true,
             panel: html! {
                 (project_subscriptions::lifecycle_group(&values.key))
                 (project_webhook::group(state, project))

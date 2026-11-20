@@ -55,16 +55,7 @@ pub async fn create_deny_rule(
     deciding: Option<RequestId>,
 ) -> Result<EntryRecord, DbError> {
     lock_allowlist(tx).await?;
-    let duplicate = sqlx::query_scalar!(
-        r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist
-             WHERE kind = 'http-deny' AND host = $1) AS "exists!""#,
-        host
-    )
-    .fetch_one(&mut **tx)
-    .await?;
-    if duplicate {
-        return Err(DbError::Conflict("this deny rule already exists".into()));
-    }
+    ensure_no_deny_duplicate(tx, host, None).await?;
     let id = Uuid::now_v7();
     sqlx::query!(
         "INSERT INTO egress_allowlist (id, scope, kind, host) VALUES ($1, 'instance', 'http-deny', $2)",
@@ -77,13 +68,36 @@ pub async fn create_deny_rule(
         id,
         project_key: None,
         task_key: None,
+        task_id: None,
+        task_project_key: None,
         kind: EntryKind::HttpDeny {
             host: host.to_string(),
         },
     };
-    record_entry_change(tx, actor, "create", &record).await?;
+    record_entry_change(tx, actor, "create", &record, &record).await?;
     crate::network_access::deny_matching(tx, host, deciding).await?;
     Ok(record)
+}
+
+/// [`DbError::Conflict`] if a deny rule for `host` exists, other than `exclude`. Callers hold the
+/// allowlist lock.
+pub(super) async fn ensure_no_deny_duplicate(
+    tx: &mut Transaction<'_, Postgres>,
+    host: &str,
+    exclude: Option<Uuid>,
+) -> Result<(), DbError> {
+    let duplicate = sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist
+             WHERE kind = 'http-deny' AND host = $1 AND id IS DISTINCT FROM $2) AS "exists!""#,
+        host,
+        exclude
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if duplicate {
+        return Err(DbError::Conflict("this deny rule already exists".into()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

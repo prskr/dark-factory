@@ -117,6 +117,8 @@ mod tests {
                 id: Uuid::now_v7(),
                 project_key: (n % 2 == 1).then(|| "DF".to_string()),
                 task_key: None,
+                task_id: None,
+                task_project_key: None,
                 kind: EntryKind::HttpHost {
                     host: format!("host{n}.example"),
                     port: 443,

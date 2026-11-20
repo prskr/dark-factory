@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE egress_allowlist\n         SET scope = $2, project_id = $3, task_id = $4, host = $5, port = $6, namespace = $7,\n             service = $8, ports = $9, allow_dns = $10\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Text",
+        "Text",
+        "Int4Array",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eb459817e689b9a5aac6a308a8180a8eb1a08f702a1f0ffd87c7e9cf5a6a88f6"
+}

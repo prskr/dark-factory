@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT e.id, p.key AS \"project_key?\", t.key AS \"task_key?\", e.kind, e.host, e.port,\n                  e.namespace, e.service, e.ports, e.allow_dns\n           FROM egress_allowlist e\n           LEFT JOIN projects p ON p.id = e.project_id\n           LEFT JOIN tasks t ON t.id = e.task_id\n           ORDER BY (e.task_id IS NOT NULL), (e.project_id IS NOT NULL), p.key, t.key, e.kind,\n                    e.host, e.namespace, e.service, e.id",
+  "query": "SELECT e.id, p.key AS \"project_key?\", t.key AS \"task_key?\", e.task_id,\n                  tp.key AS \"task_project_key?\", e.kind, e.host, e.port,\n                  e.namespace, e.service, e.ports, e.allow_dns\n           FROM egress_allowlist e\n           LEFT JOIN projects p ON p.id = e.project_id\n           LEFT JOIN tasks t ON t.id = e.task_id\n           LEFT JOIN projects tp ON tp.id = t.project_id\n           WHERE e.id = $1 FOR UPDATE OF e",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,28 @@
       },
       {
         "ordinal": 3,
+        "name": "task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "egress_allowlist",
+            "name": "task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "task_project_key?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
         "name": "kind",
         "type_info": "Text",
         "origin": {
@@ -48,7 +70,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 6,
         "name": "host",
         "type_info": "Text",
         "origin": {
@@ -59,7 +81,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "port",
         "type_info": "Int4",
         "origin": {
@@ -70,7 +92,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "namespace",
         "type_info": "Text",
         "origin": {
@@ -81,7 +103,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "service",
         "type_info": "Text",
         "origin": {
@@ -92,7 +114,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "ports",
         "type_info": "Int4Array",
         "origin": {
@@ -103,7 +125,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "allow_dns",
         "type_info": "Bool",
         "origin": {
@@ -115,11 +137,15 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid"
+      ]
     },
     "nullable": [
       false,
       false,
+      false,
+      true,
       false,
       false,
       true,
@@ -130,5 +156,5 @@
       false
     ]
   },
-  "hash": "d6b7c426389add7c10377267042f545a2108ab6952fa8653f8d37276832bc6ca"
+  "hash": "06e1706c2a3b811936a8797c058576142f2bb6de339773444b472672a4646f72"
 }

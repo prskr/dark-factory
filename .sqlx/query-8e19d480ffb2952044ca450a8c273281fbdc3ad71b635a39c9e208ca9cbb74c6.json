@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'http-host'\n             AND host = $1 AND port = $2 AND project_id IS NOT DISTINCT FROM $3\n             AND task_id IS NOT DISTINCT FROM $4 AND id IS DISTINCT FROM $5) AS \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8e19d480ffb2952044ca450a8c273281fbdc3ad71b635a39c9e208ca9cbb74c6"
+}

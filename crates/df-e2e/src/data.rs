@@ -113,6 +113,13 @@ pub const EXISTING_BRANCH_SUMMARY: &str = "Bumped the dependency on the bot bran
 pub const LIFECYCLE_PROJECT_KEY: &str = "LC";
 pub const LIFECYCLE_PROJECT_NAME: &str = "Lifecycle";
 
+/// Two projects for the egress rule editing tests, which put rules on them (the tests of the rules
+/// page and the Egress tab) and run no task; keys `EG` and `EO`.
+pub const EGRESS_PROJECT_KEY: &str = "EG";
+pub const EGRESS_PROJECT_NAME: &str = "Egress Rules";
+pub const EGRESS_OTHER_PROJECT_KEY: &str = "EO";
+pub const EGRESS_OTHER_PROJECT_NAME: &str = "Egress Other";
+
 /// Project whose fake agents hand a result over as an artifact (demo step 5 of iteration 3);
 /// tasks are `RS-<n>`.
 pub const RESEARCH_PROJECT_KEY: &str = "RS";

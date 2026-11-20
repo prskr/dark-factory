@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'http-host'\n             AND host = $1 AND port = $2 AND project_id IS NOT DISTINCT FROM $3\n             AND task_id IS NOT DISTINCT FROM $4) AS \"exists!\"",
+  "query": "SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'cluster-service'\n             AND namespace = $1 AND service = $2 AND project_id IS NOT DISTINCT FROM $3\n             AND id IS DISTINCT FROM $4) AS \"exists!\"",
   "describe": {
     "columns": [
       {
@@ -13,7 +13,7 @@
     "parameters": {
       "Left": [
         "Text",
-        "Int4",
+        "Text",
         "Uuid",
         "Uuid"
       ]
@@ -22,5 +22,5 @@
       null
     ]
   },
-  "hash": "41e65232bcad95be81253ebe6e75a64cdb4e41114a0f258a1ca686c56f96803e"
+  "hash": "6894a51adf4ef17d7db00a2df92c3331ec023c4602d8012323143ce635e4947f"
 }

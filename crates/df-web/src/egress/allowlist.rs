@@ -1,35 +1,32 @@
 //! `/egress/allowlist`: instance, project and task entries of kind `http-host` and
 //! `cluster-service` (task entries are only `http-host`) and deny rules (`http-deny`, instance
-//! only), with search and pages.
+//! only), with search and pages. The dialogs to add and edit them are in [`dialogs`].
 
-use axum::Extension;
-use axum::extract::{Form, Path, Query, State};
-use axum::http::HeaderMap;
-use axum::response::{IntoResponse, Redirect, Response};
-use df_core::host::{DEFAULT_HOST_PORT, is_dns_label, validate_allowlist_host};
-use df_db::catalog::Actor;
-use df_db::{DbError, EntryKind, EntryRecord};
+use axum::extract::{Query, State};
+use axum::response::Response;
+use df_core::host::{DEFAULT_HOST_PORT, is_dns_label};
+use df_db::{EntryKind, EntryRecord};
 use maud::{Markup, html};
 use serde::Deserialize;
-use uuid::Uuid;
 
 use crate::WebState;
-use crate::auth::CurrentUser;
 use crate::components::forms::INPUT_CLASS;
 use crate::components::{
-    ButtonKind, Cell, FormErrors, HostIconSize, ICON_BUTTON_CLASS, Icon, ProjectHosts, Tone,
-    action_class, data_table, empty_panel, field, form_error, host_icon, icon, link_button,
-    select_field, td, text_field, th, tone_badge,
+    ButtonKind, Icon, ProjectHosts, action_class, data_table, empty_panel, icon, link_button,
+    page_header_with_subtitle,
 };
-use crate::config_pages::{
-    create_button, form_footer, form_grid, full_row, list_page, modal, open_modal, saved,
-};
+use crate::config_pages::{create_button, list_page, open_modal};
 use crate::layout::{Nav, Shell};
-use crate::responses::{internal_error, invalid, not_found};
+use crate::responses::internal_error;
 
+pub(super) mod dialogs;
+mod origin;
 pub(super) mod paging;
+pub(super) mod rows;
 
+pub(super) use origin::Origin;
 use paging::View;
+use rows::{RowEnv, scope_label, target};
 
 const ALLOWLIST: &str = "/egress/allowlist";
 
@@ -45,13 +42,21 @@ enum Effect {
     Deny,
 }
 
+/// The fields of the dialogs of all rule kinds; each kind reads its own.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
-pub(super) struct HostForm {
+pub(super) struct RuleForm {
     effect: Effect,
+    /// "Applies to": empty for the instance, a project key, or `task:<KEY>` for a task rule.
     project: String,
     host: String,
     port: String,
+    namespace: String,
+    service: String,
+    ports: String,
+    allow_dns: Option<String>,
+    #[serde(flatten)]
+    origin: Origin,
 }
 
 impl Effect {
@@ -64,20 +69,10 @@ impl Effect {
     }
 }
 
-impl HostForm {
+impl RuleForm {
     fn is_deny(&self) -> bool {
         self.effect == Effect::Deny
     }
-}
-
-#[derive(Debug, Default, Clone, Deserialize)]
-#[serde(default)]
-pub(super) struct ServiceForm {
-    project: String,
-    namespace: String,
-    service: String,
-    ports: String,
-    allow_dns: Option<String>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -163,35 +158,6 @@ impl<'a> ScopeName<'a> {
     }
 }
 
-fn scope_label(record: &EntryRecord) -> String {
-    ScopeName::of(record.project_key.as_deref(), record.task_key.as_deref()).label()
-}
-
-/// The ports of a cluster service entry: the list, or "all ports".
-fn service_ports(ports: &[u16]) -> String {
-    if ports.is_empty() {
-        "all ports".to_string()
-    } else {
-        ports
-            .iter()
-            .map(u16::to_string)
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
-
-/// `host:port` of an `http-host` entry, `namespace/service` of a cluster service: the target as
-/// named in accessible labels and matched by `?highlight=`.
-fn target(record: &EntryRecord) -> String {
-    match &record.kind {
-        EntryKind::HttpHost { host, port } => format!("{host}:{port}"),
-        EntryKind::HttpDeny { host } => format!("{host}:{ANY_PORT}"),
-        EntryKind::ClusterService {
-            namespace, service, ..
-        } => format!("{namespace}/{service}"),
-    }
-}
-
 /// What the search looks at, lower case: the host (or `namespace/service`) and the scope label.
 fn search_text(record: &EntryRecord) -> String {
     let name = match &record.kind {
@@ -203,67 +169,20 @@ fn search_text(record: &EntryRecord) -> String {
     format!("{name} {}", scope_label(record)).to_lowercase()
 }
 
-/// Whether the target of `record` (`host:port`, `host:any` for a deny rule) is the one
-/// `?highlight=` names. Cluster services have no `host:port` to highlight.
+/// Whether the target of `record` (`host:port`, `host:any` for a deny rule, `namespace/service`
+/// for a cluster service) is the one `?highlight=` names.
 fn is_highlighted(record: &EntryRecord, highlight: Option<&str>) -> bool {
-    !matches!(record.kind, EntryKind::ClusterService { .. })
-        && highlight == Some(target(record).as_str())
+    highlight == Some(target(record).as_str())
 }
 
-fn effect_badge(record: &EntryRecord) -> Markup {
-    match record.kind {
-        EntryKind::HttpDeny { .. } => tone_badge(Tone::Failed, "Deny"),
-        EntryKind::HttpHost { .. } | EntryKind::ClusterService { .. } => {
-            tone_badge(Tone::Completed, "Allow")
-        }
-    }
-}
-
-fn target_cell(record: &EntryRecord, projects: &ProjectHosts) -> Markup {
-    match &record.kind {
-        EntryKind::HttpHost { host, .. } | EntryKind::HttpDeny { host } => html! {
-            span class="flex items-center gap-3" {
-                (host_icon(host, HostIconSize::Table, projects))
-                span class="min-w-0 truncate font-mono text-[13px]" { (host) }
-            }
-        },
-        EntryKind::ClusterService {
-            namespace, service, ..
-        } => html! {
-            span class="flex items-center gap-3" {
-                span aria-hidden="true" class="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-sunk text-muted [&>svg]:size-4" { (icon(Icon::Server)) }
-                span class="min-w-0 truncate font-mono text-[13px]" { (namespace) "/" (service) }
-                (tone_badge(Tone::Waiting, "cluster service"))
-            }
-        },
-    }
-}
-
-fn ports_cell(record: &EntryRecord) -> String {
-    match &record.kind {
-        EntryKind::HttpHost { port, .. } => port.to_string(),
-        EntryKind::HttpDeny { .. } => ANY_PORT.to_string(),
-        EntryKind::ClusterService {
-            ports, allow_dns, ..
-        } => {
-            let dns = if *allow_dns { ", DNS allowed" } else { "" };
-            format!("{}{dns}", service_ports(ports))
-        }
-    }
-}
-
+/// The title row, laid out like the other list pages: the actions stay at the right of the row.
 fn header(count: usize) -> Markup {
-    html! {
-        header class="mb-5 flex flex-wrap items-start justify-between gap-4" {
-            div {
-                h1 class="text-2xl font-semibold" {
-                    "Egress rules " span class="font-normal text-faint" { (count) }
-                }
-                p class="mt-1 text-sm text-muted" {
-                    "External hosts and cluster services that sandboxes may reach."
-                }
-            }
-            div class="flex flex-wrap items-center gap-2" {
+    page_header_with_subtitle(
+        "Egress rules",
+        Some(count),
+        Some("External hosts and cluster services that sandboxes may reach."),
+        html! {
+            div class="flex shrink-0 items-center gap-2" {
                 (link_button(ButtonKind::Secondary, "/egress/log", "Live traffic"))
                 (open_modal(
                     "/egress/allowlist/service/new",
@@ -273,8 +192,8 @@ fn header(count: usize) -> Markup {
                 ))
                 (create_button("/egress/allowlist/host/new", "New egress rule"))
             }
-        }
-    }
+        },
+    )
 }
 
 /// The page's live region: the header, the search, the table of the page `view` selects and the
@@ -308,6 +227,12 @@ fn region(entries: &[EntryRecord], view: &View, projects: &ProjectHosts) -> Mark
 /// the line below it.
 fn results(view: &View, page: &paging::Page<'_>, total: usize, projects: &ProjectHosts) -> Markup {
     let mut scrolled = false;
+    let query = view.query(page.number);
+    let env = RowEnv {
+        projects,
+        query: &query,
+        region: "#config-list",
+    };
     html! {
         div id="rules-results" {
             @if page.matched == 0 {
@@ -317,31 +242,16 @@ fn results(view: &View, page: &paging::Page<'_>, total: usize, projects: &Projec
                 // `nth-child` indices follow the header order below.
                 div class="[&_table]:table-fixed [&_th:nth-child(2)]:w-28 [&_th:nth-child(3)]:w-28 [&_th:nth-child(4)]:w-44 [&_th:nth-child(5)]:w-20" {
                     (data_table(
-                        html! {
-                            (th(Cell::First, html! { "Target" })) (th(Cell::Text, html! { "Effect" }))
-                            (th(Cell::Mono, html! { "Port" })) (th(Cell::Text, html! { "Scope" }))
-                            (th(Cell::Actions, html! { span class="sr-only" { "Actions" } }))
-                        },
+                        rows::head(),
                         html! {
                             @for entry in &page.rows {
-                                @let target = target(entry);
                                 @let marked = is_highlighted(entry, view.highlight());
                                 @let scroll = marked && !std::mem::replace(&mut scrolled, true);
                                 tr class={"border-t border-line" @if marked { " bg-accent-soft" }}
                                     aria-current=[marked.then_some("true")]
                                     x-data=[scroll.then_some("")]
                                     x-init=[scroll.then_some("$el.scrollIntoView({ block: 'center' })")] {
-                                    (td(Cell::First, target_cell(entry, projects)))
-                                    (td(Cell::Text, effect_badge(entry)))
-                                    (td(Cell::Mono, html! { (ports_cell(entry)) }))
-                                    (td(Cell::Text, html! { (scope_label(entry)) }))
-                                    (td(Cell::Actions, html! {
-                                        button type="button" hx-delete={"/egress/allowlist/" (entry.id) (view.query(page.number))}
-                                            hx-target="#config-list" hx-swap="outerHTML"
-                                            aria-label={"Delete egress rule " (target)} title="Delete" class=(ICON_BUTTON_CLASS) {
-                                            (icon(Icon::Trash))
-                                        }
-                                    }))
+                                    (rows::cells(entry, &env, html! {}))
                                 }
                             }
                         },
@@ -405,115 +315,6 @@ async fn region_markup(state: &WebState, view: &View) -> Result<Markup, Box<Resp
     Ok(region(&entries, view, &super::project_hosts(state).await))
 }
 
-/// `(key, "Name (KEY)")` of every project, for the scope select.
-async fn project_options(state: &WebState) -> Result<Vec<(String, String)>, Box<Response>> {
-    let projects = df_db::catalog::list_projects(&state.pool)
-        .await
-        .map_err(|e| Box::new(internal_error(&e)))?;
-    Ok(projects
-        .into_iter()
-        .map(|p| (p.key.clone(), format!("{} ({})", p.name, p.key)))
-        .collect())
-}
-
-fn scope_field(options: &[(String, String)], selected: &str, errors: &FormErrors) -> Markup {
-    select_field(
-        "Applies to",
-        "project",
-        options,
-        selected,
-        Some("Every project (instance)"),
-        errors,
-    )
-}
-
-/// The "New egress rule" dialog. `effect` (Allow or Deny) is a radio group; the Alpine component
-/// `egressRule` (`scripts/egress-rule.ts`) disables "Applies to" and Port for Deny and shows
-/// `every project` and `any` in them. The server renders the same state, so a form that is shown
-/// again after an error keeps it. Disabled fields are not submitted.
-fn host_form(options: &[(String, String)], values: &HostForm, errors: &FormErrors) -> Markup {
-    let deny = values.is_deny();
-    let effect = values.effect;
-    let radio = |value: Effect, label: &'static str, tone: &'static str| {
-        html! {
-            label class={"flex flex-1 cursor-pointer items-center justify-center rounded-md px-3 text-sm font-medium text-muted has-focus-visible:outline-2 has-checked:border has-checked:" (tone)} {
-                input type="radio" name="effect" value=(value.as_str()) checked[effect == value] x-model="effect" class="sr-only";
-                (label)
-            }
-        }
-    };
-    let submit = if deny { "Add deny rule" } else { "Add rule" };
-    html! {
-        form id="form" class="space-y-4" hx-post="/egress/allowlist/host" hx-target="#form" hx-swap="outerHTML"
-            x-data={"egressRule(" (serde_json::json!({ "effect": effect.as_str() })) ")"} {
-            (form_error(errors))
-            div class="flex flex-col gap-4 md:flex-row" {
-                div class="shrink-0" { (field("Effect", "effect", errors, None, html! {
-                    div role="radiogroup" aria-label="Effect" class="flex min-h-11 items-stretch gap-1 rounded-lg border border-line bg-sunk p-1 lg:min-h-10" {
-                        (radio(Effect::Allow, "Allow", "border-status-completed-fg/40 has-checked:bg-status-completed-bg has-checked:text-status-completed-fg"))
-                        (radio(Effect::Deny, "Deny", "border-status-failed-fg/40 has-checked:bg-status-failed-bg has-checked:text-status-failed-fg"))
-                    }
-                })) }
-                div class="min-w-0 flex-1" { (field("Applies to", "project", errors, None, html! {
-                    select id="project" name="project" class=(INPUT_CLASS) x-ref="project" ":disabled"="deny" disabled[deny] {
-                        option value="" selected[values.project.is_empty() || deny] { "Every project (instance)" }
-                        @for (value, text) in options {
-                            option value=(value) selected[!deny && *value == values.project] { (text) }
-                        }
-                    }
-                })) }
-            }
-            div class="flex flex-col gap-4 md:flex-row" {
-                div class="min-w-0 flex-1" { (field("Host", "host", errors, None, html! {
-                    input id="host" name="host" type="text" value=(values.host) class=(INPUT_CLASS)
-                        aria-invalid=[errors.get("host").map(|_| "true")] aria-describedby="host-hint";
-                    p id="host-hint" class="text-xs text-faint" {
-                        span x-show="!deny" style=[deny.then_some("display: none")] { "A hostname such as api.anthropic.com, or *.example.org for all its subdomains." }
-                        span x-show="deny" style=[(!deny).then_some("display: none")] { "Every port and project. No requests are raised for matching hosts." }
-                    }
-                })) }
-                div class="md:w-32 md:shrink-0" { (field("Port", "port", errors, None, html! {
-                    input id="port" name="port" type="text" x-ref="port" ":disabled"="deny" disabled[deny]
-                        value=(if deny { ANY_PORT } else { values.port.as_str() }) class=(INPUT_CLASS)
-                        aria-invalid=[errors.get("port").map(|_| "true")];
-                    p class="text-xs text-faint" x-show="!deny" style=[deny.then_some("display: none")] { "Empty means 443. Plain HTTP needs an explicit 80." }
-                })) }
-            }
-            div class="mt-5 flex justify-end gap-2 border-t border-line pt-3" {
-                button type="button" "x-on:click"="$el.closest('dialog').close()" class=(action_class(ButtonKind::Secondary)) { "Cancel" }
-                button type="submit" class=(action_class(ButtonKind::Primary))
-                    "x-text"="deny ? 'Add deny rule' : 'Add rule'" { (submit) }
-            }
-        }
-    }
-}
-
-fn service_form(options: &[(String, String)], values: &ServiceForm, errors: &FormErrors) -> Markup {
-    html! {
-        form id="form" class="space-y-4" hx-post="/egress/allowlist/service" hx-target="#form" hx-swap="outerHTML" {
-            (form_error(errors))
-            (form_grid(html! {
-                (full_row(scope_field(options, &values.project, errors)))
-                (text_field("Namespace", "namespace", &values.namespace, errors, None))
-                (text_field("Service", "service", &values.service, errors, None))
-                (full_row(text_field("Ports", "ports", &values.ports, errors,
-                    Some("Comma separated target ports. Empty means every port of the Service."))))
-                (full_row(html! {
-                    label class="flex min-h-11 items-center gap-2 text-sm" {
-                        input type="checkbox" name="allow_dns" checked[values.allow_dns.is_some()];
-                        "Allow the cluster DNS (for headless Services)"
-                    }
-                }))
-            }))
-            (form_footer("Add cluster service"))
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
-// Handlers
-// ---------------------------------------------------------------------------------------------
-
 pub(super) async fn list(
     State(state): State<WebState>,
     shell: Shell,
@@ -530,220 +331,6 @@ pub(super) async fn list(
         &shell,
         region(&entries, &view, &projects),
     )
-}
-
-pub(super) async fn new_host(State(state): State<WebState>, headers: HeaderMap) -> Response {
-    if !crate::auth::is_htmx(&headers) {
-        return Redirect::to(ALLOWLIST).into_response();
-    }
-    match project_options(&state).await {
-        Ok(options) => modal(
-            "New egress rule",
-            host_form(&options, &HostForm::default(), &FormErrors::default()),
-        ),
-        Err(response) => *response,
-    }
-}
-
-pub(super) async fn new_service(State(state): State<WebState>, headers: HeaderMap) -> Response {
-    if !crate::auth::is_htmx(&headers) {
-        return Redirect::to(ALLOWLIST).into_response();
-    }
-    match project_options(&state).await {
-        Ok(options) => modal(
-            "Add cluster service",
-            service_form(&options, &ServiceForm::default(), &FormErrors::default()),
-        ),
-        Err(response) => *response,
-    }
-}
-
-/// Stores `kind`. `Some` is the final response (the updated list, or an error page); `None`
-/// means the database refused the entry and `errors` says why.
-async fn save(
-    state: &WebState,
-    user: &CurrentUser,
-    project: &str,
-    kind: &EntryKind,
-    errors: &mut FormErrors,
-) -> Option<Response> {
-    let principal = user.principal();
-    let actor = Actor {
-        principal: &principal,
-        roles: &user.roles,
-    };
-    let project_key = (!project.is_empty()).then_some(project);
-    match df_db::add_entry(&state.pool, actor, project_key, kind).await {
-        Ok(_) => Some(match region_markup(state, &View::default()).await {
-            Ok(region) => saved(region),
-            Err(response) => *response,
-        }),
-        Err(DbError::Conflict(message)) => {
-            errors.add("", message);
-            None
-        }
-        Err(DbError::NotFound(_)) => {
-            errors.add("project", "Unknown project.");
-            None
-        }
-        Err(e) => Some(internal_error(&e)),
-    }
-}
-
-pub(super) async fn add_host(
-    State(state): State<WebState>,
-    Extension(user): Extension<CurrentUser>,
-    Form(form): Form<HostForm>,
-) -> Response {
-    let mut errors = FormErrors::default();
-    let host = validate_allowlist_host(&form.host).map_err(|m| errors.add("host", m));
-    if form.is_deny() {
-        // A deny rule has no project and no port: both fields are ignored.
-        if let Ok(host) = host
-            && let Some(response) = save_deny(&state, &user, &host, &mut errors).await
-        {
-            return response;
-        }
-    } else {
-        let port = validate_port(&form.port).map_err(|m| errors.add("port", m));
-        if let (Ok(host), Ok(port)) = (host, port) {
-            let kind = EntryKind::HttpHost { host, port };
-            if let Some(response) = save(&state, &user, &form.project, &kind, &mut errors).await {
-                return response;
-            }
-        }
-    }
-    show_again(&state, errors, |options, errors| {
-        host_form(options, &form, errors)
-    })
-    .await
-}
-
-/// Stores the deny rule for `host`; like [`save`], `None` means `errors` says why not.
-async fn save_deny(
-    state: &WebState,
-    user: &CurrentUser,
-    host: &str,
-    errors: &mut FormErrors,
-) -> Option<Response> {
-    let principal = user.principal();
-    let actor = Actor {
-        principal: &principal,
-        roles: &user.roles,
-    };
-    match df_db::egress::add_deny_rule(&state.pool, host, actor).await {
-        Ok(_) => Some(match region_markup(state, &View::default()).await {
-            Ok(region) => saved(region),
-            Err(response) => *response,
-        }),
-        Err(DbError::Conflict(message)) => {
-            errors.add("", message);
-            None
-        }
-        Err(e) => Some(internal_error(&e)),
-    }
-}
-
-pub(super) async fn add_service(
-    State(state): State<WebState>,
-    Extension(user): Extension<CurrentUser>,
-    Form(form): Form<ServiceForm>,
-) -> Response {
-    let mut errors = FormErrors::default();
-    let namespace =
-        validate_k8s_name(&form.namespace, "Namespace").map_err(|m| errors.add("namespace", m));
-    let service = validate_k8s_name(&form.service, "Service").map_err(|m| errors.add("service", m));
-    let ports = validate_ports(&form.ports).map_err(|m| errors.add("ports", m));
-    if let (Ok(namespace), Ok(service), Ok(ports)) = (namespace, service, ports)
-        && service_exists(&state, &namespace, &service, &mut errors).await
-    {
-        let kind = EntryKind::ClusterService {
-            namespace,
-            service,
-            ports,
-            allow_dns: form.allow_dns.is_some(),
-        };
-        if let Some(response) = save(&state, &user, &form.project, &kind, &mut errors).await {
-            return response;
-        }
-    }
-    show_again(&state, errors, |options, errors| {
-        service_form(options, &form, errors)
-    })
-    .await
-}
-
-/// Whether the Service exists; adds the reason to `errors` if not.
-async fn service_exists(
-    state: &WebState,
-    namespace: &str,
-    service: &str,
-    errors: &mut FormErrors,
-) -> bool {
-    let Some(lookup) = &state.services else {
-        errors.add(
-            "",
-            "Services cannot be checked: the Kubernetes API is not available.",
-        );
-        return false;
-    };
-    match lookup.exists(namespace, service).await {
-        Ok(true) => true,
-        Ok(false) => {
-            errors.add(
-                "service",
-                format!("The Service {namespace}/{service} does not exist."),
-            );
-            false
-        }
-        Err(error) => {
-            tracing::warn!(%error, namespace, service, "Service lookup failed");
-            errors.add("", format!("The Service could not be checked: {error}"));
-            false
-        }
-    }
-}
-
-async fn show_again(
-    state: &WebState,
-    errors: FormErrors,
-    form: impl FnOnce(&[(String, String)], &FormErrors) -> Markup,
-) -> Response {
-    match project_options(state).await {
-        Ok(options) => invalid(form(&options, &errors)),
-        Err(response) => *response,
-    }
-}
-
-/// Deletes an entry and renders the same search and page again (a page that no longer exists
-/// shows the last one).
-pub(super) async fn remove(
-    State(state): State<WebState>,
-    Extension(user): Extension<CurrentUser>,
-    Path(id): Path<Uuid>,
-    Query(view): Query<View>,
-) -> Response {
-    let principal = user.principal();
-    let actor = Actor {
-        principal: &principal,
-        roles: &user.roles,
-    };
-    match df_db::delete_entry(&state.pool, actor, id).await {
-        Ok(_) => match region_markup(
-            &state,
-            &View {
-                highlight: String::new(),
-                ..view
-            },
-        )
-        .await
-        {
-            Ok(region) => region.into_response(),
-            Err(response) => *response,
-        },
-        Err(DbError::NotFound(_)) => not_found("The entry"),
-        Err(e) => internal_error(&e),
-    }
 }
 
 #[cfg(test)]

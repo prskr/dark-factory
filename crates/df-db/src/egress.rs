@@ -16,8 +16,10 @@ use crate::requests::Scope;
 use crate::runs::state_list;
 
 mod deny;
+mod update;
 
 pub use deny::{add_deny_rule, create_deny_rule, deny_patterns, deny_rule_for};
+pub use update::{make_global, update_entry};
 
 /// Key of the transaction-level advisory lock that serializes `http-host` entry creation with
 /// denial handling (iter2-egress-approvals design D2, D3).
@@ -48,6 +50,11 @@ pub struct EntryRecord {
     pub id: Uuid,
     pub project_key: Option<String>,
     pub task_key: Option<String>,
+    /// The id and the project of the task of a task rule; not part of the audit details.
+    #[serde(skip)]
+    pub task_id: Option<Uuid>,
+    #[serde(skip)]
+    pub task_project_key: Option<String>,
     #[serde(flatten)]
     pub kind: EntryKind,
 }
@@ -56,6 +63,8 @@ struct EntryRow {
     id: Uuid,
     project_key: Option<String>,
     task_key: Option<String>,
+    task_id: Option<Uuid>,
+    task_project_key: Option<String>,
     kind: String,
     host: Option<String>,
     port: Option<i32>,
@@ -99,6 +108,8 @@ impl TryFrom<EntryRow> for EntryRecord {
             id: row.id,
             project_key: row.project_key,
             task_key: row.task_key,
+            task_id: row.task_id,
+            task_project_key: row.task_project_key,
             kind,
         })
     }
@@ -314,17 +325,38 @@ pub async fn http_host_entries(pool: &PgPool) -> Result<Vec<HostEntry>, DbError>
 pub async fn list_entries(pool: &PgPool) -> Result<Vec<EntryRecord>, DbError> {
     let rows = sqlx::query_as!(
         EntryRow,
-        r#"SELECT e.id, p.key AS "project_key?", t.key AS "task_key?", e.kind, e.host, e.port,
+        r#"SELECT e.id, p.key AS "project_key?", t.key AS "task_key?", e.task_id,
+                  tp.key AS "task_project_key?", e.kind, e.host, e.port,
                   e.namespace, e.service, e.ports, e.allow_dns
            FROM egress_allowlist e
            LEFT JOIN projects p ON p.id = e.project_id
            LEFT JOIN tasks t ON t.id = e.task_id
+           LEFT JOIN projects tp ON tp.id = t.project_id
            ORDER BY (e.task_id IS NOT NULL), (e.project_id IS NOT NULL), p.key, t.key, e.kind,
                     e.host, e.namespace, e.service, e.id"#
     )
     .fetch_all(pool)
     .await?;
     rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// The entry `id`, or `None` if it does not exist.
+pub async fn get_entry(pool: &PgPool, id: Uuid) -> Result<Option<EntryRecord>, DbError> {
+    let row = sqlx::query_as!(
+        EntryRow,
+        r#"SELECT e.id, p.key AS "project_key?", t.key AS "task_key?", e.task_id,
+                  tp.key AS "task_project_key?", e.kind, e.host, e.port,
+                  e.namespace, e.service, e.ports, e.allow_dns
+           FROM egress_allowlist e
+           LEFT JOIN projects p ON p.id = e.project_id
+           LEFT JOIN tasks t ON t.id = e.task_id
+           LEFT JOIN projects tp ON tp.id = t.project_id
+           WHERE e.id = $1"#,
+        id
+    )
+    .fetch_optional(pool)
+    .await?;
+    row.map(TryInto::try_into).transpose()
 }
 
 /// Adds an entry at instance scope (`project_key` is `None`) or for a project. An identical
@@ -365,18 +397,8 @@ pub async fn add_entry(
             ));
         }
     };
-    let duplicate = sqlx::query_scalar!(
-        r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'cluster-service'
-             AND namespace = $1 AND service = $2 AND project_id IS NOT DISTINCT FROM $3) AS "exists!""#,
-        namespace,
-        service,
-        project_id
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    if duplicate {
-        return Err(DbError::Conflict("this entry already exists".into()));
-    }
+    lock_allowlist(&mut tx).await?;
+    ensure_no_cluster_service_duplicate(&mut tx, namespace, service, project_id, None).await?;
 
     let id = Uuid::now_v7();
     let scope = if project_id.is_some() {
@@ -403,9 +425,11 @@ pub async fn add_entry(
         id,
         project_key: project_key.map(str::to_string),
         task_key: None,
+        task_id: None,
+        task_project_key: None,
         kind: kind.clone(),
     };
-    record_entry_change(&mut tx, actor, "create", &record).await?;
+    record_entry_change(&mut tx, actor, "create", &record, &record).await?;
     tx.commit().await?;
     Ok(record)
 }
@@ -459,38 +483,8 @@ pub async fn create_http_host_entry(
 ) -> Result<EntryRecord, DbError> {
     lock_allowlist(tx).await?;
     let (project_id, task_id) = (scope.project_id(), scope.task_id());
-    let project_key = match project_id {
-        Some(id) => Some(
-            sqlx::query_scalar!("SELECT key FROM projects WHERE id = $1", id)
-                .fetch_optional(&mut **tx)
-                .await?
-                .ok_or_else(|| DbError::NotFound(format!("project `{id}`")))?,
-        ),
-        None => None,
-    };
-    let task_key = match task_id {
-        Some(id) => Some(
-            sqlx::query_scalar!("SELECT key FROM tasks WHERE id = $1", id)
-                .fetch_optional(&mut **tx)
-                .await?
-                .ok_or_else(|| DbError::NotFound(format!("task `{id}`")))?,
-        ),
-        None => None,
-    };
-    let duplicate = sqlx::query_scalar!(
-        r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'http-host'
-             AND host = $1 AND port = $2 AND project_id IS NOT DISTINCT FROM $3
-             AND task_id IS NOT DISTINCT FROM $4) AS "exists!""#,
-        host,
-        i32::from(port),
-        project_id,
-        task_id
-    )
-    .fetch_one(&mut **tx)
-    .await?;
-    if duplicate {
-        return Err(DbError::Conflict("this entry already exists".into()));
-    }
+    let keys = scope_keys(tx, scope).await?;
+    ensure_no_http_host_duplicate(tx, host, port, scope, None).await?;
 
     let id = Uuid::now_v7();
     sqlx::query!(
@@ -507,14 +501,16 @@ pub async fn create_http_host_entry(
     .await?;
     let record = EntryRecord {
         id,
-        project_key,
-        task_key,
+        project_key: keys.project,
+        task_key: keys.task,
+        task_id,
+        task_project_key: keys.task_project,
         kind: EntryKind::HttpHost {
             host: host.to_string(),
             port,
         },
     };
-    record_entry_change(tx, actor, "create", &record).await?;
+    record_entry_change(tx, actor, "create", &record, &record).await?;
     crate::network_access::settle(tx, scope, host, port, actor, deciding).await?;
     Ok(record)
 }
@@ -526,35 +522,148 @@ pub async fn delete_entry(
     id: Uuid,
 ) -> Result<EntryRecord, DbError> {
     let mut tx = pool.begin().await?;
-    let row = sqlx::query_as!(
-        EntryRow,
-        r#"SELECT e.id, p.key AS "project_key?", t.key AS "task_key?", e.kind, e.host, e.port,
-                  e.namespace, e.service, e.ports, e.allow_dns
-           FROM egress_allowlist e
-           LEFT JOIN projects p ON p.id = e.project_id
-           LEFT JOIN tasks t ON t.id = e.task_id
-           WHERE e.id = $1 FOR UPDATE OF e"#,
-        id
-    )
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| DbError::NotFound(format!("egress entry `{id}`")))?;
-    let record = EntryRecord::try_from(row)?;
-    sqlx::query!("DELETE FROM egress_allowlist WHERE id = $1", id)
-        .execute(&mut *tx)
-        .await?;
-    record_entry_change(&mut tx, actor, "delete", &record).await?;
+    let record = delete_entry_in(&mut tx, actor, id).await?;
     tx.commit().await?;
     Ok(record)
 }
 
-/// Audits the change of `record`. Deny rules write `egress_deny_rule.<verb>` and publish nothing:
-/// the gateway does not know them.
+/// [`delete_entry`] in the caller's transaction.
+async fn delete_entry_in(
+    tx: &mut Transaction<'_, Postgres>,
+    actor: Actor<'_>,
+    id: Uuid,
+) -> Result<EntryRecord, DbError> {
+    let record = EntryRecord::try_from(lock_entry(tx, id).await?)?;
+    sqlx::query!("DELETE FROM egress_allowlist WHERE id = $1", id)
+        .execute(&mut **tx)
+        .await?;
+    record_entry_change(tx, actor, "delete", &record, &record).await?;
+    Ok(record)
+}
+
+/// Loads entry `id` and locks its row until the end of `tx`.
+async fn lock_entry(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<EntryRow, DbError> {
+    sqlx::query_as!(
+        EntryRow,
+        r#"SELECT e.id, p.key AS "project_key?", t.key AS "task_key?", e.task_id,
+                  tp.key AS "task_project_key?", e.kind, e.host, e.port,
+                  e.namespace, e.service, e.ports, e.allow_dns
+           FROM egress_allowlist e
+           LEFT JOIN projects p ON p.id = e.project_id
+           LEFT JOIN tasks t ON t.id = e.task_id
+           LEFT JOIN projects tp ON tp.id = t.project_id
+           WHERE e.id = $1 FOR UPDATE OF e"#,
+        id
+    )
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| DbError::NotFound(format!("egress entry `{id}`")))
+}
+
+/// The keys that name a scope in an [`EntryRecord`].
+struct ScopeKeys {
+    project: Option<String>,
+    task: Option<String>,
+    task_project: Option<String>,
+}
+
+/// Resolves the keys of `scope`; an unknown project or task is [`DbError::NotFound`].
+async fn scope_keys(
+    tx: &mut Transaction<'_, Postgres>,
+    scope: HostScope,
+) -> Result<ScopeKeys, DbError> {
+    let project = match scope.project_id() {
+        Some(id) => Some(
+            sqlx::query_scalar!("SELECT key FROM projects WHERE id = $1", id)
+                .fetch_optional(&mut **tx)
+                .await?
+                .ok_or_else(|| DbError::NotFound(format!("project `{id}`")))?,
+        ),
+        None => None,
+    };
+    let (task, task_project) = match scope.task_id() {
+        Some(id) => {
+            let row = sqlx::query!(
+                "SELECT t.key, p.key AS project_key FROM tasks t
+                 JOIN projects p ON p.id = t.project_id WHERE t.id = $1",
+                id
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or_else(|| DbError::NotFound(format!("task `{id}`")))?;
+            (Some(row.key), Some(row.project_key))
+        }
+        None => (None, None),
+    };
+    Ok(ScopeKeys {
+        project,
+        task,
+        task_project,
+    })
+}
+
+/// [`DbError::Conflict`] if an `http-host` entry for `host`, `port` and `scope` exists, other than
+/// `exclude`. Callers hold the allowlist lock.
+async fn ensure_no_http_host_duplicate(
+    tx: &mut Transaction<'_, Postgres>,
+    host: &str,
+    port: u16,
+    scope: HostScope,
+    exclude: Option<Uuid>,
+) -> Result<(), DbError> {
+    let duplicate = sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'http-host'
+             AND host = $1 AND port = $2 AND project_id IS NOT DISTINCT FROM $3
+             AND task_id IS NOT DISTINCT FROM $4 AND id IS DISTINCT FROM $5) AS "exists!""#,
+        host,
+        i32::from(port),
+        scope.project_id(),
+        scope.task_id(),
+        exclude
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if duplicate {
+        return Err(DbError::Conflict("this entry already exists".into()));
+    }
+    Ok(())
+}
+
+/// [`DbError::Conflict`] if a `cluster-service` entry for `namespace`, `service` and
+/// `project_id` exists, other than `exclude`. Callers hold the allowlist lock.
+async fn ensure_no_cluster_service_duplicate(
+    tx: &mut Transaction<'_, Postgres>,
+    namespace: &str,
+    service: &str,
+    project_id: Option<Uuid>,
+    exclude: Option<Uuid>,
+) -> Result<(), DbError> {
+    let duplicate = sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM egress_allowlist WHERE kind = 'cluster-service'
+             AND namespace = $1 AND service = $2 AND project_id IS NOT DISTINCT FROM $3
+             AND id IS DISTINCT FROM $4) AS "exists!""#,
+        namespace,
+        service,
+        project_id,
+        exclude
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if duplicate {
+        return Err(DbError::Conflict("this entry already exists".into()));
+    }
+    Ok(())
+}
+
+/// Audits the change of `record` (with `details`, usually the record) and publishes
+/// `egress_policy`. Deny rules write `egress_deny_rule.<verb>`; they are published too, so
+/// gateways learn of a deny change within a second (`egress-held-connections`).
 async fn record_entry_change(
     tx: &mut Transaction<'_, Postgres>,
     actor: Actor<'_>,
     verb: &str,
     record: &EntryRecord,
+    details: &impl Serialize,
 ) -> Result<(), DbError> {
     let is_deny = matches!(record.kind, EntryKind::HttpDeny { .. });
     let entry = NewAuditEntry::new(
@@ -568,11 +677,8 @@ async fn record_entry_change(
         "egress_allowlist",
         record.id.to_string(),
     )
-    .with_details(record)?;
+    .with_details(details)?;
     write_audit_entry(&mut **tx, &entry).await?;
-    if is_deny {
-        return Ok(());
-    }
     publish(&mut **tx, &Notification::EgressPolicy).await
 }
 
@@ -940,6 +1046,29 @@ mod tests {
         .unwrap();
         assert_eq!(details["host"], "pypi.org");
         assert_eq!(details["project_key"], "DF");
+    }
+
+    #[tokio::test]
+    async fn one_entry_is_loaded_by_id_and_a_missing_id_is_none() {
+        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+        insert_project(&pool, "DF").await;
+        let (principal, roles) = actor_fixture();
+        let actor = Actor {
+            principal: &principal,
+            roles: &roles,
+        };
+        let project = add_entry(&pool, actor, Some("DF"), &http_host("pypi.org", 443))
+            .await
+            .unwrap();
+        add_entry(&pool, actor, None, &http_host("github.com", 443))
+            .await
+            .unwrap();
+
+        let found = get_entry(&pool, project.id).await.unwrap();
+        let missing = get_entry(&pool, Uuid::now_v7()).await.unwrap();
+
+        assert_eq!(found, Some(project));
+        assert_eq!(missing, None);
     }
 
     #[tokio::test]
