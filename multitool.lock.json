@@ -4,27 +4,27 @@
     "binaries": [
       {
         "cpu": "x86_64",
-        "file": "cargo-deny-0.21.0-x86_64-unknown-linux-musl/cargo-deny",
+        "file": "cargo-deny-0.22.0-x86_64-unknown-linux-musl/cargo-deny",
         "kind": "archive",
         "os": "linux",
-        "sha256": "a2170b854ff697e79e39c4c538981c9c1bdd803addbae6719a4cb66b4585a903",
-        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.21.0/cargo-deny-0.21.0-x86_64-unknown-linux-musl.tar.gz"
+        "sha256": "98c56e6a408bfa5c3c60744b6015aaa6aa08f743fdeb88386d06fca035bb1786",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.22.0/cargo-deny-0.22.0-x86_64-unknown-linux-musl.tar.gz"
       },
       {
         "cpu": "arm64",
-        "file": "cargo-deny-0.21.0-aarch64-unknown-linux-musl/cargo-deny",
+        "file": "cargo-deny-0.22.0-aarch64-unknown-linux-musl/cargo-deny",
         "kind": "archive",
         "os": "linux",
-        "sha256": "47cc5d88d43cd568028080fece02d729f56f0ff8e6c168563ce6589e3c0f4738",
-        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.21.0/cargo-deny-0.21.0-aarch64-unknown-linux-musl.tar.gz"
+        "sha256": "4818d44cdcac285776336504fca722493ab634d3377b94a462e98aad3f41484a",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.22.0/cargo-deny-0.22.0-aarch64-unknown-linux-musl.tar.gz"
       },
       {
         "cpu": "arm64",
-        "file": "cargo-deny-0.21.0-aarch64-apple-darwin/cargo-deny",
+        "file": "cargo-deny-0.22.0-aarch64-apple-darwin/cargo-deny",
         "kind": "archive",
         "os": "macos",
-        "sha256": "c99a789160775ada8cb54aed72cfdae5a9b72e27434f8868d17c9634c3f52425",
-        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.21.0/cargo-deny-0.21.0-aarch64-apple-darwin.tar.gz"
+        "sha256": "aa23e2f32eaf0b92efb36de3fc925f3e1b841fdafcc555ddab43d4d146cec251",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.22.0/cargo-deny-0.22.0-aarch64-apple-darwin.tar.gz"
       }
     ]
   },
