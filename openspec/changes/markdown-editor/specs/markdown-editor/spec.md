@@ -7,7 +7,7 @@ Defines the Markdown field of the web UI: writing and previewing Markdown in for
 ## ADDED Requirements
 
 ### Requirement: Markdown field with Write and Preview
-A Markdown field SHALL be a labelled multi-line text field in a monospace font with two tabs, "Write" and "Preview", following the WAI-ARIA tabs pattern. "Write" SHALL be open when the form opens. The field SHALL grow with its content up to 70 % of the viewport height and then scroll inside. Its hint and validation error SHALL be shown and linked like those of other form fields. The text field SHALL be the submitted form value in every mode.
+A Markdown field SHALL be a labelled multi-line text field in a monospace font with two tabs, "Write" and "Preview", following the WAI-ARIA tabs pattern. "Write" SHALL be open when the form opens. The field SHALL grow with its content up to 70 % of the viewport height in every supported browser and then scroll inside. Its hint and validation error SHALL be shown and linked like those of other form fields. The text field SHALL be the submitted form value in every mode.
 
 #### Scenario: Open the persona form
 - **WHEN** a board member opens the persona form
@@ -56,7 +56,7 @@ The preview SHALL be requested when "Preview" opens and the text changed since t
 - **THEN** "Preview" shows "Preview not available" with a retry action, and "Write" still holds the text
 
 ### Requirement: Preview endpoint
-The preview endpoint SHALL accept only requests from logged-in board members that pass the CSRF protection of other form posts. It SHALL accept a text of at most 256 KiB and answer a larger request with HTTP 413, which the field shows as "Text too long for a preview (max 256 KiB)". It SHALL return only the rendered, sanitized HTML, SHALL store nothing and SHALL NOT log the text.
+The preview endpoint SHALL accept only requests from logged-in board members that pass the CSRF protection of other form posts. It SHALL accept a text of at most 256 KiB, measured after decoding the request, and answer a larger text with HTTP 413, which the field shows as "Text too long for a preview (max 256 KiB)". It SHALL return only the rendered, sanitized HTML, SHALL store nothing and SHALL NOT log the text.
 
 #### Scenario: Not logged in
 - **WHEN** a request without a session posts to the preview endpoint
@@ -70,8 +70,12 @@ The preview endpoint SHALL accept only requests from logged-in board members tha
 - **WHEN** a board member opens "Preview" for a text of 300 KiB
 - **THEN** the endpoint answers 413, the preview shows "Text too long for a preview (max 256 KiB)", and the form can still be saved
 
+#### Scenario: Text that grows in the request
+- **WHEN** a board member opens "Preview" for 200 KiB of `#` characters, which the form encoding makes about three times larger
+- **THEN** the preview is rendered
+
 ### Requirement: Markdown field without scripts
-When the field's script is not running, the Markdown field SHALL be a plain labelled text field with its hint and error, without tabs, and the form SHALL submit its text unchanged.
+When the field's script is not running, the Markdown field SHALL be a plain labelled text field with its hint and error, without tabs, at least its configured row height (growing only where the browser does it without scripts), and the form SHALL submit its text unchanged.
 
 #### Scenario: Script disabled
 - **WHEN** a page with a Markdown field is rendered with JavaScript disabled
