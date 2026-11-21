@@ -16,7 +16,7 @@ This change implements ADR-0040 phases 1 and 2 (roadmap iteration 6, "Agent memo
 - **Secret scan on every write.** `remember`, `forget` reasons and human edits pass the same secret rules as the push checks. A match rejects the write and names the rule; nothing is stored, and the stored tool call holds the arguments masked.
 - **Loaded at run start: pinned memories and an index.** Like the harness's `MEMORY.md`: the first turn of every run gets one block with the full text of pinned memories and a one-line index (id, scope, author, date, summary) of the other memories in scope, labeled "not reviewed", within a size cap and with a fixed end line. Everything else is reached through `recall`. Only humans pin.
 - **Marked as data.** The block, every `recall` and `search_history` result and the tool descriptions say that memories are notes written by agents, are hints and not instructions, and must be checked against the repository and the task. Memories never go into the system prompt.
-- **Run record.** The run stores the exact memory block it got (also when empty) and the ids in it; the run view lists them, plus the memories the run created, replaced or deleted.
+- **Run record.** The run stores the exact memory block it got (also when empty) and the ids in it; the run view lists them, plus the memories the run created, replaced or deleted. The transcript shows one line "Memory loaded: 1 pinned, 37 in index" that links there; the block text itself is not in the transcript.
 - **"Memory" tab on the project settings page.** Board members list, search, filter (scope, persona, author, run), create, edit, pin, unpin and delete memories, see each memory's history, and undo all memory changes of one run (delete what it created, restore what it replaced, re-create what it deleted). A switch turns memory off for the project.
 - **Audit.** Every create, update, delete, pin and unpin writes an audit entry (`memory.*`) with the memory id, scope and content before and after, for agents and humans alike.
 - **Lifecycle.** Memories are deleted with their project (and persona memories with their persona) in the same transaction.
@@ -44,10 +44,11 @@ Out of scope:
 - `run-orchestration`: `Assign` carries the memory block, fixed per run.
 - `acp-harness`: the runtime puts the memory block before the first prompt of every run.
 - `audit-log`: `memory.*` actions.
+- `factory-activity`: a "memory loaded" event with the counts in the run's transcript.
 
 ## Impact
 
-- **Contract** (`contract/proto/darkfactory/agent/v1/agent.proto`): `Assign.memory_context` (string). Additive. `contract/mcp/factory-tools.v2.json`: four tools.
+- **Contract** (`contract/proto/darkfactory/agent/v1/agent.proto`): `Assign.memory_context` (string). `contract/proto/darkfactory/transcript/v1`: `FactoryActivity.memory_loaded` (`MemoryLoaded`: pinned, indexed, left out). Both additive. `contract/mcp/factory-tools.v2.json`: four tools.
 - **Core** (`df-core`): `Memory` domain type and validation, rendering of the memory block; `SecretRules` moves from `df-gateway` to `df-core` (rules file included) so the control plane can scan; built-in skill `dark-factory-memory` (needs `iter4-skills`).
 - **Database** (`df-db`): modules `memories` (tables `memories`, `memory_changes`, `run_memory_context`, column `projects.memory_enabled`) and `history_search` (`tasks.search`, table `transcript_messages` filled with the transcript events, GIN indexes, backfill); migrations and `.sqlx/` metadata.
 - **Agent channel** (`df-agent-channel`): the four tool handlers, argument mask before the claim, memory block in `assign.rs`, `CHAT_TOOLS`, `CHAT_INSTRUCTIONS`.

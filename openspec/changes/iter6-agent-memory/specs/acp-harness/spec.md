@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Memory block before the first prompt
-When `Assign.memory_context` is not empty, the runtime SHALL put it as its own text block before the prompts of the first turn of the run, after a continuation summary if there is one, both for a new and for a resumed harness session. Later turns of the run SHALL NOT repeat it. The runtime SHALL NOT emit the block into the transcript; the run record keeps it (`agent-memory`, "Memory on the run view").
+When `Assign.memory_context` is not empty, the runtime SHALL put it as its own text block before the prompts of the first turn of the run, after a continuation summary if there is one, both for a new and for a resumed harness session. Later turns of the run SHALL NOT repeat it. The runtime SHALL NOT emit the block text into the transcript; the run record keeps it (`agent-memory`, "Memory on the run view") and the control plane records a "memory loaded" event (`factory-activity`).
 
 #### Scenario: First turn
 - **WHEN** a run with a memory block starts its first turn with a message from "Peter Kurfer"
@@ -19,4 +19,4 @@ When `Assign.memory_context` is not empty, the runtime SHALL put it as its own t
 
 #### Scenario: Not in the transcript
 - **WHEN** a run with a memory block starts
-- **THEN** no transcript event of the run contains the block
+- **THEN** no transcript event of the run contains the block text

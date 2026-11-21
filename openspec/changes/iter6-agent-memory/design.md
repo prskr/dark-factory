@@ -153,7 +153,24 @@ Rules:
 - No memories in scope, or memory off (D14): empty block.
 - Project scope and the run's persona scope only; memories of other personas are never in the block.
 
-`Assign.memory_context` (string, new field) carries the block. The runtime puts it as its own text block before the first prompt of every run (after a continuation summary), also when the harness session is resumed (memories may have changed since the last run). The block does not appear in the transcript (Q1 decision): it would repeat on every run and push the conversation down. Humans see it through the run's Memory section (D11), which opens the stored block from `run_memory_context`.
+`Assign.memory_context` (string, new field) carries the block. The runtime puts it as its own text block before the first prompt of every run (after a continuation summary), also when the harness session is resumed (memories may have changed since the last run). The block text does not appear in the transcript (Q1 decision): it would repeat on every run and push the conversation down. Instead, when the control plane stores a non-empty block, it appends one factory activity event "memory loaded" to the run's transcript in the same transaction (source key per run, so it is written once). The event carries the counts only (pinned, in index, left out), like "artifact written" carries no content. The transcript shows it as one line, "Memory loaded: 1 pinned, 37 in index", linking to the run's Memory section (D11), which opens the stored block from `run_memory_context`.
+
+```proto
+message FactoryActivity {
+  oneof kind {
+    ArtifactWritten artifact_written = 1;
+    MemoryLoaded memory_loaded = 2;
+  }
+}
+
+// The memory block a run got at its start. Never carries the text.
+message MemoryLoaded {
+  uint32 pinned = 1;
+  uint32 indexed = 2;
+  // Memories in scope that did not fit into the block.
+  uint32 left_out = 3;
+}
+```
 
 The block never goes into the system prompt: the system prompt is where instructions live, and the harness may treat it with more authority. In the user turn the header, the "not reviewed" label and the end line set it apart from the task's messages.
 
@@ -270,7 +287,7 @@ It is the fastest containment after a poisoning, and the setting for a project t
 
 Peter Kurfer decided all questions on 2026-11-21. No question is open.
 
-- **Q1: Index in the run-start block (deviation from ADR-0040).** Yes: pinned memories in full plus a one-line index of the others, labeled "not reviewed", capped at 16 KiB (D5). The block is not shown in the transcript; humans open it from the run's Memory section (D5, D11). Trade-off accepted: unreviewed agent text (200 characters per line) reaches every run of the project.
+- **Q1: Index in the run-start block (deviation from ADR-0040).** Yes: pinned memories in full plus a one-line index of the others, labeled "not reviewed", capped at 16 KiB (D5). The block text is not shown in the transcript; a one-line "memory loaded" event with the counts is, and links to the run's Memory section, which opens the block (D5, D11). Trade-off accepted: unreviewed agent text (200 characters per line) reaches every run of the project.
 - **Q2: Who pins.** Board members only (D6).
 - **Q3: Agent `forget` deletes for real.** Yes, hard delete; `memory_changes` keeps the last content, the run view shows it, and undo re-creates it (D10).
 - **Q4: Review before a memory enters the block.** No. New memories enter the index at once, labeled unreviewed; pinning marks reviewed ones.
