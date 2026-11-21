@@ -162,6 +162,16 @@
   ],
   "packageRules": [
     {
+      "description": "sqlx 0.9.1 query macros need cargo (`cargo metadata`), which the Bazel build does not have; skip that release (hold in Cargo.toml)",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "sqlx"
+      ],
+      "allowedVersions": "!/^0\\.9\\.1$/"
+    },
+    {
       "description": "One PR for wasmtime: the wasmtime crates share one version and must move together",
       "matchManagers": [
         "cargo"
