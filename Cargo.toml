@@ -112,7 +112,7 @@ kube = { version = "5.1", default-features = false, features = ["client", "runti
 landlock = "0.4"
 maud = { version = "0.27", features = ["axum"] }
 minijinja = { version = "3", default-features = false, features = ["builtins", "fuel"] }
-nix = { version = "0.31", default-features = false }
+nix = { version = "0.32", default-features = false }
 openidconnect = "4"
 opentelemetry = { version = "0.33", default-features = false, features = ["metrics", "trace", "internal-logs"] }
 opentelemetry-otlp = { version = "0.33", default-features = false, features = ["grpc-tonic", "tls-ring", "tls-roots", "metrics", "trace"] }
