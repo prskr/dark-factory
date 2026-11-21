@@ -150,6 +150,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Declarative configuration import | idea | F4 |
 | Docs site: preview of the docs for every pull request (today the PR job only builds) | idea | `openspec/changes/archive/2026-11-04-docs-site` (non-goal) |
 | Sandbox pod resources: CPU/memory requests and limits for sandbox pods, configurable separately for task and chat runs (today none are set) | idea | `crates/df-k8s/src/render.rs`, `openspec/changes/iter3-chats` (review log) |
+| Chat runs on an `emptyDir` instead of a PVC; harness session state restored from a per-chat snapshot in PostgreSQL; separate chat keep-alive | designed | `openspec/changes/chat-emptydir-session-restore` |
 | Docs site: check external links (dead URLs) in CI | idea | `openspec/changes/archive/2026-11-04-docs-site` (D7: only links within the site are checked) |
 | Docs served by the control plane (air-gapped instances; the Docs entry of the profile menu needs the internet today) | idea | `openspec/changes/archive/2026-11-04-docs-site` (Risks) |
 | Real screenshots of the task views for the landing page cards, from the demo profile (`just seed-demo`, delivered by `e2e-suite-and-seed`) | idea | [`docs/design-workflow.md`](../../docs/design-workflow.md) "Build order", `docs/landing/_index.md` |
