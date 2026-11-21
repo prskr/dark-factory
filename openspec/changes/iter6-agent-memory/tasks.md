@@ -1,6 +1,6 @@
 # Tasks
 
-> **Decisions first:** the open questions Q1–Q12 in `design.md` are answered by the user before group 4 starts; write the answers back into `design.md` and the spec deltas. Group 2 (PenPot) must be approved before group 7. Group 3 (phase 1) needs only group 1 (it masks secrets in hits) and can ship first. Group 8 needs `iter4-skills` merged.
+> **Decisions:** Q1–Q12 are decided (`design.md`, "Decisions Taken"). Group 2 (PenPot) must be approved before group 7. Group 3 (phase 1) needs only group 1 (it masks secrets in hits) and can ship first. Group 8 needs `iter4-skills` merged.
 >
 > Tests marked "container-backed" need a PostgreSQL container (`df_test_postgres`); state in the report which of them could not run.
 
@@ -36,7 +36,7 @@
 - [ ] 6.1 Write failing `df-core` unit tests first for rendering the block (design D5): header, pinned section with indented content lines, the 8 KiB cap and overflow into the index ("Pinned memories over 8 KiB"), the "not reviewed" index heading, index ordering by last change, the 16 KiB cap with the "N more" line, the end line, empty block without memories, author lines with last changer and creator. Then implement. Verify: `cargo nextest run -p df-core memory`.
 - [ ] 6.2 Add `string memory_context = 8;` to `Assign` in `agent.proto` with a field comment. Verify: `cargo build --workspace` and `bazel --bazelrc=.bazelrc.agents build //contract/...`.
 - [ ] 6.3 Write failing tests first for `run-orchestration` "Memory block in Assign" (all three scenarios) and `agent-memory` "Memory block at run start" (all three scenarios), "Memory block fixed per run" ("Reconnect", "Empty block stays empty", and two concurrent first `build_assign` calls getting the same block). Then add `run_memory_context` (migration, `df-db` module `memories`), and in `build_assign` store the block, also when empty, with `INSERT … ON CONFLICT (run_id) DO NOTHING` and read it back. Verify: `cargo nextest run -p df-agent-channel assign` and `cargo nextest run -p df-db memories` (container-backed).
-- [ ] 6.4 Write failing `factory-agent` tests first for `acp-harness` "Memory block before the first prompt" (first turn with and without a continuation summary, resumed session, second turn, `memory.loaded` notice). Then implement in `build_acp_prompt_blocks` and `begin_turn`. Verify: `cargo nextest run -p factory-agent`.
+- [ ] 6.4 Write failing `factory-agent` tests first for `acp-harness` "Memory block before the first prompt" (first turn with and without a continuation summary, resumed session, second turn, no transcript event contains the block). Then implement in `build_acp_prompt_blocks` and `begin_turn`. Verify: `cargo nextest run -p factory-agent`.
 
 ## 7. Web UI
 
@@ -50,8 +50,8 @@
 
 ## 9. Documentation
 
-- [ ] 9.1 Published docs: new how-to `docs/content/using/agent-memory.md` (what memories are, scopes, what agents get at run start, finding a bad memory and undoing a poisoned run, switching memory off, the Memory tab, security model); `docs/content/architecture/agent-runs.md` (four new tools, memory block in the first prompt); `docs/content/using/chats.md` (chat tools and instructions); `crates/factory-agent/docs/` (notice `memory.loaded`, `Assign.memory_context`). Verify: `just docs-build`.
-- [ ] 9.2 Contributor and product docs: `product/agent-playbook.md` (memory section matching the skill), `product/GLOSSARY.md` (terms "Memory", "Pinned memory", "Protected memory"), ADR-0040 amended for the deviations in `design.md` and the decisions taken on Q1–Q4, Q8 and Q11, `design/tech-stack.md` agent memory row status, roadmap iteration 6 memory line (status) and a backlog row for promoting a memory into the project context. Verify: review of the diff; `openspec validate iter6-agent-memory --strict`.
+- [ ] 9.1 Published docs: new how-to `docs/content/using/agent-memory.md` (what memories are, scopes, what agents get at run start, finding a bad memory and undoing a poisoned run, switching memory off, the Memory tab, security model); `docs/content/architecture/agent-runs.md` (four new tools, memory block in the first prompt); `docs/content/using/chats.md` (chat tools and instructions); `crates/factory-agent/docs/` (`Assign.memory_context`, put before the first prompt and kept out of the transcript). Verify: `just docs-build`.
+- [ ] 9.2 Contributor and product docs: `product/agent-playbook.md` (memory section matching the skill), `product/GLOSSARY.md` (terms "Memory", "Pinned memory", "Protected memory"), ADR-0040 amended for the deviations and the decisions in `design.md` ("Decisions Taken", in particular Q1–Q4, Q8 and Q11), `design/tech-stack.md` agent memory row status, roadmap iteration 6 memory line (status) and backlog rows for promoting a memory into the project context and for the text search configuration per instance (Q7). Verify: review of the diff; `openspec validate iter6-agent-memory --strict`.
 
 ## 10. Final checks
 

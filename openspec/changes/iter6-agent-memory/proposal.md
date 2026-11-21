@@ -29,6 +29,7 @@ Out of scope:
 - The UI full-text search across tasks and transcripts: roadmap iteration 6, "Full-text search across tasks and transcripts". This change builds the index it can reuse.
 - Importing the harness's existing `MEMORY.md` files from task volumes: rejected. They are few, unreviewed, and would bypass the secret scan and provenance.
 - Instance scope and persona memories across projects: rejected (ADR-0040).
+- Text search configuration per instance (this change uses `english`): roadmap backlog (row added at archive).
 - Agents pinning memories: rejected for this change (design Q2).
 
 ## Capabilities
@@ -50,7 +51,7 @@ Out of scope:
 - **Core** (`df-core`): `Memory` domain type and validation, rendering of the memory block; `SecretRules` moves from `df-gateway` to `df-core` (rules file included) so the control plane can scan; built-in skill `dark-factory-memory` (needs `iter4-skills`).
 - **Database** (`df-db`): modules `memories` (tables `memories`, `memory_changes`, `run_memory_context`, column `projects.memory_enabled`) and `history_search` (`tasks.search`, table `transcript_messages` filled with the transcript events, GIN indexes, backfill); migrations and `.sqlx/` metadata.
 - **Agent channel** (`df-agent-channel`): the four tool handlers, argument mask before the claim, memory block in `assign.rs`, `CHAT_TOOLS`, `CHAT_INSTRUCTIONS`.
-- **factory-agent**: prepends `Assign.memory_context` to the first turn of a run; notice `memory.loaded`.
+- **factory-agent**: prepends `Assign.memory_context` to the first turn of a run; the block is not written to the transcript.
 - **Web** (`df-web`): Memory tab on the project settings page, memory lists on the run view.
 - **Docs**: new how-to `docs/content/using/agent-memory.md`, `docs/content/architecture/agent-runs.md`, `docs/content/using/chats.md`, `crates/factory-agent/docs/` (notice), `product/agent-playbook.md` (memory section), `docs/architecture.md` (`SecretRules` move), glossary term "Memory".
 - **Depends on** `iter4-skills` (DF-7, built-in skills) for the skill; everything else stands alone. If `iter4-skills` lands later, the skill task waits; the tool descriptions and the memory block carry the minimum rules on their own.

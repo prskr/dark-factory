@@ -32,6 +32,7 @@
 - UI search across tasks and transcripts → roadmap iteration 6, "Full-text search across tasks and transcripts" (reuses D9's index).
 - Import of existing harness `MEMORY.md` files → rejected.
 - Instance scope, persona memories across projects → rejected (ADR-0040).
+- Text search configuration per instance (for example `german` instead of `english`) → roadmap backlog (row added at archive; Q7 decision). The generated `tsvector` columns then become columns filled with the configured language and are rebuilt when it changes.
 - Disabling the harness's own auto-memory → rejected for this change: it does no harm, it just doesn't persist. The skill tells agents to use `remember` instead.
 
 ## Deviations from ADR-0040
@@ -152,7 +153,7 @@ Rules:
 - No memories in scope, or memory off (D14): empty block.
 - Project scope and the run's persona scope only; memories of other personas are never in the block.
 
-`Assign.memory_context` (string, new field) carries the block. The runtime puts it as its own text block before the first prompt of every run (after a continuation summary), also when the harness session is resumed (memories may have changed since the last run). It emits a `memory.loaded` notice (level `INFO`) with the block, so the transcript shows what the agent got.
+`Assign.memory_context` (string, new field) carries the block. The runtime puts it as its own text block before the first prompt of every run (after a continuation summary), also when the harness session is resumed (memories may have changed since the last run). The block does not appear in the transcript (Q1 decision): it would repeat on every run and push the conversation down. Humans see it through the run's Memory section (D11), which opens the stored block from `run_memory_context`.
 
 The block never goes into the system prompt: the system prompt is where instructions live, and the harness may treat it with more authority. In the user turn the header, the "not reviewed" label and the end line set it apart from the task's messages.
 
@@ -265,17 +266,20 @@ It is the fastest containment after a poisoning, and the setting for a project t
 3. The tools reach runtimes through `Assign.tools`, which the control plane sends; no runtime change is needed for them.
 4. Rollback: drop the tables and columns. Memories are lost; the audit log keeps their content.
 
-## Open Questions
+## Decisions Taken
 
-- **Q1: Index in the run-start block (deviation from ADR-0040).** Recommendation: pinned memories in full plus a one-line index of the others, labeled "not reviewed", capped at 16 KiB (D5), like `MEMORY.md`. Trade-off: unreviewed agent text (200 characters per line) reaches every run of the project. Alternative: pinned only, as ADR-0040 says; safer, but agents search blind and unpinned memories are effectively invisible. If accepted, amend ADR-0040.
-- **Q2: Who pins.** Recommendation: board members only (D6). Alternative: agents may pin with a limit (for example 5 per scope); that hands a poisoned run the strongest position in the block.
-- **Q3: Agent `forget` deletes for real.** Recommendation: yes, hard delete; `memory_changes` keeps the last content, the run view shows it, and undo re-creates it (D10). Alternative: soft delete with a "deleted" state in every query; more states for the same result.
-- **Q4: Review before a memory enters the block.** Recommendation: no. New memories enter the index at once, labeled unreviewed; humans review in the Memory tab, pinning marks reviewed ones. Alternative: agent memories reach the block only after a board member approves them (approval type `memory`); safest, but every useful fact waits for a human and the inbox fills up.
-- **Q5: Dedicated skill or a section in `dark-factory-basics`.** Recommendation: dedicated `dark-factory-memory` plus a three-line pointer in basics (D13), so basics stays short. Alternative: one section in basics.
-- **Q6: Phase 1 in this change.** Recommendation: keep `search_history` and its index here as a separate task group (group 3); it can ship first after the secret rules move (group 1). Alternative: a separate change shared with the iteration 6 UI search.
-- **Q7: Text search configuration.** Recommendation: `english` (stemming helps "flaky"/"flakiness"; stopwords such as "not" are dropped). Alternative: `simple` (no stemming, language neutral). A per-project setting is rejected for now.
-- **Q8: Cleaning up after a poisoned run.** Recommendation: "Undo memory changes of this run" on the Memory tab with the run filter (D10): deletes what it created, restores what it replaced, re-creates what it deleted. Alternative: delete everything the run created or replaced; simpler, but it destroys the good facts the run overwrote.
-- **Q9: The planning-chat example is instance-wide.** "Linus Torvalds is the software engineer persona" is true in every project, but ADR-0040 has no instance scope. Recommendation: keep ADR-0040; `list_personas` already answers it, and the skill says not to store what can be read elsewhere. Revisit only if many memories get duplicated across projects.
-- **Q10: Controllers see memories.** Recommendation: not in this change (board members only); read access for `controller` comes with the permission model.
-- **Q11: Memory off per project.** Recommendation: yes, a switch on the Memory tab, default on (D14). Cheap, and the fastest containment. Alternative: no switch; containment then means deleting memories one by one.
-- **Q12: Stale memories before the curator.** Recommendation: accept them in phase 2; every line shows the date of last change, and agents and humans replace or forget them. Alternative: hide memories not changed for N months from the index (still found by `recall`); decide when phase 2 shows the need.
+Peter Kurfer decided all questions on 2026-11-21. No question is open.
+
+- **Q1: Index in the run-start block (deviation from ADR-0040).** Yes: pinned memories in full plus a one-line index of the others, labeled "not reviewed", capped at 16 KiB (D5). The block is not shown in the transcript; humans open it from the run's Memory section (D5, D11). Trade-off accepted: unreviewed agent text (200 characters per line) reaches every run of the project.
+- **Q2: Who pins.** Board members only (D6).
+- **Q3: Agent `forget` deletes for real.** Yes, hard delete; `memory_changes` keeps the last content, the run view shows it, and undo re-creates it (D10).
+- **Q4: Review before a memory enters the block.** No. New memories enter the index at once, labeled unreviewed; pinning marks reviewed ones.
+- **Q5: Skill.** A dedicated `dark-factory-memory` plus a short pointer in `dark-factory-basics` (D13).
+- **Q6: Phase 1 in this change.** Yes, as its own task group (group 3).
+- **Q7: Text search configuration.** `english` now. A setting on instance level comes later (Non-Goals, roadmap backlog).
+- **Q8: Cleaning up after a poisoned run.** "Undo memory changes of this run" on the Memory tab (D10).
+- **Q9: No instance scope.** Kept as in ADR-0040; `list_personas` answers who is who.
+- **Q10: Controllers.** No read access in this change; it comes with the permission model.
+- **Q11: Memory off per project.** Yes, a switch on the Memory tab, default on (D14).
+- **Q12: Stale memories before the curator.** Accepted in phase 2; every line shows the date of last change, and agents and humans replace or forget them.
+
