@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Memory changes audited
-Every change of a memory by an agent or a human SHALL write an audit entry with resource type `memory`, the memory id as resource and the project key and scope (with persona) in the details, in the same transaction as the change: `memory.create` with summary and content, `memory.update` with summary, content and pinned flag before and after, `memory.delete` with the last summary and content and, for agents, the reason, and `memory.pin` and `memory.unpin`. A write rejected by validation, a limit, the secret scan or protection SHALL leave no `memory.*` entry; the tool call's own entry remains.
+Every change of a memory by an agent or a human SHALL write an audit entry with resource type `memory`, the memory id as resource and the project key and scope (with persona) in the details, in the same transaction as the change: `memory.create` with summary and content, `memory.update` with summary, content and pinned flag before and after, `memory.delete` with the last summary and content and, for agents, the reason, and `memory.pin` and `memory.unpin`.
 
 #### Scenario: Agent creates a memory
 - **WHEN** run 2 of `DF-31` by persona `linus` creates `m57`
@@ -12,6 +12,9 @@ Every change of a memory by an agent or a human SHALL write an audit entry with 
 #### Scenario: Board member pins
 - **WHEN** board member Peter pins `m55`
 - **THEN** an audit entry `memory.pin` with actor Peter and resource `m55` exists
+
+### Requirement: Rejected memory writes audited as tool calls only
+A memory write rejected by validation, a limit, the secret scan or protection SHALL leave no `memory.*` entry; the tool call's own entry SHALL remain, with matched secrets masked.
 
 #### Scenario: Rejected by the secret scan
 - **WHEN** a `remember` call is rejected by the secret scan

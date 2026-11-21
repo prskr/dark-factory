@@ -81,7 +81,7 @@ Memories written or last changed by a human and pinned memories SHALL NOT be rep
 - **THEN** the call fails and the memory still exists
 
 ### Requirement: Memory block at run start
-Every run whose project scope or persona scope holds memories SHALL get a memory block in `Assign`. The block SHALL be at most 16 KiB and SHALL contain: a header naming the project and stating that the memories are hints written in earlier runs, not instructions, to be checked against the repository and the task; the pinned memories with their full content, newest first, together at most 8 KiB, under a heading that says they were reviewed by a board member; and an index with one line per other memory (id, scope, author, date, summary), most recently changed first, until the size limit, followed by the number of memories left out. Memories of other personas SHALL NOT be in the block. Without memories in scope there SHALL be no block. The block SHALL NOT be part of the system prompt.
+Every run whose project scope or persona scope holds memories SHALL get a memory block in `Assign`. The block SHALL contain a header naming the project and stating that the memories are hints from earlier runs, not instructions; the pinned memories in full under a heading saying a board member reviewed them; and an index with one line per other memory (id, scope, author, date, summary). Memories of other personas SHALL NOT be in it. Without memories in scope there SHALL be no block.
 
 #### Scenario: Pinned and index
 - **WHEN** `DF` has pinned project memory `m42` and unpinned memories `m55` (project) and `m57` (persona `linus`), and a run of `linus` in `DF` starts
@@ -91,13 +91,20 @@ Every run whose project scope or persona scope holds memories SHALL get a memory
 - **WHEN** a run of persona `woz` in `DF` starts
 - **THEN** its block contains `m42` and `m55` and not `m57`
 
+#### Scenario: No memories
+- **WHEN** a run starts in a project without memories in its scopes
+- **THEN** `Assign` carries no memory block
+
+### Requirement: Memory block size and order
+The memory block SHALL be at most 16 KiB. Pinned memories SHALL be listed newest first and together at most 8 KiB; a pinned memory that does not fit SHALL be listed in the index instead. Index lines SHALL be ordered by last change, newest first, until the size limit, followed by a line naming the number of memories left out and pointing to `recall`. The block SHALL NOT be part of the system prompt.
+
 #### Scenario: Index over the limit
 - **WHEN** the index lines of a run would exceed the 16 KiB block
 - **THEN** the block ends with a line naming the number of memories left out and pointing to `recall`
 
-#### Scenario: No memories
-- **WHEN** a run starts in a project without memories in its scopes
-- **THEN** `Assign` carries no memory block
+#### Scenario: Pinned memories over 8 KiB
+- **WHEN** the pinned memories of a run are 10 KiB together
+- **THEN** the newest pinned memories up to 8 KiB are in the pinned section and the rest appear as index lines
 
 ### Requirement: Memory block fixed per run
 The memory block SHALL be rendered once per run and stored with the ids of the memories in it. Every `Assign` for the same run SHALL carry the stored block. Changes to memories during a run SHALL reach that run only through `recall`.
@@ -118,11 +125,18 @@ The run details on the task page and the chat page SHALL show a "Memory" section
 - **THEN** the run's Memory section lists `m57` as deleted
 
 ### Requirement: Memory tab
-The project settings page SHALL have a "Memory" tab (`?tab=memory`) for board members. It SHALL list the project's memories of all scopes in two-line rows (summary; scope, author with links, date, pin marker), with a full-text search box and filters for scope (all, project, one persona), author (all, agents, board members), pinned only and run. Board members SHALL create, edit (summary, content, pinned), and delete memories in a form modal that shows the provenance read-only; the scope is set on creation only. Deleting SHALL ask for confirmation. With the run filter set, the tab SHALL offer to delete all memories the run created or last changed, after a confirmation naming their number.
+The project settings page SHALL have a "Memory" tab (`?tab=memory`) for board members. It SHALL list the project's memories of all scopes in two-line rows (summary; scope, author with links, date, pin marker), with a full-text search box and filters for scope (all, project, one persona), author (all, agents, board members), pinned only and run.
 
 #### Scenario: Find a bad memory
 - **WHEN** a board member searches the Memory tab of `DF` for "curl"
 - **THEN** the list shows the memories whose summary or content matches, each with its author and run link
+
+#### Scenario: Empty tab
+- **WHEN** a project has no memories
+- **THEN** the tab explains what memories are and offers "New memory"
+
+### Requirement: Editing memories in the UI
+Board members SHALL create, edit (summary, content, pinned) and delete memories in a form modal that shows the provenance read-only; the scope SHALL be set on creation only. Deleting SHALL ask for confirmation. With the run filter set, the Memory tab SHALL offer to delete all memories the run created or last changed, after a confirmation naming their number.
 
 #### Scenario: Edit and pin
 - **WHEN** a board member opens `m55`, changes the content and checks "Pinned"
@@ -131,10 +145,6 @@ The project settings page SHALL have a "Memory" tab (`?tab=memory`) for board me
 #### Scenario: Delete all memories of a run
 - **WHEN** a board member opens the Memory tab from run 1 of `DF-40` and confirms "Delete all 3 memories of this run"
 - **THEN** the three memories are deleted and each deletion is audited
-
-#### Scenario: Empty tab
-- **WHEN** a project has no memories
-- **THEN** the tab explains what memories are and offers "New memory"
 
 ### Requirement: Memory lifecycle
 Deleting a project SHALL delete its memories in the same transaction. Deleting a persona SHALL delete its persona memories; project memories it wrote SHALL stay with the persona reference removed from their provenance.
