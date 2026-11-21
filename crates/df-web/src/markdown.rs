@@ -4,7 +4,8 @@
 //! (prefix `hl-`); the colors come from the theme stylesheet ([`CodeTheme`]), so the HTML does
 //! not depend on the configured themes.
 
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, LazyLock};
 
@@ -13,8 +14,9 @@ use axum::http::{HeaderValue, header};
 use axum::response::IntoResponse;
 use axum::routing::get;
 
-use comrak::adapters::{CodefenceRendererAdapter, SyntaxHighlighterAdapter};
-use comrak::nodes::Sourcepos;
+use comrak::adapters::{
+    CodefenceMeta, CodefenceRendererAdapter, SyntaxHighlightMeta, SyntaxHighlighterAdapter,
+};
 use maud::{Markup, PreEscaped, html};
 use sha2::{Digest, Sha256};
 use syntect::highlighting::ThemeSet;
@@ -288,19 +290,19 @@ impl SyntaxHighlighterAdapter for Highlighter {
     fn write_highlighted(
         &self,
         output: &mut dyn fmt::Write,
-        lang: Option<&str>,
-        code: &str,
+        meta: &SyntaxHighlightMeta<'_>,
     ) -> fmt::Result {
-        match self.highlight(lang.unwrap_or_default(), code) {
+        match self.highlight(meta.lang, meta.code) {
             Some(highlighted) => output.write_str(&highlighted),
-            None => write!(output, "{}", html! { (code) }.into_string()),
+            None => write!(output, "{}", html! { (meta.code) }.into_string()),
         }
     }
 
     fn write_pre_tag(
         &self,
         output: &mut dyn fmt::Write,
-        _attributes: HashMap<&'static str, std::borrow::Cow<'_, str>>,
+        _meta: &SyntaxHighlightMeta<'_>,
+        _attributes: BTreeMap<&str, Cow<'_, str>>,
     ) -> fmt::Result {
         output.write_str(r#"<pre class="hl-code">"#)
     }
@@ -308,7 +310,8 @@ impl SyntaxHighlighterAdapter for Highlighter {
     fn write_code_tag(
         &self,
         output: &mut dyn fmt::Write,
-        attributes: HashMap<&'static str, std::borrow::Cow<'_, str>>,
+        _meta: &SyntaxHighlightMeta<'_>,
+        attributes: BTreeMap<&str, Cow<'_, str>>,
     ) -> fmt::Result {
         comrak::html::write_opening_tag(output, "code", attributes)
     }
@@ -319,16 +322,9 @@ impl SyntaxHighlighterAdapter for Highlighter {
 struct MermaidFence;
 
 impl CodefenceRendererAdapter for MermaidFence {
-    fn write(
-        &self,
-        output: &mut dyn fmt::Write,
-        _lang: &str,
-        _meta: &str,
-        code: &str,
-        _sourcepos: Option<Sourcepos>,
-    ) -> fmt::Result {
+    fn write(&self, output: &mut dyn fmt::Write, meta: &CodefenceMeta<'_>) -> fmt::Result {
         let block = html! {
-            pre class="hl-code" x-data="mermaidDiagram" { code { (code) } }
+            pre class="hl-code" x-data="mermaidDiagram" { code { (meta.code) } }
         };
         writeln!(output, "{}", block.into_string())
     }
