@@ -6,12 +6,8 @@ Skills managed in Dark Factory: what a skill consists of, its validation, limits
 
 ## ADDED Requirements
 
-### Requirement: Skill content
-A skill SHALL have a name, a description, a body and zero or more supporting files. The name SHALL be 1–64 characters of `[a-z0-9-]` without a leading, trailing or double hyphen, unique across built-in and instance skills, and SHALL NOT change after creation. The description SHALL be one line of 1–1024 characters. A supporting file SHALL have a relative path without `..` components, with at most 8 components and other than `SKILL.md`, UTF-8 text content and an executable flag. Dark Factory SHALL render the skill's `SKILL.md` as YAML frontmatter with `name` and `description`, followed by the body.
-
-#### Scenario: Valid skill
-- **WHEN** a board member saves skill `release-notes` with description "Write release notes from merged pull requests." and a body
-- **THEN** the skill is stored and its `SKILL.md` starts with frontmatter `name: release-notes` and that description, followed by the body
+### Requirement: Skill name and description
+A skill SHALL have a name, a description, a body and zero or more supporting files. The name SHALL be 1–64 characters of `[a-z0-9-]` without a leading, trailing or double hyphen, unique across built-in and instance skills, and SHALL NOT change after creation. The description SHALL be one line of 1–1024 characters.
 
 #### Scenario: Invalid name
 - **WHEN** a board member saves a skill named `Release_Notes`
@@ -21,13 +17,39 @@ A skill SHALL have a name, a description, a body and zero or more supporting fil
 - **WHEN** a board member creates a skill named like an existing skill
 - **THEN** the form shows a field error naming the existing skill and nothing is saved
 
+#### Scenario: Name fixed after creation
+- **WHEN** a board member opens an existing skill
+- **THEN** the name is shown but cannot be edited
+
+### Requirement: Supporting files
+A supporting file SHALL have a relative path of 1–8 normal components (no empty, `.` or `..` component), UTF-8 text content and an executable flag. Paths SHALL be unique within the skill, no path SHALL be an ancestor of another, and no path SHALL be `SKILL.md` or start with `SKILL.md/`.
+
+#### Scenario: Valid supporting files
+- **WHEN** a board member adds `scripts/collect.sh` and `references/style.md` to a skill
+- **THEN** the skill is saved with both files
+
 #### Scenario: Supporting file outside the skill
 - **WHEN** a board member adds a supporting file with path `../x.sh`
 - **THEN** the form shows a field error for that path and nothing is saved
 
-#### Scenario: Name fixed after creation
-- **WHEN** a board member opens an existing skill
-- **THEN** the name is shown but cannot be edited
+#### Scenario: Path below SKILL.md
+- **WHEN** a board member adds a supporting file with path `SKILL.md/notes.txt`
+- **THEN** the form shows a field error for that path and nothing is saved
+
+#### Scenario: File and directory with the same path
+- **WHEN** a board member adds the files `scripts` and `scripts/collect.sh`
+- **THEN** the form shows a field error naming both paths and nothing is saved
+
+### Requirement: Rendered SKILL.md
+Dark Factory SHALL render a skill's `SKILL.md` as YAML frontmatter with `name` and `description`, followed by the body. Users SHALL NOT write the frontmatter themselves.
+
+#### Scenario: Valid skill
+- **WHEN** a board member saves skill `release-notes` with description "Write release notes from merged pull requests." and a body
+- **THEN** the skill is stored and its `SKILL.md` starts with frontmatter `name: release-notes` and that description, followed by the body
+
+#### Scenario: Description with YAML characters
+- **WHEN** the description is `Use when: the PR is "ready"`
+- **THEN** the rendered frontmatter is valid YAML and its `description` is exactly that text
 
 ### Requirement: Skill size limits
 A skill SHALL be at most 256 KiB (body plus supporting files) with at most 50 supporting files; saving a larger skill SHALL fail with a field error naming the limit. If the skills of a run exceed 4 MiB together, the run SHALL fail before provisioning with a reason naming the limit.

@@ -12,8 +12,9 @@ Agents get their working rules only from the persona's system prompt and the rep
 - **Assignment** of instance skills per persona (persona form) and per project (project settings). A run gets the built-in skills, the persona's skills and the project's skills (union).
 - **Delivery on every run.** `Assign` carries the run's skills and the harness's skill directory. The runtime replaces the skill directory under `HOME` before the harness starts. This works on a reused home and on a fresh one (planned `emptyDir` chats).
 - **Skill paths are harness profile data.** `HarnessProfile` gets the skill directory (relative to `HOME`) and the repository skill directories (relative to the workspace). Claude Code: `.claude/skills` and `.claude/skills`. OpenCode: values from the spike in task 1. The harness registry and "Generic ACP" (F12) set the same two values as settings. No code per harness.
-- **Factory skills win over repository skills** with the same name (iteration 4, decision 12). Human-edited skills are trusted; skills from the repository are untrusted like any repository content. Repository skills with other names stay usable. A shadowed repository skill gives a `skills.repository_skill_shadowed` warning in the transcript.
-- **Pointer in the system prompt.** When a run has skills, the system prompt tells the agent to load `dark-factory-basics` before its first action, because harnesses load skills on demand only.
+- **Repository skills stay untouched.** Human-edited skills are trusted; skills from the repository are untrusted like any repository content, and stay usable. On a name clash the harness's own lookup order decides; in Claude Code personal skills win, so the factory skill wins (iteration 4, decision 12). The runtime does not hide repository skills. A clash gives a `skills.repository_skill_shadowed` warning in the transcript, and users resolve it by renaming.
+- **Runtime-owned, read-only skill directory.** Skill files and directories are written read-only, as a signal to the agent. Changes the agent makes anyway are gone at the next run.
+- **Pointer in the system prompt.** When a run has skills, the system prompt tells the agent to load `dark-factory-basics` before its first action, because harnesses load skills on demand only, and says the skill directory is managed by Dark Factory. A harness without a skill directory gets `dark-factory-basics` in the system prompt instead.
 
 Out of scope:
 - Agents changing skills or assignments as an instance operation (`instance-operation` approval): roadmap iteration 4, "Full permission model (ADR-0011)". It needs the permission modes first.
@@ -33,7 +34,7 @@ Out of scope:
 - `skills`: what a skill is, validation and size limits, versions, built-in skills, the skills page, assignment per persona and project, which skills a run gets, audit.
 
 ### Modified Capabilities
-- `acp-harness`: the runtime replaces the harness's skill directory before the harness starts, warns about shadowed repository skills, and the system prompt points to `dark-factory-basics`.
+- `acp-harness`: the runtime validates the skill paths and replaces the harness's skill directory (read-only, no symlink following) before the harness starts, warns about clashing repository skills, and the system prompt points to `dark-factory-basics`.
 - `opencode-harness`: OpenCode's skill directory and repository skill directories.
 - `run-orchestration`: `Assign` carries the run's skills and the harness's skill paths, also for chat runs.
 - `configuration-management`: the persona form and the project settings page get a skill selection.
