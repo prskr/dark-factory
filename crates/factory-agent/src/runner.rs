@@ -8,11 +8,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     CancelNotification, ContentBlock, PromptRequest, PromptResponse, RequestPermissionRequest,
     RequestPermissionResponse, SessionId, SessionNotification, SessionUpdate, TextContent,
 };
-use agent_client_protocol::{ByteStreams, Client, ConnectionTo, Responder};
+use agent_client_protocol::v1::{ConnectionTo, Responder};
+use agent_client_protocol::{ByteStreams, Client};
 use std::ffi::OsString;
 
 use df_proto::agent::v1::{
@@ -873,7 +874,7 @@ async fn drive_session(
     let notif_ready = Arc::clone(&session_ready);
     let notif_tx = ctx.outbound_tx.clone();
     let client = Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx: ConnectionTo<AcpAgent>| {
                 if notif_ready.load(Ordering::SeqCst) {

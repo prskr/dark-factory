@@ -7,13 +7,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::broadcast;
 
-use agent_client_protocol::schema::v1::{
-    AgentCapabilities, CancelNotification, ContentBlock, ContentChunk, Error, InitializeRequest,
+use agent_client_protocol::v1::schema::{
+    AgentCapabilities, CancelNotification, ContentBlock, ContentChunk, InitializeRequest,
     InitializeResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     SessionId, SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall, ToolCallId,
     ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, UsageUpdate,
 };
-use agent_client_protocol::{Agent as AcpAgent, Client, ConnectionTo, Responder, Stdio};
+use agent_client_protocol::v1::{ConnectionTo, Responder};
+use agent_client_protocol::{Agent as AcpAgent, Client, Error, Stdio};
 use rpi_agent::{AgentBuilder, AgentEvent, AgentTool, StreamFn};
 use rpi_ai::Provider;
 use rpi_ai::model::Model;
@@ -67,7 +68,7 @@ pub(crate) async fn run_stdio(cli: Cli) -> anyhow::Result<()> {
     let (m_new, p_new) = (model.clone(), provider);
 
     AcpAgent
-        .builder()
+        .v1()
         .name("df-harness")
         .on_receive_request(
             async move |req: InitializeRequest,

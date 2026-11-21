@@ -596,7 +596,7 @@ With the fixed column widths, long hosts are cut off with `truncate`. Only the d
 These were reviewed and kept on purpose. Don't raise them as issues unless the stated assumption changes.
 
 - **No pending-request count on the phone task view:** below 768 px the bottom bar, and the count with it, is hidden while a task's transcript is shown (`web-ui-shell`: the message input takes its place). The task's own requests are on its timeline. Accepted after the 390 px check of `iter2-agent-requests` (2026-10-28).
-- **TurnEnded vs. trailing transcript chunks:** ordering is guaranteed. `agent-client-protocol` 3.4.0 (`concepts::ordering`) waits for each notification handler to finish before it routes the next message. The handler awaits the `outbound_tx` send, so all chunks of a turn are queued before the prompt response arrives. Revisit if the ACP crate changes its dispatch model.
+- **TurnEnded vs. trailing transcript chunks:** ordering is guaranteed. `agent-client-protocol` 5.4.0 (`concepts::ordering`) waits for each notification handler to finish before it routes the next message. The handler awaits the `outbound_tx` send, so all chunks of a turn are queued before the prompt response arrives. Revisit if the ACP crate changes its dispatch model.
 - **Git config denylist instead of an allowlist:** the denylist was extended. Replace it with an allowlist once the set of config keys the control plane sends is known.
 - **Harness exit:** stdin is closed when the ACP transport is dropped. The runtime waits 5 s, then kills the harness.
 - **Fake agent cancel flag:** `fake-acp-agent` resets `cancelled` at the end of a prompt, because a cancel can be handled before the spawned prompt task starts.

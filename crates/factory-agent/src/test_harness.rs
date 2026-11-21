@@ -578,12 +578,13 @@ fn handle_git_http_request<S: std::io::Read + std::io::Write>(
     Ok(())
 }
 
-use agent_client_protocol::schema::v1::{
-    AgentCapabilities, Error, InitializeRequest, InitializeResponse, LoadSessionRequest,
+use agent_client_protocol::v1::schema::{
+    AgentCapabilities, InitializeRequest, InitializeResponse, LoadSessionRequest,
     LoadSessionResponse, McpServer, NewSessionRequest, NewSessionResponse, PromptRequest,
     PromptResponse, SessionId, StopReason,
 };
-use agent_client_protocol::{Agent, Builder, ConnectionTo, HandleDispatchFrom, Responder};
+use agent_client_protocol::v1::{Builder, ConnectionTo, Responder};
+use agent_client_protocol::{Agent, Error, HandleDispatchFrom};
 
 /// A scriptable mock ACP agent for testing client/session interactions.
 #[derive(Clone, Default)]
@@ -631,7 +632,7 @@ impl MockAcpAgent {
         let prompts = Arc::clone(&self.received_prompts);
 
         Agent
-            .builder()
+            .v1()
             .name("mock-acp-agent")
             .on_receive_request(
                 async move |req: InitializeRequest,

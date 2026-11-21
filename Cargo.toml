@@ -65,7 +65,7 @@ max-lines = 1500
 [workspace.metadata.file-length.allow]
 
 [workspace.dependencies]
-agent-client-protocol = { version = "3.4.0", features = ["stdio"] }
+agent-client-protocol = { version = "5.4.0", features = ["stdio"] }
 anyhow = "1"
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false, features = ["form", "http1", "matched-path", "query", "tokio"] }

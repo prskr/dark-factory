@@ -11,7 +11,7 @@ use super::authored_prompt;
 async fn test_scenario_harness_resume_success() {
     use crate::harness::{build_acp_prompt_blocks, setup_session};
     use crate::test_harness::MockAcpAgent;
-    use agent_client_protocol::schema::v1::McpServer;
+    use agent_client_protocol::v1::schema::McpServer;
     use agent_client_protocol::{Channel, Client};
     use df_proto::agent::v1::Continuation;
 
@@ -26,7 +26,7 @@ async fn test_scenario_harness_resume_success() {
         agent_builder.connect_to(peer).await.unwrap();
     });
 
-    let client = Client.builder();
+    let client = Client.v1();
     let client_task = tokio::spawn(async move {
         client
             .connect_with(transport, async move |cx| {
@@ -73,7 +73,7 @@ async fn test_scenario_harness_resume_success() {
                 );
                 assert_eq!(prompt_blocks.len(), 1);
                 match &prompt_blocks[0] {
-                    agent_client_protocol::schema::v1::ContentBlock::Text(t) => {
+                    agent_client_protocol::v1::schema::ContentBlock::Text(t) => {
                         assert_eq!(t.text, "Follow up prompt");
                     }
                     _ => panic!("Expected text block"),
@@ -116,7 +116,7 @@ async fn test_scenario_harness_resume_fails_falls_back_to_new() {
         agent_builder.connect_to(peer).await.unwrap();
     });
 
-    let client = Client.builder();
+    let client = Client.v1();
     let client_task = tokio::spawn(async move {
         client
             .connect_with(transport, async move |cx| {
@@ -169,7 +169,7 @@ async fn test_scenario_harness_resume_fails_falls_back_to_new() {
                 );
                 assert_eq!(prompt_blocks.len(), 2);
                 match &prompt_blocks[0] {
-                    agent_client_protocol::schema::v1::ContentBlock::Text(t) => {
+                    agent_client_protocol::v1::schema::ContentBlock::Text(t) => {
                         assert_eq!(
                             t.text,
                             "Context from previous run:\nSummary of earlier progress"
@@ -178,7 +178,7 @@ async fn test_scenario_harness_resume_fails_falls_back_to_new() {
                     _ => panic!("Expected text block for summary"),
                 }
                 match &prompt_blocks[1] {
-                    agent_client_protocol::schema::v1::ContentBlock::Text(t) => {
+                    agent_client_protocol::v1::schema::ContentBlock::Text(t) => {
                         assert_eq!(t.text, "First prompt of run 2");
                     }
                     _ => panic!("Expected text block for user prompt"),
@@ -207,7 +207,7 @@ async fn notice_codes_of_a_new_session(
         agent_builder.connect_to(peer).await.unwrap();
     });
     let codes = Client
-        .builder()
+        .v1()
         .connect_with(transport, async move |cx| {
             let temp = tempfile::tempdir().unwrap();
             let res = setup_session(
@@ -251,7 +251,7 @@ async fn a_new_session_seeded_with_a_summary_notices_context_compacted_once() {
 #[test]
 fn test_scenario_harness_permission_auto_approved() {
     use crate::harness::approve_permission;
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         PermissionOption, PermissionOptionId, PermissionOptionKind, RequestPermissionOutcome,
         RequestPermissionRequest, SessionId, ToolCallUpdate, ToolCallUpdateFields,
     };
@@ -344,7 +344,7 @@ sessions:
     let mcp_cmd_1 = mcp_cmd.clone();
     let mcp_sock_1 = mcp_sock.clone();
 
-    let client = Client.builder();
+    let client = Client.v1();
     let setup_result = client
         .connect_with(transport, async move |cx| {
             let res = setup_session(&cx, &repo_dir_1, None, &mcp_cmd_1, &mcp_sock_1)
@@ -385,7 +385,7 @@ sessions:
     let mcp_cmd_2 = mcp_cmd.clone();
     let mcp_sock_2 = mcp_sock.clone();
 
-    let client2 = Client.builder();
+    let client2 = Client.v1();
     let setup_result2 = client2
         .connect_with(transport2, async move |cx| {
             let res = setup_session(
@@ -414,7 +414,7 @@ fn harness_prompt_texts(
     crate::harness::build_acp_prompt_blocks(prompts, summary)
         .into_iter()
         .map(|block| {
-            let agent_client_protocol::schema::v1::ContentBlock::Text(text) = block else {
+            let agent_client_protocol::v1::schema::ContentBlock::Text(text) = block else {
                 panic!("expected a text block");
             };
             text.text

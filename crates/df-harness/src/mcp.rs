@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_client_protocol::schema::v1::McpServer;
+use agent_client_protocol::v1::schema::McpServer;
 use async_trait::async_trait;
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, JsonObject};
@@ -145,7 +145,7 @@ impl AgentTool for McpTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::McpServerStdio;
+    use agent_client_protocol::v1::schema::McpServerStdio;
 
     #[tokio::test]
     async fn hung_mcp_server_fails_setup_instead_of_blocking() {
