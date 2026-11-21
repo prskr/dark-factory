@@ -162,6 +162,54 @@
   ],
   "packageRules": [
     {
+      "description": "One PR for wasmtime: the wasmtime crates share one version and must move together",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "wasmtime",
+        "wasmtime-*"
+      ],
+      "groupName": "wasmtime"
+    },
+    {
+      "description": "One PR for tonic and prost: tonic-prost pins the prost version, so they move together",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "tonic",
+        "tonic-*",
+        "prost",
+        "prost-*"
+      ],
+      "groupName": "tonic and prost",
+      "separateMajorMinor": false
+    },
+    {
+      "description": "One PR for kube: kube requires a matching k8s-openapi version",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "kube",
+        "kube-*",
+        "k8s-openapi"
+      ],
+      "groupName": "kube",
+      "separateMajorMinor": false
+    },
+    {
+      "description": "One PR for rpi: the rpi crates are pinned to one exact version",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "rpi-*"
+      ],
+      "groupName": "rpi"
+    },
+    {
       "description": "One PR for the adapter: package.json, pnpm-lock.yaml and every copy of the image tag",
       "matchPackageNames": [
         "@agentclientprotocol/claude-agent-acp"
