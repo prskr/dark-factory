@@ -7,9 +7,9 @@ use std::path::Path;
 
 use anyhow::Context as _;
 
-use agent_client_protocol::ConnectionTo;
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::v1::schema::{
     ClientCapabilities, ContentBlock as AcpContentBlock, InitializeRequest, LoadSessionRequest,
     McpServer, McpServerStdio, NewSessionRequest, PermissionOptionKind, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionId,

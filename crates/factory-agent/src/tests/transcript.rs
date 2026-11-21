@@ -3,7 +3,7 @@
 #[test]
 fn test_scenario_text_after_a_tool_call() {
     use crate::transcript::TranscriptTranslator;
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         ContentBlock as AcpContentBlock, ContentChunk, TextContent as AcpTextContent,
         ToolCall as AcpToolCall, ToolCallId,
     };
@@ -90,7 +90,7 @@ fn test_scenario_text_after_a_tool_call() {
 #[test]
 fn test_scenario_large_tool_output() {
     use crate::transcript::{MAX_RAW_IO_BYTES, TranscriptTranslator};
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Content, ContentBlock as AcpContentBlock, TextContent as AcpTextContent,
         ToolCall as AcpToolCall, ToolCallContent as AcpToolCallContent, ToolCallId,
         ToolCallUpdate as AcpToolCallUpdate, ToolCallUpdateFields,
@@ -156,7 +156,7 @@ fn test_scenario_large_tool_output() {
 #[test]
 fn test_transcript_plan_and_tool_origin() {
     use crate::transcript::TranscriptTranslator;
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Plan as AcpPlan, PlanEntry as AcpPlanEntry, PlanEntryPriority as AcpPlanPriority,
         PlanEntryStatus as AcpPlanStatus, StopReason as AcpStopReason, ToolCall as AcpToolCall,
         ToolCallId,
@@ -221,7 +221,7 @@ fn test_transcript_plan_and_tool_origin() {
 #[test]
 fn test_only_the_mcp_factory_prefix_marks_factory_origin() {
     use crate::transcript::TranscriptTranslator;
-    use agent_client_protocol::schema::v1::{ToolCall as AcpToolCall, ToolCallId};
+    use agent_client_protocol::v1::schema::{ToolCall as AcpToolCall, ToolCallId};
     use df_proto::transcript::v1::ToolOrigin;
 
     let mut translator = TranscriptTranslator::new("turn_1");

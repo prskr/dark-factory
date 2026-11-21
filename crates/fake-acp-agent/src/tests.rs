@@ -10,11 +10,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, InitializeRequest, NewSessionRequest, PlanEntryStatus,
     PromptRequest, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
-use agent_client_protocol::{Channel, Client, ConnectionTo};
+use agent_client_protocol::{Channel, Client};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, Notify};
 
@@ -178,7 +179,7 @@ sessions:
     let updates = Arc::new(Mutex::new(Vec::new()));
     let updates_cb = Arc::clone(&updates);
 
-    let client = Client.builder().on_receive_notification(
+    let client = Client.v1().on_receive_notification(
         async move |notification: SessionNotification,
                     _cx: ConnectionTo<agent_client_protocol::role::acp::Agent>| {
             updates_cb.lock().await.push(notification.update);
@@ -273,7 +274,7 @@ sessions:
             assert_eq!(update.tool_call_id.0.as_ref(), "call_1");
             assert_eq!(
                 update.fields.status,
-                Some(agent_client_protocol::schema::v1::ToolCallStatus::Completed)
+                Some(agent_client_protocol::v1::schema::ToolCallStatus::Completed)
             );
         }
         other => panic!("Expected ToolCallUpdate, got: {other:?}"),
@@ -331,7 +332,7 @@ sessions:
     let repo_path_buf = repo_path.to_path_buf();
     let client_task = tokio::spawn(async move {
         Client
-            .builder()
+            .v1()
             .connect_with(transport, async move |cx| {
                 cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
                     .block_task()
@@ -393,7 +394,7 @@ async fn play_with_mock_mcp(yaml: &str, mock_body: &str) -> Vec<SessionUpdate> {
     let updates = Arc::new(Mutex::new(Vec::new()));
     let updates_cb = Arc::clone(&updates);
 
-    let client = Client.builder().on_receive_notification(
+    let client = Client.v1().on_receive_notification(
         async move |notification: SessionNotification,
                     _cx: ConnectionTo<agent_client_protocol::role::acp::Agent>| {
             updates_cb.lock().await.push(notification.update);
@@ -420,11 +421,11 @@ async fn play_with_mock_mcp(yaml: &str, mock_body: &str) -> Vec<SessionUpdate> {
                     .expect("init");
 
                 let stdio_server =
-                    agent_client_protocol::schema::v1::McpServerStdio::new("factory", mock_script);
+                    agent_client_protocol::v1::schema::McpServerStdio::new("factory", mock_script);
 
                 let mut new_session_req = NewSessionRequest::new(temp_session.path().to_path_buf());
                 new_session_req.mcp_servers =
-                    vec![agent_client_protocol::schema::v1::McpServer::Stdio(
+                    vec![agent_client_protocol::v1::schema::McpServer::Stdio(
                         stdio_server,
                     )];
 
@@ -467,7 +468,7 @@ fn tool_result_text(update: &SessionUpdate) -> String {
     match update.fields.content.as_deref() {
         Some(
             [
-                agent_client_protocol::schema::v1::ToolCallContent::Content(c),
+                agent_client_protocol::v1::schema::ToolCallContent::Content(c),
                 ..,
             ],
         ) => match &c.content {
@@ -521,7 +522,7 @@ done
         SessionUpdate::ToolCallUpdate(update) => {
             assert_eq!(
                 update.fields.status,
-                Some(agent_client_protocol::schema::v1::ToolCallStatus::Completed)
+                Some(agent_client_protocol::v1::schema::ToolCallStatus::Completed)
             );
         }
         other => panic!("Expected ToolCallUpdate, got: {other:?}"),
@@ -666,7 +667,7 @@ done
     match &received[1] {
         SessionUpdate::ToolCallUpdate(update) => assert_eq!(
             update.fields.status,
-            Some(agent_client_protocol::schema::v1::ToolCallStatus::Failed)
+            Some(agent_client_protocol::v1::schema::ToolCallStatus::Failed)
         ),
         other => panic!("Expected ToolCallUpdate, got: {other:?}"),
     }
@@ -778,7 +779,7 @@ sessions:
 
     let client_task = tokio::spawn(async move {
         Client
-            .builder()
+            .v1()
             .connect_with(transport, async move |cx| {
                 cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
                     .block_task()
@@ -837,7 +838,7 @@ sessions:
 
     let client_task = tokio::spawn(async move {
         Client
-            .builder()
+            .v1()
             .connect_with(transport, async move |cx| {
                 cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
                     .block_task()
@@ -894,7 +895,7 @@ sessions:
 
     let client_task = tokio::spawn(async move {
         Client
-            .builder()
+            .v1()
             .connect_with(transport, async move |cx| {
                 cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
                     .block_task()
@@ -950,7 +951,7 @@ sessions:
     let updates = Arc::new(Mutex::new(Vec::new()));
     let updates_cb = Arc::clone(&updates);
 
-    let client = Client.builder().on_receive_notification(
+    let client = Client.v1().on_receive_notification(
         async move |notification: SessionNotification,
                     _cx: ConnectionTo<agent_client_protocol::role::acp::Agent>| {
             updates_cb.lock().await.push(notification.update);
@@ -988,7 +989,7 @@ sessions:
 
                 // Run 2: load session with same ID
                 let load_res = cx
-                    .send_request(agent_client_protocol::schema::v1::LoadSessionRequest::new(
+                    .send_request(agent_client_protocol::v1::schema::LoadSessionRequest::new(
                         session_id.clone(),
                         session_dir.clone(),
                     ))
@@ -1007,9 +1008,9 @@ sessions:
                 assert_eq!(res2.stop_reason, StopReason::EndTurn);
 
                 // Run 3: load non-existent session
-                let bad_id = agent_client_protocol::schema::v1::SessionId::new("non-existent-id");
+                let bad_id = agent_client_protocol::v1::schema::SessionId::new("non-existent-id");
                 let bad_load = cx
-                    .send_request(agent_client_protocol::schema::v1::LoadSessionRequest::new(
+                    .send_request(agent_client_protocol::v1::schema::LoadSessionRequest::new(
                         bad_id,
                         session_dir,
                     ))
@@ -1072,7 +1073,7 @@ sessions:
 
     let client_task = tokio::spawn(async move {
         Client
-            .builder()
+            .v1()
             .connect_with(transport, async move |cx| {
                 cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
                     .block_task()
@@ -1099,7 +1100,7 @@ sessions:
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     cancel_sender
                         .send_notification(
-                            agent_client_protocol::schema::v1::CancelNotification::new(sid_cancel),
+                            agent_client_protocol::v1::schema::CancelNotification::new(sid_cancel),
                         )
                         .ok();
                 });
@@ -1132,7 +1133,7 @@ async fn messages_of_first_turn(yaml: &str) -> Vec<String> {
     let (transport, peer) = Channel::duplex();
     let updates = Arc::new(Mutex::new(Vec::new()));
     let updates_cb = Arc::clone(&updates);
-    let client = Client.builder().on_receive_notification(
+    let client = Client.v1().on_receive_notification(
         async move |notification: SessionNotification,
                     _cx: ConnectionTo<agent_client_protocol::role::acp::Agent>| {
             updates_cb.lock().await.push(notification.update);

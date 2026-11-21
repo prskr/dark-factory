@@ -6,17 +6,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use agent_client_protocol::schema::v1::{
-    AgentCapabilities, CancelNotification, Content, ContentBlock, ContentChunk, Error,
-    InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse, McpServer,
-    McpServerStdio, NewSessionRequest, NewSessionResponse, Plan, PlanEntry, PlanEntryPriority,
-    PlanEntryStatus, PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate,
-    StopReason, TextContent, ToolCall, ToolCallContent, ToolCallId, ToolCallStatus, ToolCallUpdate,
+use agent_client_protocol::v1::schema::{
+    AgentCapabilities, CancelNotification, Content, ContentBlock, ContentChunk, InitializeRequest,
+    InitializeResponse, LoadSessionRequest, LoadSessionResponse, McpServer, McpServerStdio,
+    NewSessionRequest, NewSessionResponse, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus,
+    PromptRequest, PromptResponse, SessionId, SessionNotification, SessionUpdate, StopReason,
+    TextContent, ToolCall, ToolCallContent, ToolCallId, ToolCallStatus, ToolCallUpdate,
     ToolCallUpdateFields,
 };
-use agent_client_protocol::{
-    Agent, Builder, Client, ConnectionTo, HandleDispatchFrom, Responder, Stdio,
-};
+use agent_client_protocol::v1::{Builder, ConnectionTo, Responder};
+use agent_client_protocol::{Agent, Client, Error, HandleDispatchFrom, Stdio};
 use rmcp::ServiceExt;
 use tokio::sync::{Mutex, Notify};
 use uuid::Uuid;
@@ -89,7 +88,7 @@ pub fn build_agent(
     let state_cancel = Arc::clone(&state);
 
     Agent
-        .builder()
+        .v1()
         .name("fake-acp-agent")
         .on_receive_request(
             async move |req: InitializeRequest,

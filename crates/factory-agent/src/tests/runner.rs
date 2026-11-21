@@ -585,7 +585,7 @@ async fn test_unreachable_repository_fails_the_run_in_workspace_preparation() {
 
 #[tokio::test]
 async fn a_usage_update_of_the_harness_is_not_forwarded() {
-    use agent_client_protocol::schema::v1::{SessionUpdate, UsageUpdate};
+    use agent_client_protocol::v1::schema::{SessionUpdate, UsageUpdate};
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
     let translator = tokio::sync::Mutex::new(crate::transcript::TranscriptTranslator::new("t1"));

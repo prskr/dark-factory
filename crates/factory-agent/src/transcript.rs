@@ -2,7 +2,7 @@
 //!
 //! Follows `specs/acp-harness/spec.md`, `design/agent-run.md` §5.2, and ADR-0017.
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock as AcpContentBlock, ContentChunk, Plan as AcpPlan,
     PlanEntryPriority as AcpPlanPriority, PlanEntryStatus as AcpPlanStatus,
     StopReason as AcpStopReason, ToolCall as AcpToolCall, ToolCallContent as AcpToolCallContent,
