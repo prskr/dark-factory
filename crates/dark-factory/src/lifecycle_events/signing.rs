@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn rsa_key_and_garbage_are_rejected() {
-        let rsa = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 1024).unwrap();
+        let rsa = rsa::PrivateKey::new(&mut getrandom::SysRng, 1024).unwrap();
         let rsa_pem = rsa.to_pkcs8_pem(LineEnding::LF).unwrap();
         assert!(matches!(
             SigningKey::from_pem(rsa_pem.as_bytes()),

@@ -53,6 +53,7 @@ df-orchestrator = { workspace = true, features = ["test-util"] }
 df-telemetry = { workspace = true, features = ["clap", "http", "otel", "test-util"] }
 df-test-postgres.workspace = true
 df-tls = { workspace = true, features = ["test-util"] }
+getrandom.workspace = true
 hex.workspace = true
 rsa.workspace = true
 sqlx.workspace = true
