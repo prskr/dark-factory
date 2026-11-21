@@ -91,6 +91,7 @@ df-tls = { path = "crates/df-tls" }
 df-web = { path = "crates/df-web" }
 forge-common = { path = "plugins/forge-common" }
 futures = "0.3"
+getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] }
 gix = { version = "0.90.0", default-features = false, features = ["sha1", "blocking-network-client"] }
 gix-error = "0.5.2"
 gix-pack = { version = "0.77.0", default-features = false, features = ["sha1", "streaming-input"] }
@@ -135,7 +136,7 @@ rmcp = { version = "3.9.0", default-features = false, features = ["client", "ser
 rpi-agent = "=0.16.0"
 rpi-ai = { version = "=0.16.0", features = ["providers"] }
 rpi-tools = "=0.16.0"
-rsa = { version = "0.9", features = ["pem"] }
+rsa = "0.10"
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path", "debug-embed"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

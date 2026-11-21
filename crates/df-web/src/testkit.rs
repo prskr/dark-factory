@@ -37,7 +37,7 @@ pub(crate) const CLIENT_ID: &str = "dark-factory";
 /// Signing key of every mock provider, as PKCS#1 PEM. Generated once per test process: a 2048-bit
 /// key takes seconds in an unoptimized build, and most tests start a provider.
 static SIGNING_KEY_PEM: LazyLock<String> = LazyLock::new(|| {
-    let key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
+    let key = rsa::PrivateKey::new(&mut getrandom::SysRng, 2048).unwrap();
     key.to_pkcs1_pem(rsa::pkcs8::LineEnding::LF)
         .unwrap()
         .to_string()
