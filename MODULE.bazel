@@ -371,7 +371,7 @@ http_archive(
 
 # The OpenCode release the opencode-harness image ships; `deploy/images/check_versions.sh` compares
 # it with the other copies of the version.
-OPENCODE_VERSION = "2.2.5"
+OPENCODE_VERSION = "2.3.2"
 
 OPENCODE_BUILD = 'exports_files(["opencode"], visibility = ["//visibility:public"])'
 
