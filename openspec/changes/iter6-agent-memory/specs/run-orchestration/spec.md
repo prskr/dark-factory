@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Memory block in Assign
-`Assign.memory_context` SHALL carry the run's memory block (`agent-memory`, "Memory block at run start"), or be empty when the run has none. Chat runs SHALL carry it the same way. Every `Assign` for the same run SHALL carry the same block.
+`Assign.memory_context` SHALL carry the run's memory block (`agent-memory`, "Memory block at run start"), or be empty when the run has none or memory is off for the project. Chat runs SHALL carry it the same way. Every `Assign` for the same run SHALL carry the same block (`agent-memory`, "Memory block fixed per run").
 
 #### Scenario: Task run with memories
 - **WHEN** run 1 of `DF-40` by persona `linus` connects and `DF` has memories in its scopes
