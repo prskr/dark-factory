@@ -1,9 +1,6 @@
 [advisories]
 version = 2
 ignore = [
-    # `paste` is unmaintained; reached only through the spike crate df-harness (rpi-tools -> image
-    # -> exr -> pulp). Spike-only: revisit if the native-harness-spike decision is to build.
-    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained: spike-only (df-harness via rpi-tools)" },
     # Marvin attack on RSA private-key operations; no fixed `rsa` release exists. Production only
     # verifies OIDC ID-token signatures with the provider's public keys (`openidconnect`); private
     # keys are used only by df-web's test OIDC provider. Revisit when `openidconnect` moves to a
@@ -18,11 +15,6 @@ ignore = [
     # only to load its bundled syntax and theme dumps, which this repository does not control.
     # Revisit when syntect moves to another serialization crate.
     { id = "RUSTSEC-2025-0141", reason = "bincode 1 unmaintained: syntect loads its bundled dumps with it" },
-    # Non-constant-time operations in crypto-bigint 0.5 (fixed in 0.7.6). Reached only through
-    # openidconnect -> p256/p384 -> elliptic-curve 0.13, which verifies ES256/ES384 ID-token
-    # signatures with the provider's public keys: no secret integers. Revisit when `openidconnect`
-    # moves to elliptic-curve 0.14.
-    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint: only public-key ECDSA verification" },
     # `chrono` is unmaintained (no fixed release); not a vulnerability. Besides our own crates it is
     # pulled in by sqlx, openidconnect, oauth2, rmcp, schemars and pbjson-types, so dropping it from
     # our code alone does not clear the advisory. Revisit when those dependencies move to `jiff` or
