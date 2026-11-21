@@ -73,7 +73,7 @@ base64 = "0.23"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4", features = ["derive", "env"] }
-comrak = { version = "0.57", default-features = false }
+comrak = { version = "1.1", default-features = false }
 df-agent-channel = { path = "crates/df-agent-channel" }
 df-artifact-types = { path = "crates/df-artifact-types" }
 df-core = { path = "crates/df-core" }
