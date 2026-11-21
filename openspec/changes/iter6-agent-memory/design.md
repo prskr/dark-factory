@@ -99,7 +99,9 @@ A memory is **protected** when it is pinned, or when it was created or last chan
   - `reason` (1–500 characters, same character rules as `summary`, secret-scanned) goes into the history and the audit entry.
 - `search_history { query, limit? }` (phase 1, D9)
   - Searches the run's project only, including archived chats. `limit` default 10, at most 20.
-  - Each hit: task key, task kind (`task` or `chat`), title, run number, time, author, and the matching message text cut at 2 KiB with `ts_headline` markers around the matched words.
+  - Each hit has `source` `message` or `task`, task key, task kind (`task` or `chat`), title, time, author, and `text`: the matching text cut at 2 KiB with `ts_headline` markers around the matched words.
+    - `message` hit: `text` is the message; also `run` (number); time is the message's time.
+    - `task` hit (title or description matched): `text` is the title and description; no `run` field; time is the task's creation time and author its creator.
   - Author: the persona for agent text; for user messages the stored author, and for forge messages the forge author with the `outside` flag, like `read_pull_request_feedback`.
   - Secret-rule matches in the returned text and title are masked (D4) before the result is built.
 
@@ -221,8 +223,8 @@ Project settings page, new tab "Memory" (`?tab=memory`), after "Context" if `ite
 - When the run filter is set: the list shows what the run created, replaced and deleted, and the action "Undo memory changes of this run" (Q8). After a confirmation naming the number of changes, it reverts the run's changes in reverse order:
   - created by the run: deleted, if not changed since by someone else;
   - replaced by the run: previous summary and content restored, if the memory still holds what the run wrote;
-  - deleted by the run: re-created with its id, content and original provenance, if the id is free.
-  Changes that were overwritten later are skipped and listed in the confirmation result. Each step is a normal change by the board member (history, audit).
+  - deleted by the run: re-created with its id, summary, content and original creation provenance, if the id is free and the scope is below its limit.
+  Changes that were overwritten later, and re-creations that would exceed the scope limit, are skipped and listed in the confirmation result. Each step is a normal change by the board member (history, audit): a restored or re-created memory gets the board member as last changer, so it is protected from agents afterwards (D3).
 - Content is shown as plain text, never rendered as Markdown.
 - Board members only, like other project settings; the iteration 4 permission model maps this later.
 
@@ -250,7 +252,7 @@ Built-in skill `dark-factory-memory` (scope `always`, `iter4-skills` D3), text i
 
 It is a second `always` built-in. On a harness without a skill directory, `iter4-skills` D9 appends `always` built-ins to the system prompt; that is fine, the skill is fixed instructions shipped with Dark Factory, not memory content.
 
-`CHAT_INSTRUCTIONS` changes "Results that should outlive the chat belong in artifacts or tasks." to "Results that should outlive the chat belong in artifacts or tasks, and facts later runs need belong in memory (`remember`)."
+`CHAT_INSTRUCTIONS` changes "Results that should outlive the chat belong in artifacts or tasks." to "Results that should outlive the chat belong in artifacts or tasks, and facts later runs need belong in memory (`remember`)." The added clause is left out when memory is off for the project (D14), so the instructions never name a tool the run does not have.
 
 If `iter4-skills` is not merged when this change is implemented, task 8.1 waits; the tool descriptions and the block header carry the core rules meanwhile.
 
@@ -261,7 +263,7 @@ A project setting `memory_enabled` (default on), switched on the Memory tab and 
 - `remember`, `recall` and `forget` are not offered (a call is the usual "unknown tool" error); `search_history` stays;
 - existing memories stay and board members can still view, edit and delete them.
 
-It is the fastest containment after a poisoning, and the setting for a project that processes hostile public input (Q11). A run in progress keeps what it got at start; its memory tools fail with "memory is off for this project".
+It is the fastest containment after a poisoning, and the setting for a project that processes hostile public input (Q11). A run in progress keeps what it got at start: on a reconnect it gets its stored block again ("Memory block fixed per run" takes precedence; the model already read the block in its first turn, and the runtime does not repeat it). Its memory tools fail with "memory is off for this project". Runs started after the switch get an empty block.
 
 ## Risks / Trade-offs
 

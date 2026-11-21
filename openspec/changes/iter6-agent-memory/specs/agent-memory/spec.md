@@ -177,18 +177,29 @@ Board members SHALL create, edit (summary, content, pinned) and delete memories 
 - **THEN** the tab and the modal show both literally
 
 ### Requirement: Undo a run's memory changes
-With the run filter set, the Memory tab SHALL offer "Undo memory changes of this run". After a confirmation naming the number of changes, it SHALL revert them newest first: delete what the run created, restore the previous content of what it replaced, and re-create what it deleted with its id, content and original provenance. A change overwritten later SHALL be skipped and listed in the result. Each revert SHALL be recorded and audited as a change by the board member.
+With the run filter set, the Memory tab SHALL offer "Undo memory changes of this run", which after a confirmation SHALL revert them newest first: delete what the run created, restore the previous summary and content of what it replaced, and re-create what it deleted with its id, summary, content and creation provenance. Each revert SHALL be a change by the board member, who becomes the last changer.
 
 #### Scenario: Undo a poisoned run
 - **WHEN** run 1 of `DF-40` created `m60`, replaced `m55` and deleted `m50`, and a board member confirms the undo for that run
-- **THEN** `m60` is gone, `m55` holds its previous content, and `m50` exists again with its previous content and provenance
+- **THEN** `m60` is gone, `m55` holds its previous summary and content, and `m50` exists again with its previous summary, content and creation provenance
+
+#### Scenario: Restored memory is protected
+- **WHEN** board member Peter's undo restores `m55` and an agent later calls `forget` for `m55`
+- **THEN** `m55` names Peter as last changer and the call fails saying the memory is protected
+
+### Requirement: Undo skips what it cannot revert
+Undo SHALL skip a change that was overwritten later and a re-creation that would exceed the scope limit, list each skipped change with its reason in the result, and revert the others.
 
 #### Scenario: Changed since
 - **WHEN** run 1 of `DF-40` replaced `m55` and a later run replaced `m55` again before the undo
 - **THEN** the undo leaves `m55` unchanged and lists it as skipped
 
+#### Scenario: Scope full
+- **WHEN** run 1 of `DF-40` deleted `m50` from the full project scope of `DF`, another run filled the freed slot, and a board member confirms the undo
+- **THEN** `m50` is not re-created and the result lists it as skipped because of the scope limit; the other changes are reverted
+
 ### Requirement: Memory off per project
-A project SHALL have a setting "Memory on" (default on) on the Memory tab. While it is off, runs of the project SHALL get an empty memory block and SHALL NOT be offered `remember`, `recall` and `forget`; calls to them from a run started before the switch SHALL fail with "memory is off for this project". Existing memories SHALL stay and board members SHALL still manage them.
+A project SHALL have a setting "Memory on" (default on) on the Memory tab. While it is off, runs started after the switch SHALL get an empty memory block and SHALL NOT be offered `remember`, `recall` and `forget`. A run started before the switch SHALL keep its stored block, also on reconnect ("Memory block fixed per run" takes precedence), and its calls to these tools SHALL fail with "memory is off for this project". Existing memories SHALL stay and board members SHALL still manage them.
 
 #### Scenario: Switched off
 - **WHEN** a board member switches memory off for `DF` and a run of `DF-41` starts
@@ -197,6 +208,10 @@ A project SHALL have a setting "Memory on" (default on) on the Memory tab. While
 #### Scenario: Run in progress
 - **WHEN** memory is switched off while run 2 of `DF-31` runs and its agent calls `remember`
 - **THEN** the call fails with "memory is off for this project" and nothing is stored
+
+#### Scenario: Reconnect after switching off
+- **WHEN** run 2 of `DF-31` got a non-empty block, memory is switched off, and its runtime reconnects
+- **THEN** the new `Assign` carries the same stored block
 
 ### Requirement: Memory lifecycle
 Deleting a project SHALL delete its memories and their history in the same transaction. Deleting a persona SHALL delete its persona memories; project memories it wrote SHALL stay with the persona reference removed from their provenance.

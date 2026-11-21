@@ -37,7 +37,7 @@ The migration that adds the index SHALL index the messages of transcripts stored
 - **THEN** their user and agent messages are found by a history search as whole messages
 
 ### Requirement: Search within one project
-A history search SHALL return only tasks and messages of one project, including archived chats, ranked by relevance and then newest first. Each hit SHALL name the task key, task kind, title, run number, time, author and the matching text cut at 2 KiB with the matched words marked. For a forge message the author SHALL be the forge author with the `outside` flag.
+A history search SHALL return only tasks and messages of one project, including archived chats, ranked by relevance and then newest first. Each hit SHALL name its source (`message` or `task`), task key, task kind, title, time, author and the matching text cut at 2 KiB with the matched words marked. For a forge message the author SHALL be the forge author with the `outside` flag.
 
 #### Scenario: Other project
 - **WHEN** project `OPS` has a message with "RBE failure" and a search in `DF` runs for it
@@ -50,6 +50,17 @@ A history search SHALL return only tasks and messages of one project, including 
 #### Scenario: Forge comment
 - **WHEN** an outside author's issue comment delivered to `DF-31` matches the query
 - **THEN** the hit names that forge author and marks them as outside
+
+### Requirement: Hit shapes
+A `message` hit SHALL carry the run number and the message's time, and its text SHALL be the message. A `task` hit (the title or description matched) SHALL carry no run number; its time SHALL be the task's creation time, its author the task's creator, and its text the title and description.
+
+#### Scenario: Task without runs
+- **WHEN** task `DF-50` has never run and its description contains "release train"
+- **THEN** a search in `DF` for "release train" returns a `task` hit for `DF-50` without a run number, with its creation time, its creator and its description as text
+
+#### Scenario: Message hit
+- **WHEN** run 2 of `DF-31` has an agent message matching the query
+- **THEN** the hit has source `message`, run 2, the message's time and the message as text
 
 ### Requirement: Secrets masked in history hits
 Secret-rule matches (the rules of the push checks) in the title and text of a history hit SHALL be masked before the hit is returned.
