@@ -178,10 +178,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 url = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
 wasip2 = "2"
-wasmtime = { version = "50.0.3", default-features = false, features = ["component-model", "async", "cranelift", "runtime", "std", "parallel-compilation", "wat"] }
-wasmtime-wasi = { version = "50.0.3", default-features = false, features = ["p2"] }
-wasmtime-wasi-config = "50.0.3"
-wasmtime-wasi-http = { version = "50.0.3", default-features = false, features = ["p2", "default-send-request"] }
+wasmtime = { version = "51", default-features = false, features = ["component-model", "async", "cranelift", "runtime", "std", "parallel-compilation", "wat"] }
+wasmtime-wasi = { version = "51", default-features = false, features = ["p2"] }
+wasmtime-wasi-config = "51"
+wasmtime-wasi-http = { version = "51", default-features = false, features = ["p2", "default-send-request"] }
 webpki-roots = "1"
 wiremock = "0.6"
 wit-bindgen = "0.63"
@@ -192,7 +192,3 @@ x509-parser = "0.18"
 [workspace.metadata.outdated.ignore]
 globset = "rpi-tools 0.16 (df-harness) requires globset =0.4.15; the workspace resolves a single version"
 reqwest = "native-harness-spike: rpi-ai 0.16 builds its provider client on reqwest 0.12; df-harness must hand it a client of the same version"
-wasmtime = "50.0.3 only takes the fix of RUSTSEC-2026-0587; the major update to 51 gets its own change"
-wasmtime-wasi = "updated together with wasmtime"
-wasmtime-wasi-config = "updated together with wasmtime"
-wasmtime-wasi-http = "updated together with wasmtime"
