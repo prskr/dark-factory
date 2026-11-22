@@ -2062,7 +2062,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.3",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2305,7 +2305,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e35d6e78f4cebb90e51d543db8fe41528851d6deeef6ef21ebd4bfdc1e784776"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5277,7 +5277,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6454,7 +6454,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6818,9 +6818,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-agent"
-version = "0.27.0"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a27a4f38ca1d1a1899a5cf407ddbe18be1d44bfdaefac1c976342bf978fd88e8"
+checksum = "7fa2208137050346f03ac17bd82ea987e093c29432fa9b228846f8330303e186"
 dependencies = [
  "async-trait",
  "futures",
@@ -6837,9 +6837,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-ai"
-version = "0.27.0"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88b7f1148d487e917fd26fcd60e7953a8e9f7af9efc34e9b31535b338924b33c"
+checksum = "630df5a6142ad761bb36a0c7f3b13cad669454a26c151d44a656c566030ff57c"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6862,9 +6862,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-plugin-sdk"
-version = "0.27.0"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b71b21b3d72a43d47bf0e0b3445a591d08091ae796467dfe689f6ea7be38a9db"
+checksum = "b12db083b91c1f20bd9fe72d1ae95ff3375c50029fb7fe999679d35bc61d7bda"
 dependencies = [
  "libc",
  "serde_json",
@@ -6873,9 +6873,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-telemetry"
-version = "0.27.0"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aed42c90d2284ac9dd3f0b3fb6e8040f2e55d4ef3fb1b45cee61f31ad4d59796"
+checksum = "461a07d5d263aaeec79e2342feeb4d8b275a4034c30616265bebc67435fe1086"
 dependencies = [
  "async-trait",
  "serde",
@@ -6885,9 +6885,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-tools"
-version = "0.27.0"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0cafdc19843aa2ef75fed947440505bfd665edacddd01d70090c594c62dfd77"
+checksum = "8b3a1ba8816407ccdd0ae7afbea48aaac4b93c37a12ab5e5449080d820bdf0c4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7038,7 +7038,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7106,7 +7106,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7299,7 +7299,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "969cde0349344dbbf58b5f9badbfb8f806db13969364eb8007c057ef687007d9"
 dependencies = [
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.23.1",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",
@@ -8056,10 +8056,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9482,7 +9482,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
