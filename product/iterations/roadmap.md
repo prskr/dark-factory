@@ -222,6 +222,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Approving an agent's push to a protected path (e.g. a Containerfile under `.dark-factory/` suggested by an agent), then the onboarding guide: project on the default image → agent suggests a Containerfile → approved push → switch to image build | decided | `openspec/changes/protected-path-approval` (to be proposed) |
 | Image builds triggered by a push to the base branch (forge webhook), with a "context changed since the last build" hint | idea | `openspec/changes/project-image-builds` |
 | Retention of image build logs (e.g. weekly, or once the image was replaced) | idea | `openspec/changes/project-image-builds` |
+| Task retention and deletion: tombstones for tasks and runs, manual delete, retention period per instance and project, purge job. Follow-ups: audit log retention, `task.deleted` lifecycle event | designed | `openspec/changes/task-retention` |
 | Registry-backed layer cache for image builds (needs credentials in the builder) | idea | ADR-0060, `openspec/changes/project-image-builds` |
 | BuildKit or Buildah as alternative image builder behind the same context-in, tarball-out interface | idea | ADR-0060, `openspec/changes/project-image-builds` |
 | Repository file read tools for agents without a workspace (chats) or for other repositories | idea | ADR-0059, `openspec/changes/forge-repo-contents` |
