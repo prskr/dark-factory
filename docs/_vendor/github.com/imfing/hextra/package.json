@@ -14,7 +14,7 @@
     "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "4.3.5",
     "postcss-cli": "11.0.1",
-    "prettier": "3.9.10",
+    "prettier": "3.10.1",
     "prettier-plugin-go-template": "0.0.15",
     "tailwindcss": "4.3.5"
   }
