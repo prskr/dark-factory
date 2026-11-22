@@ -33,4 +33,4 @@ flowchart LR
 Notes:
 - Wave-1 changes develop against the fakes in `df_core::testing`, so they don't block each other.
 - Each iteration-1 §7 spike is the first task group of the change that owns it.
-- Apply one change per agent: `/opsx:apply <change>`.
+- Apply one change per agent: `/openspec-apply-change <change>`.

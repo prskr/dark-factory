@@ -34,9 +34,14 @@ schema: spec-driven
 rules:
   proposal:
     - Every out-of-scope item that is a real follow-up names its target in product/iterations/roadmap.md (an iteration or the backlog); an item that is not wanted says "rejected".
+    - New protobuf fields and enum values in existing messages and enums get placeholder numbers (`<n1>`, `<n2>`, …) or none, never a concrete field number or a `reserved` entry; the final numbers are assigned when the change is implemented, because parallel changes would otherwise claim the same numbers.
+  specs:
+    - New protobuf fields and enum values in existing messages and enums get placeholder numbers (`<n1>`, `<n2>`, …) or none, never a concrete field number or a `reserved` entry; the final numbers are assigned when the change is implemented, because parallel changes would otherwise claim the same numbers.
   design:
     - Every non-goal that is a real follow-up names its target in product/iterations/roadmap.md (an iteration or the backlog); a non-goal that is not wanted says "rejected".
+    - New protobuf fields and enum values in existing messages and enums get placeholder numbers (`= <n1>`, `= <n2>`, …), never a concrete field number or a `reserved` entry (fields of a message the change creates may be numbered), with a comment that the final numbers are assigned when the change is implemented. Parallel changes would otherwise claim the same numbers.
   tasks:
+    - A change that adds protobuf fields or enum values has a task that assigns the final numbers (the next free ones in the message at implementation time, checked against `reserved` entries) and replaces the placeholders in the change's artifacts.
     - Every change that alters what a user or operator sees or configures (UI behavior, configuration keys, Helm values, environment variables, metrics, logs, install or upgrade steps, architecture, security properties) has a task that updates the published docs (docs/content/, and the crate references mounted from crates/*/docs/), names the pages to change or create, and is verified with `just docs-build`. A change without such effects says so in one line instead.
 
 operations:
