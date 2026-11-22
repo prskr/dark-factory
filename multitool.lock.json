@@ -250,24 +250,24 @@
         "file": "kingfisher",
         "kind": "archive",
         "os": "linux",
-        "sha256": "3449ba41007df91e6774a816dd64cc9385900a304ef3cbb58ab61e0a83448e1c",
-        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.19.1/kingfisher-linux-x64.tgz"
+        "sha256": "825a5e89cdf6c0d52e85bf029061f76ad6ba7cc6e55406c6eb9f68572ee6b774",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.20.0/kingfisher-linux-x64.tgz"
       },
       {
         "cpu": "arm64",
         "file": "kingfisher",
         "kind": "archive",
         "os": "linux",
-        "sha256": "273744b70304704e46fb980cbe37fc9a94a96f62d65aaf07af1f21ea94b4b09f",
-        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.19.1/kingfisher-linux-arm64.tgz"
+        "sha256": "245c34ee00caf24bffe9fed54a23bcb617fe95a0755ff881ef7d2c869f9d4ad7",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.20.0/kingfisher-linux-arm64.tgz"
       },
       {
         "cpu": "arm64",
         "file": "kingfisher",
         "kind": "archive",
         "os": "macos",
-        "sha256": "c7441bb1708f65fb146121e351546661c5ace52fd948eff7fd7c6adb68e7c556",
-        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.19.1/kingfisher-darwin-arm64.tgz"
+        "sha256": "eade605f6c4ae091aeb06e186b9d3d802b4c4a222956f661991f2b16d6655ab3",
+        "url": "https://github.com/mongodb/kingfisher/releases/download/v2.20.0/kingfisher-darwin-arm64.tgz"
       }
     ]
   },
