@@ -173,6 +173,9 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Automatic downscaling of image artifacts (e.g. to 2k or 4k on the long side) instead of rejecting images above the size and pixel limits | idea | ADR-0048 (amended 2026-11-03) |
 | Agent memory phases 3 and 4: curator routine, embedding or model-based selection, entity memory | decided | ADR-0040 |
 | SSH repository URLs, issue-only trackers | idea | `openspec/changes/archive/2026-10-30-iter2-multi-forge` |
+| Issue tracker separate from the forge, e.g. GitHub as forge with Jira for issues: a per-project issue provider (world `issue-provider`) that `list_issues`, `create_issue` and the `create_task` issue check use instead of the forge | idea | `openspec/changes/chat-issue-tools` (design, "`create_task` with `issue`") |
+| Link an issue to an existing task, or change it: by an agent tool and by a human in the task UI (today the issue is set when the task is created and does not change) | idea | `openspec/changes/chat-issue-tools` (non-goals) |
+| Agents manage issues: close and reopen, edit title and body, labels, assignees | idea | `openspec/changes/chat-issue-tools` (non-goals) |
 | GitHub App authentication for the GitHub plugin: installation tokens minted and cached by the host (JWT signed with the app key); needs an ADR | idea | `openspec/changes/archive/2026-11-01-iter2-github-plugin` |
 | Shared crate for forge plugins (HTTP transport, draft prefixes), once a third forge plugin exists | idea | `openspec/changes/archive/2026-11-01-iter2-github-plugin` (D4) |
 | Transcript archival of finished runs to the blob store (zstd JSONL) | idea | ADR-0012 |
