@@ -105,7 +105,7 @@ Dependency: API-key harnesses need the inference endpoint of iteration 3, otherw
 - Dashboard-wide live status.
 - Full-text search across tasks and transcripts.
 - **Workspace changes view (F8)**, reading from the Git proxy's mirror.
-- **Agent memory (ADR-0040)**, explicit memories with full-text search first (phases 1 and 2).
+- **Agent memory (ADR-0040)**, explicit memories with full-text search first (phases 1 and 2): `openspec/changes/iter6-agent-memory` (proposed).
 - Installable web app with push notifications (ADR-0035).
 - **Agents deciding approvals** (e.g. a CEO persona), bounded by the no-escalation rule (ADR-0038, ADR-0011). Needs the permission model of iteration 4.
 
