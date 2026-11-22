@@ -13,7 +13,7 @@ Change: `$ARGUMENTS`
 
 1. Resolve the store: if the user names an OpenSpec store or the change lives in one, run `openspec store list --json` and pick its id (`STORE`). Pass `--store <STORE>` to every store-aware `openspec` command below (`status`, `list`, `instructions`) and tell the implementer the id. Without a store, `STORE` is none.
 2. Resolve the change: `openspec status --change "<name>" --json` (with `--store`). If no name was given or the name is ambiguous, run `openspec list --json` (with `--store`) and ask. If the change is blocked or `all_done`, report that and stop.
-3. Confirm the scope (skip on a resumed run, i.e. if `openspec/changes/<name>/review-log.md` exists). Read the change's proposal, `design.md`, specs and `tasks.md`, then summarize for the user in a few bullets: the goal, the behavior the specs require, the main design decisions, and the open tasks (`n/m`). Ask with `AskUserQuestion`: "Start implementation (Recommended)" / "Update the change first (say what)" / "Stop". On an update request, suggest `/opsx:update` with the user's notes and stop; the user restarts this skill once the artifacts are committed.
+3. Confirm the scope (skip on a resumed run, i.e. if `openspec/changes/<name>/review-log.md` exists). Read the change's proposal, `design.md`, specs and `tasks.md`, then summarize for the user in a few bullets: the goal, the behavior the specs require, the main design decisions, and the open tasks (`n/m`). Ask with `AskUserQuestion`: "Start implementation (Recommended)" / "Update the change first (say what)" / "Stop". On an update request, suggest `/openspec-update-change` with the user's notes and stop; the user restarts this skill once the artifacts are committed.
 4. Require a clean working tree (`git status --porcelain`). If it isn't clean, the user must commit or stop; there is no "continue anyway", because pre-existing edits would enter BASE and the implementation commits.
 5. Ledger: `openspec/changes/<name>/review-log.md`.
    - If it exists, this is a resumed run. Read it and take `BASE`, the round number and the open findings from it. Continue at the step the ledger records.
@@ -30,14 +30,14 @@ The implementer cannot ask questions and has no judgement about the look, so the
 2. Do each design task in PenPot (clone the nearest board, then change it). Export the board with `export_shape` and look at it.
 3. Show the result to the user and ask with `AskUserQuestion`: "Approve" / "Change it (say what)" / "Stop". On a change request, iterate and ask again. Don't go on without approval.
 4. Add the mapping row to `docs/design-workflow.md`, tick the design tasks in `tasks.md`, and commit them as `wip(<change>): design`. Record the SHA in the ledger.
-5. If the design shows that `design.md` or a spec is wrong or incomplete, suggest `/opsx:update` and stop.
+5. If the design shows that `design.md` or a spec is wrong or incomplete, suggest `/openspec-update-change` and stop.
 
 ## 2. Implement
 
 Spawn `subagent_type: implementer` with: change name, store id (or none), iteration number, and "implement the open tasks". Tell it the design tasks are done and the PenPot boards are the reference; it must not edit PenPot. With a `DOCKER_HOST`, pass it so it runs the container-backed tests and the browser check instead of skipping them (`AGENTS.md` allows using a socket that answers; the announce line shows it). Without one, pass "no container socket": it runs only the tests it has identified as needing no containers and reports the container-backed ones it skipped. Before every fix round, probe the socket again and pass the current status: a socket can stop answering, or come back, during a run. Remember its agent ID so later rounds can reach it with `SendMessage`. Tell it in every case to update the published docs (`docs/content/` and the crate references mounted from `crates/*/docs/`) for everything the change builds, even if `tasks.md` has no docs task, to describe only what is built, and to run `just docs-build`.
 
 When it reports:
-- `BLOCKED`: ask the user the question with `AskUserQuestion`, then send the answer to the same implementer with `SendMessage`. If the implementer proposes an artifact change, suggest `/opsx:update` and stop.
+- `BLOCKED`: ask the user the question with `AskUserQuestion`, then send the answer to the same implementer with `SendMessage`. If the implementer proposes an artifact change, suggest `/openspec-update-change` and stop.
 - Any check failed or `COMMIT: none`: send it back once to fix. If it fails again, show the failure to the user and stop.
 - Record the commit SHA as `HEAD_n` in the ledger.
 
@@ -117,7 +117,7 @@ When no blocking finding is open, or the user chose "Stop here" (or the fix-roun
    - status (`done`, `untested` with the skipped container tests, or `stopped` with the open blocking findings), tasks `n/m`, rounds run
    - findings fixed, deferred (with TD IDs), cosmetic, rejected
    - container tests skipped (from the implementer reports): lead the report with them if the status is `untested`
-   - next steps: squash the `wip(<change>)` commits (`git reset --soft BASE` and commit again; ask before doing this), then `/opsx:archive`. Before rebasing onto `main`, check whether commits below BASE already landed on `main` under other SHAs (`git log --oneline $(git merge-base HEAD main)..BASE`). If so, move only the squashed commit: `git rebase --onto main BASE`. The ledger is archived with the change.
+   - next steps: squash the `wip(<change>)` commits (`git reset --soft BASE` and commit again; ask before doing this), then `/openspec-archive-change`. Before rebasing onto `main`, check whether commits below BASE already landed on `main` under other SHAs (`git log --oneline $(git merge-base HEAD main)..BASE`). If so, move only the squashed commit: `git rebase --onto main BASE`. The ledger is archived with the change.
 
 ## Ledger template
 
