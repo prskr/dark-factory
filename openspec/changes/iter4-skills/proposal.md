@@ -49,4 +49,4 @@ Out of scope:
 - **Web** (`df-web`): skills page (list, form modal, read-only built-ins, version list), skill selection on the persona form and on the project settings page.
 - **Seeds / e2e** (`df-e2e`, demo data): a seeded instance skill; an e2e test for delivery.
 - **Docs**: new how-to `docs/content/using/skills.md`, `docs/content/using/setup.md`, `docs/content/using/opencode.md`, `crates/factory-agent/docs/` (notices), `product/agent-playbook.md` (§1 is now the source of `dark-factory-basics`), roadmap F13 line.
-- **Depends on** nothing unmerged. F12 (`iter4-harness-registry`) moves the two profile fields into the registry; `iter4-permissions` later maps skill management to `admin`.
+- **Depends on** the change `markdown-editor` for the UI only: the skill form reuses its rich Markdown editor component for the body. Storage, `Assign` and runtime delivery do not depend on it. F12 (`iter4-harness-registry`) moves the two profile fields into the registry; `iter4-permissions` later maps skill management to `admin`.

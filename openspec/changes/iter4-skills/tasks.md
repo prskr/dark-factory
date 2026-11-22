@@ -9,7 +9,9 @@
 
 ## 2. Design agreement (PenPot)
 
-- [ ] 2.1 Draw in PenPot, in light, dark and at 390 px width: the skills page (rows with "Built-in" label, empty state), the skill form modal (name, description, body, supporting file rows, size against the limit, version list), the read-only built-in view, the delete confirmation listing users, the "Skills" field of the persona form and the "Skills" tab of the project settings page. Verify: the user approves the boards, and every changed label is written back into `specs/skills/spec.md` and `specs/configuration-management/spec.md` before group 7 starts.
+> **Depends on `markdown-editor`:** the skill body (and Markdown supporting files) are edited with the rich Markdown editor component that the change `markdown-editor` introduces. Reuse that component in 2.1 and 7.1; don't build a separate editor. Group 7 starts after `markdown-editor` is merged.
+
+- [ ] 2.1 Draw in PenPot, in light, dark and at 390 px width, using the `markdown-editor` component for the body: the skills page (rows with "Built-in" label, empty state), the skill form modal (name, description, body, supporting file rows, size against the limit, version list), the read-only built-in view, the delete confirmation listing users, the "Skills" field of the persona form and the "Skills" tab of the project settings page. Verify: the user approves the boards, and every changed label is written back into `specs/skills/spec.md` and `specs/configuration-management/spec.md` before group 7 starts.
 
 ## 3. Skill model and storage
 
@@ -37,7 +39,7 @@
 
 ## 7. Web UI
 
-- [ ] 7.1 Write failing `df-web` tests first for the skills page: list with built-ins labeled and the empty state, create with a supporting file, field errors (name rule, name taken, reserved prefix, path, size limit), name read-only on edit, version list, built-in read-only, delete confirmation naming personas and projects. Implement per the approved boards. Verify: `cargo nextest run -p df-web skills`.
+- [ ] 7.1 Write failing `df-web` tests first for the skills page: list with built-ins labeled and the empty state, create with a supporting file, field errors (name rule, name taken, reserved prefix, path, size limit), name read-only on edit, version list, built-in read-only, delete confirmation naming personas and projects. Implement per the approved boards, with the body in the `markdown-editor` component. Verify: `cargo nextest run -p df-web skills`.
 - [ ] 7.2 Write failing tests first for "Assign a skill to a persona" and "Basics cannot be removed" (persona form). Implement. Verify: `cargo nextest run -p df-web config_pages`.
 - [ ] 7.3 Write failing tests first for "Assign a skill to a project" (project settings "Skills" tab, tab in the URL like the other tabs). Implement. Verify: `cargo nextest run -p df-web project_settings`.
 - [ ] 7.4 Seed one instance skill in the demo data and the e2e seed, and add an e2e test (skill `e2e`): create a skill in the UI, assign it to a persona, run a task with the fake ACP agent, and check that the `skills.delivered` notice in the transcript lists it next to `dark-factory-basics`. Verify: `just e2e-local`.

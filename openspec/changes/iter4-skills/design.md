@@ -146,7 +146,7 @@ A harness without `skills_dir` gets no skill files. `Assign` still names its ski
 ### D10: UI
 
 - Settings area: a "Skills" entry. The list uses the two-line settings rows (name, description; "Built-in" label for built-ins). Rows open the form modal; built-ins open read-only.
-- Form: name (create only), description, body (textarea with Markdown), supporting files (rows with path, content, executable checkbox; add and remove), the current version and the version list. Size shown against the limit; save rejected above it with a field error.
+- Form: name (create only), description, body (the rich Markdown editor component of the change `markdown-editor`, reused, not a separate editor), supporting files (rows with path, content, executable checkbox; add and remove), the current version and the version list. Size shown against the limit; save rejected above it with a field error.
 - Persona form: a "Skills" field with a checkbox list of instance skills (built-ins with scope `always` are shown checked and disabled, with the hint "every run").
 - Project settings page: a "Skills" tab with the same list.
 - Every create, edit and delete is audited: `skill.create`, `skill.update` (before and after), `skill.delete`; assignment changes are part of `persona.update` and `project.update`.
