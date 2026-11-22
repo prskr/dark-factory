@@ -254,7 +254,7 @@ filegroup(
     srcs = glob(["**/*.json"]),
     visibility = ["//visibility:public"],
 )""",
-    commit = "11639286f15b208b6c7f1f93bc2c1a70f42cfbcb",
+    commit = "0c4dd99d9873f7b4c2da24c008476f5841adbe2d",
     remote = "https://github.com/yannh/kubernetes-json-schema.git",
     sparse_checkout_patterns = ["v1.34.3-standalone-strict"],
     strip_prefix = "v1.34.3-standalone-strict",
