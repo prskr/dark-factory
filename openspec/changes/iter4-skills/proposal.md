@@ -9,7 +9,7 @@ Agents get their working rules only from the persona's system prompt and the rep
 - **Skills as factory data.** A skill has a name, a description, a body (the `SKILL.md` text) and optional supporting text files. Every save makes a new version. Skills are database rows (iteration 4, decision 11), with size limits.
 - **Built-in skills** ship with Dark Factory and are read-only. The first one is `dark-factory-basics`, written from §1 of the agent playbook. Every run gets it. Its content is versioned with the release, so later changes (for example agent memory, ADR-0040) can add to it.
 - **Instance skills** are created, edited and deleted by board members on a new "Skills" page in the settings area. Changes are audited.
-- **Assignment** of instance skills per persona (persona form) and per project (project settings). A run gets the built-in skills, the persona's skills and the project's skills (union).
+- **Assignment** of instance skills per persona (a "Skills" tab on the persona settings page) and per project (project settings). A run gets the built-in skills, the persona's skills and the project's skills (union).
 - **Delivery on every run.** `Assign` carries the run's skills and the harness's skill directory. The runtime replaces the skill directory under `HOME` before the harness starts. This works on a reused home and on a fresh one (planned `emptyDir` chats).
 - **Skill paths are harness profile data.** `HarnessProfile` gets the skill directory the runtime writes (relative to `HOME`), other global skill directories the harness reads (emptied on every run), and the repository skill directories (relative to the workspace). Claude Code: `.claude/skills` below `HOME` and in the workspace. OpenCode: values from the spike in task 1. The harness registry and "Generic ACP" (F12) set the same three values as settings. No code per harness.
 - **Repository skills stay untouched.** Human-edited skills are trusted; skills from the repository are untrusted like any repository content, and stay usable. On a name clash the harness's own lookup order decides; in Claude Code personal skills win, so the factory skill wins (iteration 4, decision 12). The runtime does not hide repository skills. A clash gives a `skills.repository_skill_shadowed` warning in the transcript, and users resolve it by renaming.
@@ -37,7 +37,7 @@ Out of scope:
 - `acp-harness`: the runtime validates the skill paths and replaces the harness's skill directory (read-only, no symlink following) before the harness starts, warns about clashing repository skills, and the system prompt points to `dark-factory-basics`.
 - `opencode-harness`: OpenCode's skill directory and repository skill directories.
 - `run-orchestration`: `Assign` carries the run's skills and the harness's skill paths, also for chat runs.
-- `configuration-management`: the persona form and the project settings page get a skill selection.
+- `configuration-management`: the persona settings page and the project settings page get a "Skills" tab.
 
 ## Impact
 
@@ -46,7 +46,7 @@ Out of scope:
 - **Database** (`df-db`): new module `skills` with tables `skills`, `skill_versions`, `persona_skills`, `project_skills`, `run_skills` (snapshot of the skills a run got, deleted at run end); migration and `.sqlx` metadata.
 - **Agent channel** (`df-agent-channel`, `assign.rs`): loads the run's skills and fills `AcpHarness`; adds the skill line to the system prompt.
 - **factory-agent**: checks `HOME` and the skill paths, empties the skill directories and writes the skills with descriptor-relative no-follow operations (`rustix`), shadow check against the workspace, notices `skills.delivered` and `skills.repository_skill_shadowed`.
-- **Web** (`df-web`): skills page (list, form modal, read-only built-ins, version list), skill selection on the persona form and on the project settings page.
+- **Web** (`df-web`): skills list, "New skill" modal, skill settings page with General, Body and Files tabs (read-only for built-ins, version list), "Skills" tabs on the persona and project settings pages.
 - **Seeds / e2e** (`df-e2e`, demo data): a seeded instance skill; an e2e test for delivery.
 - **Docs**: new how-to `docs/content/using/skills.md`, `docs/content/using/setup.md`, `docs/content/using/opencode.md`, `crates/factory-agent/docs/` (notices), `product/agent-playbook.md` (§1 is now the source of `dark-factory-basics`), roadmap F13 line.
-- **Depends on** the change `markdown-editor` for the UI only: the skill form reuses its rich Markdown editor component for the body. Storage, `Assign` and runtime delivery do not depend on it. F12 (`iter4-harness-registry`) moves the two profile fields into the registry; `iter4-permissions` later maps skill management to `admin`.
+- **Depends on** the change `markdown-editor` for the UI only: the skill body uses its Markdown field with the side-by-side layout on a "Body" tab, and the persona "Skills" tab needs its persona settings page. `markdown-editor` must be implemented first. Storage, `Assign` and runtime delivery do not depend on it. F12 (`iter4-harness-registry`) moves the two profile fields into the registry; `iter4-permissions` later maps skill management to `admin`.

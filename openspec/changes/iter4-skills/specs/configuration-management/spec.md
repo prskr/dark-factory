@@ -3,14 +3,14 @@
 ## ADDED Requirements
 
 ### Requirement: Persona skills
-The persona form SHALL have a "Skills" field listing every instance skill as a checkbox and every built-in skill that applies to every run as checked and disabled with the hint "every run". Saving SHALL store the checked instance skills as the persona's skills.
+The persona settings page ("Persona settings page") SHALL have a "Skills" tab, named `tab=skills` in the URL, listing every instance skill as a checkbox and every built-in skill that applies to every run as checked and disabled with the hint "every run". "Save persona" SHALL store the checked instance skills as the persona's skills.
 
 #### Scenario: Assign a skill to a persona
-- **WHEN** a board member checks `release-notes` on persona `linus` and saves
-- **THEN** `linus` has skill `release-notes` and the next run of `linus` gets it
+- **WHEN** a board member checks `release-notes` on the Skills tab of persona `linus` and saves
+- **THEN** the page stays on `/personas/<id>?tab=skills`, `linus` has skill `release-notes`, and the next run of `linus` gets it
 
 #### Scenario: Basics cannot be removed
-- **WHEN** a board member opens the persona form
+- **WHEN** a board member opens the Skills tab of a persona
 - **THEN** `dark-factory-basics` is shown checked and cannot be unchecked
 
 ### Requirement: Project skills

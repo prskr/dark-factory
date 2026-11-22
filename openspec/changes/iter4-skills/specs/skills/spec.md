@@ -71,7 +71,7 @@ Sizes SHALL count everything a skill adds to `Assign` (name, version, rendered `
 - **THEN** the reconnect gets the versions the run started with and the run continues
 
 ### Requirement: Skill versions
-Every save of an instance skill SHALL create a new version numbered from 1 and record its author and time. A run SHALL get the current version of each skill and the built-in skills when its `Assign` is first built, and SHALL keep this content for the whole run, also on reconnects and after the skill is deleted. The skill form SHALL list the versions read-only.
+Every save of an instance skill SHALL create a new version numbered from 1 and record its author and time. A run SHALL get the current version of each skill and the built-in skills when its `Assign` is first built, and SHALL keep this content for the whole run, also on reconnects and after the skill is deleted. The General tab of the skill settings page SHALL list the versions read-only.
 
 #### Scenario: Edit during a run
 - **WHEN** run 1 of `DF-3` started with version 2 of `release-notes` and a board member saves version 3 during the run
@@ -91,14 +91,14 @@ Every save of an instance skill SHALL create a new version numbered from 1 and r
 
 #### Scenario: Version list
 - **WHEN** a board member opens a skill saved three times
-- **THEN** the form lists versions 1 to 3 with author and time
+- **THEN** its General tab lists versions 1 to 3 with author and time
 
 ### Requirement: Built-in skills
 Dark Factory SHALL ship built-in skills with the release, versioned with the Dark Factory version. Built-in skills SHALL be shown on the skills page with a "Built-in" label and SHALL NOT be editable or deletable. Their names SHALL start with `dark-factory-`, and an instance skill name SHALL NOT start with `dark-factory-`. The built-in `dark-factory-basics` SHALL contain the principles of the agent playbook and SHALL be part of every run.
 
 #### Scenario: Built-in read-only
 - **WHEN** a board member opens `dark-factory-basics` on the skills page
-- **THEN** its content is shown without save or delete actions
+- **THEN** its settings page shows the description, the rendered body and the files, without save or delete actions
 
 #### Scenario: Reserved prefix
 - **WHEN** a board member creates an instance skill named `dark-factory-review`
@@ -124,11 +124,11 @@ Board members SHALL assign instance skills to personas and to projects. The skil
 - **THEN** the run gets the same skills as a task run of `linus` in `DF`
 
 ### Requirement: Skills page
-The settings area SHALL have a "Skills" page listing built-in and instance skills in two-line rows (name, description), built-ins labeled "Built-in". Board members SHALL create, edit and delete instance skills in a form modal with name, description, body, supporting files (path, content, executable) and the version list. Deleting a skill SHALL ask for confirmation, list the personas and projects that use it, and remove its versions and assignments.
+The settings area SHALL have a "Skills" page listing built-in and instance skills in two-line rows (name, description), built-ins labeled "Built-in"; each row SHALL link to the skill settings page. A "New skill" modal SHALL ask for name and description only and, on save, open the new skill's settings page on the Body tab. Deleting a skill SHALL ask for confirmation, list the personas and projects that use it, and remove its versions and assignments.
 
 #### Scenario: Create a skill
-- **WHEN** a board member creates skill `release-notes` with a supporting file `scripts/collect.sh` marked executable
-- **THEN** the list shows `release-notes` with its description and the skill has version 1
+- **WHEN** a board member creates skill `release-notes` with a description in the "New skill" modal
+- **THEN** `/skills/release-notes?tab=body` opens, the skill has version 1, and the list shows `release-notes` with its description
 
 #### Scenario: Delete a used skill
 - **WHEN** a board member deletes `release-notes`, which persona `linus` and project `DF` use
@@ -137,6 +137,28 @@ The settings area SHALL have a "Skills" page listing built-in and instance skill
 #### Scenario: Empty list
 - **WHEN** no instance skill exists
 - **THEN** the page lists the built-in skills and offers to create a skill
+
+### Requirement: Skill settings page
+Each skill SHALL have a settings page at `/skills/{name}`, built like the persona settings page of `markdown-editor`: back link, name, tabs General (name read-only, description, size, versions), Body and Files (path, plain text content and executable flag of each supporting file), and one "Save skill" button. The open tab SHALL be in the URL (`tab=body`, `tab=files`; none for General). Saving SHALL behave as "Saving the persona settings page".
+
+#### Scenario: Add a supporting file
+- **WHEN** a board member adds `scripts/collect.sh` marked executable on the Files tab of `release-notes` and saves
+- **THEN** the page stays on the Files tab with the file, and the skill has a new version
+
+#### Scenario: Validation error on another tab
+- **WHEN** a board member on `/skills/release-notes?tab=body` saves after clearing the description on General
+- **THEN** the page shows the General tab with the error at Description, the edited body is kept, and the URL becomes `/skills/release-notes`
+
+#### Scenario: Unknown skill
+- **WHEN** `/skills/<unknown name>` is opened
+- **THEN** the response is `404`
+
+### Requirement: Skill body in the Markdown editor
+The Body tab SHALL hold only the skill body, edited in a Markdown field with the side-by-side layout ("Side-by-side layout" in `markdown-editor`). The stored body SHALL be the text exactly as typed. Supporting files SHALL NOT use the Markdown field.
+
+#### Scenario: Write a skill body
+- **WHEN** a board member writes a body with a heading and a `bash` fence on the Body tab and saves
+- **THEN** the body is stored unchanged and the rendered `SKILL.md` contains it after the frontmatter
 
 ### Requirement: Skill changes are audited
 Every create, edit and delete of an instance skill SHALL write an audit entry (`skill.create`, `skill.update` with the old and new content, `skill.delete` with the last content). Assignment changes SHALL be part of the audit entry of the persona or project.

@@ -160,9 +160,14 @@ A harness without `skills_dir` gets no skill files. `Assign` still names its ski
 
 ### D10: UI
 
-- Settings area: a "Skills" entry. The list uses the two-line settings rows (name, description; "Built-in" label for built-ins). Rows open the form modal; built-ins open read-only.
-- Form: name (create only), description, body (the rich Markdown editor component of the change `markdown-editor`, reused, not a separate editor), supporting files (rows with path, content, executable checkbox; add and remove), the current version and the version list. Size shown against the limit; save rejected above it with a field error.
-- Persona form: a "Skills" field with a checkbox list of instance skills (built-ins with scope `always` are shown checked and disabled, with the hint "every run").
+The skill UI takes the shape of the persona settings page of the change `markdown-editor` (its design D2b and decision Q10). It reuses that change's parts; it does not describe the editor again.
+
+- Settings area: a "Skills" entry. The list uses the two-line settings rows (name, description; "Built-in" label for built-ins). A row links to the skill's settings page.
+- Create: a "New skill" modal with name and description only. Saving answers `HX-Redirect: /skills/{name}?tab=body`, like a new persona opens on its System prompt tab.
+- Skill settings page `/skills/{name}?tab=` (the name is the key; it cannot change): `settings_page_frame` with back link "Skills", the name as heading and one "Save skill" button; `tabbed_form(…, TabsStyle::Page)` with the tabs **General** (name read-only, description, size against the limit, the version list), **Body** (only the body, in a Markdown field with the side-by-side layout, as on the persona System prompt tab) and **Files** (supporting file rows with path, content as a plain textarea, executable checkbox; add and remove). The open tab is in the URL (`tab=body`, `tab=files`; General is left out), and saving and validation errors follow "Saving the persona settings page". A save above the size limit is rejected with a field error.
+- The Markdown field's behavior (layouts, preview, highlighting, phones, keyboard access) is the merged `markdown-editor` spec; this change only places it. Supporting files are not Markdown and stay plain textareas (`markdown-editor`, Out of Scope).
+- Built-ins open the same page read-only: no "Save skill" and no delete action; the Body tab shows the rendered body.
+- Persona settings page: a **Skills** tab (`?tab=skills`, design D2b "Later tabs" of `markdown-editor`) with a checkbox list of instance skills; built-ins with scope `always` are shown checked and disabled, with the hint "every run". It is saved with "Save persona".
 - Project settings page: a "Skills" tab with the same list.
 - Every create, edit and delete is audited: `skill.create`, `skill.update` (before and after), `skill.delete`; assignment changes are part of `persona.update` and `project.update`.
 - Who: board members, like personas. `iter4-permissions` maps this to `admin`.
