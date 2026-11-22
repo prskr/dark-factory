@@ -15,7 +15,7 @@ bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "protobuf", version = "35.1")
 bazel_dep(name = "rules_cc", version = "0.2.28")
 
-bazel_dep(name = "rules_buf", version = "0.5.4", dev_dependency = True)
+bazel_dep(name = "rules_buf", version = "0.6.1", dev_dependency = True)
 
 bazel_dep(name = "rules_img", version = "0.3.26")
 bazel_dep(name = "rules_multirun", version = "0.14.0")
