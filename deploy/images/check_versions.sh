@@ -23,7 +23,7 @@ check() { # <file> <found version> <wanted version> <harness>
   fi
 }
 
-for f in crates/df-core/src/config.rs crates/df-k8s/README.md crates/df-agent-channel/docs/configuration.md; do
+for f in crates/df-core/src/config.rs crates/df-core/src/config/tests.rs crates/df-k8s/README.md crates/df-agent-channel/docs/configuration.md; do
   found="$(grep -o 'claude-harness:[0-9][0-9.]*' "$f" | head -n 1 | cut -d: -f2 || true)"
   check "$f" "$found" "$want" "harness"
   found="$(grep -o 'opencode-harness:[0-9][0-9.]*' "$f" | head -n 1 | cut -d: -f2 || true)"
