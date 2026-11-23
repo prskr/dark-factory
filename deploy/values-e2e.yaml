@@ -72,10 +72,20 @@ oidc:
   existingSecret: dark-factory-oidc
   clientSecretKey: client-secret
 
+sandbox:
+  runtimeClassName: ''
+  # 1Gi memory limit: four sandboxes fit the `limitsMemory: 4Gi` quota below.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: '1'
+      memory: 1Gi
+
 sandboxNamespace:
   create: true
   name: dark-factory-sandboxes
-  runtimeClassName: ''
   pvcSize: '1Gi'
   resourceQuota:
     pods: '4'
@@ -88,11 +98,6 @@ sandboxNamespace:
     # not reserve the requested size.
     requestsStorage: '96Gi'
     persistentVolumeClaims: '96'
-  limitRange:
-    defaultCpu: '1'
-    defaultMemory: '1Gi'
-    defaultRequestCpu: '100m'
-    defaultRequestMemory: '128Mi'
 
 enforcement:
   mode: kubernetes

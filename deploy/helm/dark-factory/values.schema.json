@@ -152,29 +152,13 @@
     },
     "sandbox": {
       "type": "object",
-      "required": ["logLevel", "landlock"],
+      "additionalProperties": false,
+      "required": ["logLevel", "landlock", "serviceAccountName"],
       "properties": {
         "logLevel": { "type": "string" },
-        "landlock": { "enum": ["enforce", "disabled"] }
-      }
-    },
-    "sandboxNamespace": {
-      "type": "object",
-      "required": ["create", "name", "serviceAccountName", "resourceQuota", "limitRange"],
-      "properties": {
-        "create": { "type": "boolean" },
-        "name": { "type": "string", "minLength": 1 },
+        "landlock": { "enum": ["enforce", "disabled"] },
         "runtimeClassName": { "type": "string" },
-        "storageClass": { "type": "string" },
-        "pvcSize": { "type": "string" },
-        "issuerName": { "type": "string" },
-        "issuerKind": { "type": "string", "enum": ["", "ClusterIssuer"] },
-        "issuerGroup": { "type": "string" },
-        "certificateDuration": { "type": "string" },
-        "certificateRenewBefore": { "type": "string" },
-        "clusterDomain": { "type": "string" },
-        "controlPlaneIp": { "type": "string" },
-        "gatewayIp": { "type": "string" },
+        "serviceAccountName": { "type": "string", "minLength": 1 },
         "imagePullSecrets": {
           "type": "array",
           "items": {
@@ -185,7 +169,41 @@
             }
           }
         },
-        "serviceAccountName": { "type": "string", "minLength": 1 },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "tolerations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/toleration" }
+        },
+        "affinity": { "$ref": "#/$defs/affinity" },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests": { "$ref": "#/$defs/quantities" },
+            "limits": { "$ref": "#/$defs/quantities" }
+          }
+        }
+      }
+    },
+    "sandboxNamespace": {
+      "type": "object",
+      "required": ["create", "name", "resourceQuota"],
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string", "minLength": 1 },
+        "storageClass": { "type": "string" },
+        "pvcSize": { "type": "string" },
+        "issuerName": { "type": "string" },
+        "issuerKind": { "type": "string", "enum": ["", "ClusterIssuer"] },
+        "issuerGroup": { "type": "string" },
+        "certificateDuration": { "type": "string" },
+        "certificateRenewBefore": { "type": "string" },
+        "clusterDomain": { "type": "string" },
+        "controlPlaneIp": { "type": "string" },
+        "gatewayIp": { "type": "string" },
         "resourceQuota": {
           "type": "object",
           "required": [
@@ -205,16 +223,6 @@
             "limitsMemory": { "type": "string" },
             "requestsStorage": { "type": "string" },
             "persistentVolumeClaims": { "type": "string" }
-          }
-        },
-        "limitRange": {
-          "type": "object",
-          "required": ["defaultCpu", "defaultMemory", "defaultRequestCpu", "defaultRequestMemory"],
-          "properties": {
-            "defaultCpu": { "type": "string" },
-            "defaultMemory": { "type": "string" },
-            "defaultRequestCpu": { "type": "string" },
-            "defaultRequestMemory": { "type": "string" }
           }
         }
       }
@@ -311,6 +319,8 @@
         "replicas": { "type": "integer", "minimum": 1 },
         "logLevel": { "type": "string" },
         "serviceAccountName": { "type": "string" },
+        "podAntiAffinity": { "$ref": "#/$defs/antiAffinityPreset" },
+        "affinity": { "type": "object" },
         "ports": {
           "type": "object",
           "required": ["http", "agent", "internalGrpc"],
@@ -361,6 +371,8 @@
         "replicas": { "type": "integer", "minimum": 1 },
         "logLevel": { "type": "string" },
         "serviceAccountName": { "type": "string" },
+        "podAntiAffinity": { "$ref": "#/$defs/antiAffinityPreset" },
+        "affinity": { "type": "object" },
         "pdb": {
           "type": "object",
           "required": ["enabled", "minAvailable"],
@@ -468,6 +480,31 @@
     }
   ],
   "$defs": {
+    "affinity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nodeAffinity": { "type": "object" },
+        "podAffinity": { "type": "object" },
+        "podAntiAffinity": { "type": "object" }
+      }
+    },
+    "antiAffinityPreset": { "enum": ["soft", "hard", "none"] },
+    "quantities": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "number"] }
+    },
+    "toleration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string" },
+        "operator": { "enum": ["Equal", "Exists"] },
+        "value": { "type": "string" },
+        "effect": { "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"] },
+        "tolerationSeconds": { "type": "integer" }
+      }
+    },
     "codeTheme": {
       "enum": [
         "InspiredGitHub",

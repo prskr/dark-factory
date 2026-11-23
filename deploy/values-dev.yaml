@@ -64,11 +64,13 @@ oidc:
   existingSecret: dark-factory-oidc
   clientSecretKey: client-secret
 
+sandbox:
+  runtimeClassName: kata
+  serviceAccountName: dark-factory-sandbox
+
 sandboxNamespace:
   create: false
   name: dark-factory-dev-sandboxes
-  runtimeClassName: kata
-  serviceAccountName: dark-factory-sandbox
   resourceQuota:
     pods: '20'
     requestsCpu: '16'
@@ -77,11 +79,6 @@ sandboxNamespace:
     limitsMemory: '64Gi'
     requestsStorage: '200Gi'
     persistentVolumeClaims: '40'
-  limitRange:
-    defaultCpu: '2'
-    defaultMemory: '4Gi'
-    defaultRequestCpu: '250m'
-    defaultRequestMemory: '512Mi'
 
 enforcement:
   mode: kubernetes

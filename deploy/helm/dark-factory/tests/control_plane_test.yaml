@@ -101,3 +101,91 @@ tests:
             name: db-app-secret
             mountPath: /run/secrets/db-app
             readOnly: true
+
+  - it: prefers a node of its own for every control plane replica by default
+    template: control-plane-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+                    matchLabelKeys: [pod-template-hash]
+                    labelSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: dark-factory
+                        app.kubernetes.io/instance: RELEASE-NAME
+                        app.kubernetes.io/component: control-plane
+
+  - it: requires a node of its own for every control plane replica with the hard preset
+    template: control-plane-deployment.yaml
+    set:
+      controlPlane.podAntiAffinity: hard
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  matchLabelKeys: [pod-template-hash]
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: dark-factory
+                      app.kubernetes.io/instance: RELEASE-NAME
+                      app.kubernetes.io/component: control-plane
+
+  - it: renders no control plane affinity with the none preset
+    template: control-plane-deployment.yaml
+    set:
+      controlPlane.podAntiAffinity: none
+    asserts:
+      - notExists:
+          path: spec.template.spec.affinity
+
+  - it: rejects an unknown control plane anti-affinity preset
+    template: control-plane-deployment.yaml
+    set:
+      controlPlane.podAntiAffinity: strict
+    asserts:
+      - failedTemplate: {}
+
+  - it: replaces the control plane preset by an affinity override
+    template: control-plane-deployment.yaml
+    set:
+      controlPlane.affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: topology.kubernetes.io/zone
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: control-plane
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity
+          value:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: topology.kubernetes.io/zone
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/component: control-plane
+
+  - it: keeps the control plane preset for an empty affinity override
+    template: control-plane-deployment.yaml
+    set:
+      controlPlane.affinity: {}
+    asserts:
+      - exists:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution
+
+  - it: renders the same pod template for any control plane replica count
+    template: control-plane-deployment.yaml
+    set:
+      controlPlane.replicas: 1
+    asserts:
+      - exists:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution

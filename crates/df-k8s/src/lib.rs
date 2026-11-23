@@ -1,5 +1,6 @@
 //! Kubernetes client, rendering, and provisioning logic for Dark Factory sandboxes.
 
+mod affinity;
 pub mod config;
 pub mod provider;
 pub mod reconcile;
@@ -12,6 +13,7 @@ mod test_support;
 /// Timeout applied to every single Kubernetes API call made by this crate.
 pub const K8S_API_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+pub use affinity::{AffinityError, parse_affinity};
 pub use config::{ControlPlaneEndpoint, GatewayEndpoint, ProvisioningConfig};
 pub use provider::{
     ClusterServiceRef, ClusterTargetResolution, ClusterTargetResolver, ClusterTargetsProvider,

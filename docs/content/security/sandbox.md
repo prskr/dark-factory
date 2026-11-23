@@ -136,7 +136,7 @@ securityfs is mounted in the guest (`mount -t securityfs` needs privileges the p
 The namespace enforces the Pod Security level `restricted`, so the pod sets the security context
 that level requires (busybox runs as root otherwise). Replace `<sandbox namespace>`
 (`sandboxNamespace.name`, default `dark-factory-sandboxes`) and `<runtime class>`
-(`sandboxNamespace.runtimeClassName`):
+(`sandbox.runtimeClassName`):
 
 ```bash
 kubectl -n <sandbox namespace> run landlock-check --rm -it --restart=Never --image=busybox \

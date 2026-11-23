@@ -469,6 +469,21 @@ pub fn resolve_identity_from_pod_store(
     run_id_from_metadata(&pod.metadata)
 }
 
+/// `<reason> (exit code <n>)` of the terminated `agent` container, e.g. `OOMKilled (exit code 137)`.
+fn agent_termination(status: &k8s_openapi::api::core::v1::PodStatus) -> Option<String> {
+    let terminated = status
+        .container_statuses
+        .iter()
+        .flatten()
+        .find(|cs| cs.name == "agent")?
+        .state
+        .as_ref()?
+        .terminated
+        .as_ref()?;
+    let reason = terminated.reason.as_deref().filter(|r| !r.is_empty())?;
+    Some(format!("{reason} (exit code {})", terminated.exit_code))
+}
+
 /// Derives a `SandboxEvent` transition from a Pod's current state.
 pub fn map_pod_event(pod: &Pod) -> Option<SandboxEvent> {
     let run_id = run_id_from_metadata(&pod.metadata)?;
@@ -488,6 +503,7 @@ pub fn map_pod_event(pod: &Pod) -> Option<SandboxEvent> {
         let reason = status
             .reason
             .clone()
+            .or_else(|| agent_termination(status))
             .or_else(|| status.message.clone())
             .unwrap_or_else(|| "pod failed".to_string());
         return Some(SandboxEvent::Gone { run_id, reason });

@@ -121,13 +121,52 @@ sandbox:
   # otherwise. `disabled` runs the harness unrestricted. Rendered as sandbox.landlock in the
   # instance config.
   landlock: enforce
+  # Empty: the cluster's default runtime. Set to e.g. "kata" for microVM isolation.
+  runtimeClassName: ''
+  # Zero-privilege ServiceAccount of sandbox pods; the chart creates it in the sandbox namespace
+  # (`sandboxNamespace.create`).
+  serviceAccountName: dark-factory-sandbox
+  # Secrets the operator creates in the sandbox namespace (`kubernetes.io/dockerconfigjson`),
+  # applied to every sandbox pod: `[{ name: corp-mirror }]`. The chart does not create them and
+  # does not fall back to `image.pullSecrets`.
+  imagePullSecrets: []
+  # Labels a node must carry to run a sandbox pod, e.g. `{ dark-factory.io/pool: sandbox }`.
+  nodeSelector: {}
+  # Taints sandbox pods tolerate (Kubernetes tolerations), e.g.
+  # `[{ key: dark-factory.io/sandbox, operator: Exists, effect: NoSchedule }]`. Together with
+  # `nodeSelector` this pins sandboxes to dedicated nodes.
+  tolerations: []
+  # Kubernetes `affinity` of every sandbox pod (nodeAffinity, podAffinity, podAntiAffinity). Empty:
+  # none. Example, a best-effort spread of sandboxes over nodes (replace `homelab` with the
+  # release name):
+  # affinity:
+  #   podAntiAffinity:
+  #     preferredDuringSchedulingIgnoredDuringExecution:
+  #       - weight: 100
+  #         podAffinityTerm:
+  #           topologyKey: kubernetes.io/hostname
+  #           labelSelector:
+  #             matchLabels:
+  #               dark-factory.io/instance: homelab
+  affinity: {}
+  # Requests and limits of the agent container of every sandbox pod (resource name to quantity;
+  # strings or numbers). The control plane adds nothing to these. Helm merges an override per key:
+  # `limits.memory: 8Gi` keeps the default CPU limit. `null` removes an entry
+  # (`limits.cpu: null`) or a map (`limits: null`); `{}` does not, Helm merges it with the
+  # defaults. With `sandboxNamespace.create: true` the quota needs cpu and memory in requests and
+  # limits, so the render fails when one is removed. A request above its limit is rejected by
+  # Kubernetes: raise both together.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: '2'
+      memory: 4Gi
 
 sandboxNamespace:
   create: true
   name: dark-factory-sandboxes
-  # Empty: the cluster's default runtime. Set to e.g. "kata" for microVM isolation.
-  runtimeClassName: ''
-  serviceAccountName: dark-factory-sandbox
   # Empty: the cluster's default StorageClass.
   storageClass: ''
   pvcSize: '20Gi'
@@ -141,10 +180,6 @@ sandboxNamespace:
   clusterDomain: 'cluster.local'
   controlPlaneIp: ''
   gatewayIp: ''
-  # Secrets the operator creates in the sandbox namespace (`kubernetes.io/dockerconfigjson`),
-  # applied to every sandbox pod: `[{ name: corp-mirror }]`. The chart does not create them and
-  # does not fall back to `image.pullSecrets`.
-  imagePullSecrets: []
   resourceQuota:
     pods: '20'
     requestsCpu: '16'
@@ -153,11 +188,6 @@ sandboxNamespace:
     limitsMemory: '64Gi'
     requestsStorage: '200Gi'
     persistentVolumeClaims: '40'
-  limitRange:
-    defaultCpu: '2'
-    defaultMemory: '4Gi'
-    defaultRequestCpu: '250m'
-    defaultRequestMemory: '512Mi'
 
 enforcement:
   mode: kubernetes
@@ -296,6 +326,12 @@ controlPlane:
   # RUST_LOG (EnvFilter syntax) of the control plane and the migrate job.
   logLevel: info
   serviceAccountName: ''
+  # Spreads the replicas over nodes (`kubernetes.io/hostname`), against pods of the same revision:
+  # `soft` (preferred; a single-node cluster still runs every replica), `hard` (required; needs at
+  # least as many eligible nodes as replicas) or `none`.
+  podAntiAffinity: soft
+  # A Kubernetes `affinity`; when not empty it replaces the `podAntiAffinity` preset.
+  affinity: {}
   ports:
     http: 8080
     agent: 9443
@@ -334,6 +370,12 @@ gateway:
   # RUST_LOG (EnvFilter syntax) of the gateway.
   logLevel: info
   serviceAccountName: ''
+  # Spreads the replicas over nodes (`kubernetes.io/hostname`), against pods of the same revision:
+  # `soft` (preferred; a single-node cluster still runs every replica), `hard` (required; needs at
+  # least as many eligible nodes as replicas) or `none`.
+  podAntiAffinity: soft
+  # A Kubernetes `affinity`; when not empty it replaces the `podAntiAffinity` preset.
+  affinity: {}
   # PodDisruptionBudget of the gateway pods; rendered only with more than one replica.
   pdb:
     enabled: true

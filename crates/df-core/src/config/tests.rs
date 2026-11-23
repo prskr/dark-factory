@@ -843,3 +843,196 @@ fn valid_image_pull_secret_names_are_accepted() {
     let yaml = format!("{MINIMAL_DB}sandbox:\n  imagePullSecrets: [a.b-c, {longest}]\n");
     assert!(InstanceConfig::from_yaml_str(&yaml).is_ok());
 }
+
+fn sandbox_yaml(body: &str) -> String {
+    format!("{MINIMAL_DB}sandbox:\n{body}")
+}
+
+fn sandbox_error(body: &str) -> String {
+    InstanceConfig::from_yaml_str(&sandbox_yaml(body))
+        .unwrap_err()
+        .to_string()
+}
+
+#[test]
+fn sandbox_scheduling_and_resources_default_to_nothing() {
+    let p = InstanceConfig::from_yaml_str(MINIMAL_DB)
+        .unwrap()
+        .sandbox
+        .provisioning;
+    assert!(p.node_selector.is_empty());
+    assert!(p.tolerations.is_empty());
+    assert_eq!(p.affinity, None);
+    assert!(p.resources.requests.is_empty());
+    assert!(p.resources.limits.is_empty());
+}
+
+#[test]
+fn empty_sandbox_affinity_counts_as_unset() {
+    let cfg = InstanceConfig::from_yaml_str(&sandbox_yaml("  affinity: {}\n")).unwrap();
+    assert_eq!(cfg.sandbox.provisioning.affinity, None);
+}
+
+#[test]
+fn sandbox_resources_with_only_limits_have_empty_requests() {
+    let cfg = InstanceConfig::from_yaml_str(&sandbox_yaml(
+        "  resources:\n    limits:\n      memory: 8Gi\n",
+    ))
+    .unwrap();
+    let r = cfg.sandbox.provisioning.resources;
+    assert!(r.requests.is_empty());
+    assert_eq!(r.limits, BTreeMap::from([("memory".into(), "8Gi".into())]));
+}
+
+#[test]
+fn sandbox_scheduling_values_are_read() {
+    let cfg = InstanceConfig::from_yaml_str(&sandbox_yaml(
+        "  nodeSelector:\n    dark-factory.io/pool: sandbox\n    empty: \"\"\n  \
+         tolerations:\n    - key: dark-factory.io/sandbox\n      operator: Exists\n      effect: NoSchedule\n    \
+         - key: gpu\n      value: \"true\"\n      effect: NoExecute\n      tolerationSeconds: 60\n  \
+         affinity:\n    podAntiAffinity: {}\n",
+    ))
+    .unwrap();
+    let p = cfg.sandbox.provisioning;
+    assert_eq!(p.node_selector["dark-factory.io/pool"], "sandbox");
+    assert_eq!(p.tolerations.len(), 2);
+    assert_eq!(p.tolerations[0].operator, TolerationOperator::Exists);
+    assert_eq!(p.tolerations[1].operator, TolerationOperator::Equal);
+    assert_eq!(p.tolerations[1].toleration_seconds, Some(60));
+    assert!(p.affinity.is_some());
+}
+
+#[test]
+fn unknown_fields_in_tolerations_and_resources_are_rejected() {
+    for body in [
+        "  tolerations:\n    - key: a\n      effects: NoSchedule\n",
+        "  resources:\n    limit:\n      cpu: \"1\"\n",
+    ] {
+        assert!(
+            InstanceConfig::from_yaml_str(&sandbox_yaml(body)).is_err(),
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn invalid_node_selector_entries_are_rejected_naming_option_and_key() {
+    for (body, key) in [
+        ("  nodeSelector:\n    pool: sandbox nodes\n", "pool"),
+        ("  nodeSelector:\n    \"-bad\": x\n", "-bad"),
+        ("  nodeSelector:\n    \"a/b/c\": x\n", "a/b/c"),
+        ("  nodeSelector:\n    \"\": x\n", ""),
+        ("  nodeSelector:\n    pool: -x\n", "pool"),
+    ] {
+        let err = sandbox_error(body);
+        assert!(err.contains("sandbox.nodeSelector"), "{body}: {err}");
+        assert!(err.contains(&format!("{key:?}")), "{body}: {err}");
+    }
+    let long_value = "a".repeat(64);
+    let err = sandbox_error(&format!("  nodeSelector:\n    pool: {long_value}\n"));
+    assert!(err.contains("sandbox.nodeSelector"), "{err}");
+}
+
+#[test]
+fn valid_node_selector_entries_are_accepted() {
+    let value = "a".repeat(63);
+    let yaml = sandbox_yaml(&format!(
+        "  nodeSelector:\n    node-role.kubernetes.io/sandbox: \"\"\n    a_b.c-d: {value}\n    kubernetes.io/arch: arm64\n"
+    ));
+    assert!(InstanceConfig::from_yaml_str(&yaml).is_ok());
+}
+
+#[test]
+fn invalid_tolerations_are_rejected_naming_the_option() {
+    for body in [
+        "  tolerations:\n    - key: a\n      operator: Exists\n      value: \"true\"\n",
+        "  tolerations:\n    - operator: Equal\n      value: x\n",
+        "  tolerations:\n    - key: a\n      tolerationSeconds: 60\n      effect: NoSchedule\n",
+        "  tolerations:\n    - key: a\n      tolerationSeconds: 60\n",
+        "  tolerations:\n    - key: \"bad key\"\n      operator: Exists\n",
+    ] {
+        let err = sandbox_error(body);
+        assert!(err.contains("sandbox.tolerations"), "{body}: {err}");
+    }
+}
+
+#[test]
+fn toleration_operator_and_effect_names_match_their_serde_names() {
+    for operator in [TolerationOperator::Equal, TolerationOperator::Exists] {
+        assert_eq!(
+            serde_json::to_value(operator).unwrap(),
+            operator.as_str(),
+            "{operator:?}"
+        );
+    }
+    for effect in [
+        TaintEffect::NoSchedule,
+        TaintEffect::PreferNoSchedule,
+        TaintEffect::NoExecute,
+    ] {
+        assert_eq!(
+            serde_json::to_value(effect).unwrap(),
+            effect.as_str(),
+            "{effect:?}"
+        );
+    }
+}
+
+#[test]
+fn unknown_toleration_effect_and_operator_are_rejected() {
+    for body in [
+        "  tolerations:\n    - key: a\n      effect: NoRun\n",
+        "  tolerations:\n    - key: a\n      operator: In\n",
+    ] {
+        assert!(
+            InstanceConfig::from_yaml_str(&sandbox_yaml(body)).is_err(),
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn valid_tolerations_are_accepted() {
+    let yaml = sandbox_yaml(
+        "  tolerations:\n    - operator: Exists\n    \
+         - key: dark-factory.io/sandbox\n      operator: Exists\n      effect: NoSchedule\n    \
+         - key: a\n      value: b\n      effect: NoExecute\n      tolerationSeconds: 60\n",
+    );
+    assert!(InstanceConfig::from_yaml_str(&yaml).is_ok());
+}
+
+#[test]
+fn invalid_resource_quantities_and_names_are_rejected_naming_map_and_entry() {
+    for (map, name, quantity) in [
+        ("limits", "memory", "4 GB"),
+        ("limits", "memory", "-1"),
+        ("requests", "cpu", "abc"),
+        ("requests", "cpu", ""),
+        ("limits", "memory", "1Gi2"),
+        ("limits", "bad name", "1"),
+        ("limits", "", "1"),
+    ] {
+        let err = sandbox_error(&format!(
+            "  resources:\n    {map}:\n      \"{name}\": \"{quantity}\"\n"
+        ));
+        assert!(err.contains(&format!("sandbox.resources.{map}")), "{err}");
+        assert!(err.contains(&format!("{name:?}")), "{err}");
+    }
+}
+
+#[test]
+fn valid_resource_quantities_are_accepted() {
+    let yaml = sandbox_yaml(
+        "  resources:\n    requests:\n      cpu: 250m\n      memory: 512Mi\n    limits:\n      \
+         cpu: \"1.5\"\n      memory: 4Gi\n      ephemeral-storage: \"1e3\"\n      example.com/gpu: \"2\"\n      hugepages-2Mi: 100M\n",
+    );
+    assert!(InstanceConfig::from_yaml_str(&yaml).is_ok());
+}
+
+#[test]
+fn sandbox_affinity_that_is_not_an_object_is_rejected() {
+    for body in ["  affinity: []\n", "  affinity: yes-please\n"] {
+        let err = sandbox_error(body);
+        assert!(err.contains("sandbox.affinity"), "{body}: {err}");
+    }
+}

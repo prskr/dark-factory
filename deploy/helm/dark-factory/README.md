@@ -5,7 +5,7 @@ Deploys a single-tenant Dark Factory instance (`design/deployment.md`, ADR-0031)
 - Egress gateway `Deployment` (`gateway.replicas`, default `1`), `PodDisruptionBudget` (only for more than one replica), `Service` (`3128` proxy, `8443` Git proxy), mirror `emptyDir`, and headless `Service` (`9444` internal `Tail` mTLS gRPC, discovered by the control plane for the live egress log)
 - `migrate` pre-install/pre-upgrade hook `Job`
 - Least-privilege Kubernetes RBAC (`design/deployment.md` §3)
-- Dedicated sandbox namespace (`sandboxNamespace.create: true`) with PSA `restricted`, default-deny `NetworkPolicy`, `ResourceQuota`, `LimitRange`, and tokenless `ServiceAccount`
+- Dedicated sandbox namespace (`sandboxNamespace.create: true`) with PSA `restricted`, default-deny `NetworkPolicy`, `ResourceQuota` (no `LimitRange`: the sandbox size is `sandbox.resources`), and tokenless `ServiceAccount`
 - Private CA behind a `ClusterIssuer` (or reference to an existing `ClusterIssuer`) and mTLS `Certificate`s for control plane and gateway; sandbox pods request their client certificates from the same issuer
 - Instance namespace `NetworkPolicy` objects (`design/deployment.md` §5)
 
@@ -75,9 +75,18 @@ Every key in `values.yaml` is documented below:
 | `telemetry.otlp.headersSecret` | `string` | `''` | Name of an existing Secret in the release namespace whose key `headers` becomes `OTEL_EXPORTER_OTLP_HEADERS` (gRPC metadata, e.g. `authorization=Bearer ...`). |
 | `sandbox.logLevel` | `string` | `info` | Rendered as `sandbox.logLevel` in the instance config; the control plane sets it as `RUST_LOG` of every sandbox. DEBUG adds agent message chunks. |
 | `sandbox.landlock` | `enforce` or `disabled` | `enforce` | Rendered as `sandbox.landlock` in the instance config; the control plane sets it as `DF_LANDLOCK` of every sandbox. `enforce` confines the harness with Landlock and needs Linux 6.12+ with Landlock enabled (a run on an older kernel fails with `sandbox.landlock_unavailable`); `disabled` runs the harness unrestricted. See [Sandbox filesystem isolation](../../../docs/content/security/sandbox.md). |
-| `sandboxNamespace.create` | `bool` | `true` | Create the sandbox namespace, PSA labels, default-deny NetworkPolicy, ResourceQuota, LimitRange, and sandbox ServiceAccount. |
+| `sandbox.runtimeClassName` | `string` | `""` | Optional Kubernetes `RuntimeClass` for sandbox pods. Empty uses the cluster default runtime; set `"kata"` for microVM isolation. Moved from `sandboxNamespace.runtimeClassName`. |
+| `sandbox.serviceAccountName` | `string` | `"dark-factory-sandbox"` | Name of the zero-privilege `ServiceAccount` (`automountServiceAccountToken: false`) of sandbox pods; the chart creates it in the sandbox namespace. Moved from `sandboxNamespace.serviceAccountName`. |
+| `sandbox.imagePullSecrets` | `list` | `[]` | References (`[{ name: "..." }]`) to `kubernetes.io/dockerconfigjson` Secrets that you create in the sandbox namespace; every sandbox pod uses them for the project, runtime and harness images. The chart creates no Secret and does not fall back to `image.pullSecrets` (a different namespace). Moved from `sandboxNamespace.imagePullSecrets`. |
+| `sandbox.nodeSelector` | `map` | `{}` | Node labels (key to string value) a node must carry to run a sandbox pod. Rendered as `sandbox.nodeSelector` in the instance config. |
+| `sandbox.tolerations` | `list` | `[]` | Kubernetes tolerations of sandbox pods (`key`, `operator` `Equal` or `Exists`, `value`, `effect`, `tolerationSeconds`). With `sandbox.nodeSelector` this pins sandboxes to dedicated nodes. |
+| `sandbox.affinity` | `map` | `{}` | A Kubernetes `affinity` (`nodeAffinity`, `podAffinity`, `podAntiAffinity`) set on every sandbox pod as is. Empty: none. The control plane checks it at startup. |
+| `sandbox.resources.requests.cpu` | `string` or `number` | `250m` | CPU request of the sandbox agent container. |
+| `sandbox.resources.requests.memory` | `string` or `number` | `512Mi` | Memory request of the sandbox agent container. |
+| `sandbox.resources.limits.cpu` | `string` or `number` | `"2"` | CPU limit of the sandbox agent container (throttles, never kills). |
+| `sandbox.resources.limits.memory` | `string` or `number` | `4Gi` | Memory limit of the sandbox agent container; a sandbox above it ends `OOMKilled`. Further entries (such as `ephemeral-storage`) are allowed. Helm merges overrides per key; `null` removes an entry or a whole map. With `sandboxNamespace.create: true` the render fails unless cpu and memory are set in requests and limits (the `ResourceQuota` needs them). The chart renders no `LimitRange`. |
+| `sandboxNamespace.create` | `bool` | `true` | Create the sandbox namespace, PSA labels, default-deny NetworkPolicy, ResourceQuota, and sandbox ServiceAccount. |
 | `sandboxNamespace.name` | `string` | `"dark-factory-sandboxes"` | Name of the Kubernetes namespace where sandboxes and task PVCs run. Must differ from the release namespace; the render fails otherwise. |
-| `sandboxNamespace.runtimeClassName` | `string` | `""` | Optional Kubernetes `RuntimeClass` for sandbox pods. Empty uses the cluster default runtime; set `"kata"` for microVM isolation. |
 | `sandboxNamespace.storageClass` | `string` | `""` | StorageClass of task PVCs. Empty uses the cluster's default StorageClass. |
 | `sandboxNamespace.pvcSize` | `string` | `"20Gi"` | Storage request of task PVCs. |
 | `sandboxNamespace.issuerName` | `string` | `""` | cert-manager issuer for sandbox client certificates. Empty uses the chart's issuer (see `tls.ca`). Must be a `ClusterIssuer`. |
@@ -88,8 +97,6 @@ Every key in `values.yaml` is documented below:
 | `sandboxNamespace.clusterDomain` | `string` | `"cluster.local"` | Cluster DNS domain used for Service FQDN host aliases. |
 | `sandboxNamespace.controlPlaneIp` | `string` | `""` | Static control plane ClusterIP; empty resolves the Service at startup. |
 | `sandboxNamespace.gatewayIp` | `string` | `""` | Static gateway ClusterIP; empty resolves the Service at startup. |
-| `sandboxNamespace.imagePullSecrets` | `list` | `[]` | References (`[{ name: "..." }]`) to `kubernetes.io/dockerconfigjson` Secrets that you create in the sandbox namespace; every sandbox pod uses them for the project, runtime and harness images. The chart creates no Secret and does not fall back to `image.pullSecrets` (a different namespace). |
-| `sandboxNamespace.serviceAccountName` | `string` | `"dark-factory-sandbox"` | Name of the zero-privilege `ServiceAccount` (`automountServiceAccountToken: false`) in the sandbox namespace. |
 | `sandboxNamespace.resourceQuota.pods` | `string` | `"20"` | Hard pod count quota in the sandbox namespace. |
 | `sandboxNamespace.resourceQuota.requestsCpu` | `string` | `"16"` | Hard total CPU requests quota in the sandbox namespace. |
 | `sandboxNamespace.resourceQuota.requestsMemory` | `string` | `"32Gi"` | Hard total memory requests quota in the sandbox namespace. |
@@ -97,10 +104,6 @@ Every key in `values.yaml` is documented below:
 | `sandboxNamespace.resourceQuota.limitsMemory` | `string` | `"64Gi"` | Hard total memory limits quota in the sandbox namespace. |
 | `sandboxNamespace.resourceQuota.requestsStorage` | `string` | `"200Gi"` | Hard total PVC storage requests quota in the sandbox namespace. |
 | `sandboxNamespace.resourceQuota.persistentVolumeClaims` | `string` | `"40"` | Hard PVC count quota in the sandbox namespace. |
-| `sandboxNamespace.limitRange.defaultCpu` | `string` | `"2"` | Default container CPU limit in the sandbox namespace. |
-| `sandboxNamespace.limitRange.defaultMemory` | `string` | `"4Gi"` | Default container memory limit in the sandbox namespace. |
-| `sandboxNamespace.limitRange.defaultRequestCpu` | `string` | `"250m"` | Default container CPU request in the sandbox namespace. |
-| `sandboxNamespace.limitRange.defaultRequestMemory` | `string` | `"512Mi"` | Default container memory request in the sandbox namespace. |
 | `enforcement.mode` | `string` | `"kubernetes"` | Network policy enforcement backend (`"kubernetes"` for `networking.k8s.io/v1` or `"cilium"` to also grant `ciliumnetworkpolicies`). |
 | `clusterTargets.anyNamespace` | `bool` | `false` | When `true`, creates a read-only `ClusterRole`/`ClusterRoleBinding` `<base>-cluster-targets-reader` for `services` and `endpointslices` (names: [Several instances in one cluster](#several-instances-in-one-cluster)). |
 | `clusterTargets.namespaces` | `list` | `[]` | List of cluster-target namespaces in which per-namespace read-only `Role`/`RoleBinding`s `<base>-cluster-target-reader` are created when `anyNamespace` is `false`. |
@@ -149,6 +152,8 @@ Every key in `values.yaml` is documented below:
 | `controlPlane.replicas` | `int` | `1` | Number of control plane pod replicas. |
 | `controlPlane.logLevel` | `string` | `info` | `RUST_LOG` (`EnvFilter` syntax, e.g. `info,df_web=debug`) of the control plane and the migrate job. |
 | `controlPlane.serviceAccountName` | `string` | `""` | Optional override for the control plane `ServiceAccount` name. |
+| `controlPlane.podAntiAffinity` | `soft`, `hard` or `none` | `soft` | Spreads control plane replicas over nodes (`kubernetes.io/hostname`) against pods of the same component, release and revision. `soft` prefers it (a single-node cluster runs every replica), `hard` requires it (needs at least as many eligible nodes as replicas), `none` renders no anti-affinity. |
+| `controlPlane.affinity` | `map` | `{}` | A Kubernetes `affinity` rendered as is. When not empty it replaces the `podAntiAffinity` preset. |
 | `controlPlane.ports.http` | `int` | `8080` | Control plane UI and health HTTP port (`/healthz`, `/readyz`). |
 | `controlPlane.ports.agent` | `int` | `9443` | Control plane agent mTLS gRPC port. |
 | `controlPlane.ports.internalGrpc` | `int` | `9444` | Control plane internal gRPC port (`PolicyWatch`, mTLS). |
@@ -161,6 +166,8 @@ Every key in `values.yaml` is documented below:
 | `lifecycleEvents.subscriptions` | `list` | `[]` | Optional. Instance subscriptions: receive the events of every project. Each entry has `url` (required, `http://` or `https://`, cluster-internal addresses allowed) and `events` (optional list of `volume.provisioned`, `volume.destroyed`, `sandbox.provisioning`, `sandbox.provisioned`, `sandbox.provisioning_failed`, `sandbox.destroyed`; empty or missing: all types, including later ones). The schema rejects unknown types and entries without `url`. Receiver guide: [`docs/content/integrations/lifecycle-events.md`](../../../docs/content/integrations/lifecycle-events.md). |
 | `gateway.replicas` | `int` | `1` | Number of egress gateway pod replicas (minimum `1`). Set `2` or more for high availability; a restart of a single gateway briefly interrupts sandbox egress. |
 | `gateway.serviceAccountName` | `string` | `""` | Optional override for the gateway `ServiceAccount` name (`automountServiceAccountToken: false`). |
+| `gateway.podAntiAffinity` | `soft`, `hard` or `none` | `soft` | Spreads gateway replicas over nodes (`kubernetes.io/hostname`) against pods of the same component, release and revision. `soft` prefers it (a single-node cluster runs every replica), `hard` requires it (needs at least as many eligible nodes as replicas), `none` renders no anti-affinity. |
+| `gateway.affinity` | `map` | `{}` | A Kubernetes `affinity` rendered as is. When not empty it replaces the `podAntiAffinity` preset. |
 | `gateway.pdb.enabled` | `bool` | `true` | Render the gateway `PodDisruptionBudget`. It exists only with `gateway.replicas` greater than `1`. |
 | `gateway.pdb.minAvailable` | `int` | `1` | Minimum available gateway pods in the `PodDisruptionBudget` (only applies when the budget is rendered). |
 | `gateway.ports.proxy` | `int` | `3128` | Egress HTTP/CONNECT proxy port for sandboxes. |
@@ -359,7 +366,7 @@ Releases may share a cluster, also under the same release name in different name
 
 The base has at most 40 characters, so every name stays within 63. A longer base keeps its first 31 characters and gets the first 8 hex characters of its SHA-256, for example `team-platform-engineering-produ-38b26355` for `team-platform-engineering-production-dark-factory`.
 
-Each release needs its own sandbox namespace (`sandboxNamespace.name`); the chart cannot detect a namespace another release uses. A shared sandbox namespace collides on the `Namespace` object and its policies (`sandboxNamespace.create: true`) and on the control plane `Role` in it, and each control plane would see the other's pods and volumes. With `sandboxNamespace.create: false`, create the namespace yourself with the labels, `NetworkPolicy`, `ResourceQuota`, `LimitRange` and `ServiceAccount` of `templates/sandbox-namespace.yaml`.
+Each release needs its own sandbox namespace (`sandboxNamespace.name`); the chart cannot detect a namespace another release uses. A shared sandbox namespace collides on the `Namespace` object and its policies (`sandboxNamespace.create: true`) and on the control plane `Role` in it, and each control plane would see the other's pods and volumes. With `sandboxNamespace.create: false`, create the namespace yourself with the labels, `NetworkPolicy`, `ResourceQuota` and `ServiceAccount` of `templates/sandbox-namespace.yaml`. The chart renders no `LimitRange`; to size sandboxes with your own, see [Your own LimitRange](../../../docs/content/operations/sandbox-nodes-and-resources.md#your-own-limitrange).
 
 ## TLS issuer
 

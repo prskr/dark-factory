@@ -102,7 +102,7 @@ impl LiveEnv {
                 cluster_domain: "cluster.local".to_string(),
                 log_level: "info".to_string(),
                 landlock: df_sandbox_contract::LandlockMode::Enforce,
-                image_pull_secrets: Vec::new(),
+                ..Default::default()
             },
             ControlPlaneEndpoint {
                 ip: control_plane_ip,
@@ -116,6 +116,7 @@ impl LiveEnv {
                 git_port: 8443,
             },
         )
+        .expect("the live test config has no affinity")
     }
 }
 

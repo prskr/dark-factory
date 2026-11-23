@@ -250,6 +250,10 @@ async fn provisioning_config(
     cfg: &InstanceConfig,
     log_format: logging::LogFormat,
 ) -> anyhow::Result<ProvisioningConfig> {
+    // Before any cluster call: a bad `sandbox.affinity` fails startup first.
+    if let Some(affinity) = &cfg.sandbox.provisioning.affinity {
+        df_k8s::parse_affinity(affinity).context("invalid sandbox configuration")?;
+    }
     verify_startup(
         kube_client,
         &cfg.sandbox.provisioning.namespace,
@@ -268,7 +272,7 @@ async fn provisioning_config(
         .clone()
         .unwrap_or_else(|| format!("{}-control-plane", cfg.instance_name));
 
-    Ok(ProvisioningConfig::from_sandbox_config(
+    let config = ProvisioningConfig::from_sandbox_config(
         cfg.instance_name.clone(),
         &cfg.sandbox.provisioning,
         df_k8s::ControlPlaneEndpoint {
@@ -283,8 +287,10 @@ async fn provisioning_config(
             git_port: cfg.gateway.git_port,
         },
     )
-    .with_harness_images(cfg.harness.images())
-    .with_log_format(log_format))
+    .context("invalid sandbox configuration")?;
+    Ok(config
+        .with_harness_images(cfg.harness.images())
+        .with_log_format(log_format))
 }
 
 /// Triggers a policy reconciliation for every database notification that changes the egress
@@ -458,6 +464,27 @@ mod tests {
             },
         };
         assert!(any.check_namespace("anything").is_ok());
+    }
+
+    #[tokio::test]
+    async fn an_invalid_sandbox_affinity_fails_before_any_cluster_call() {
+        let yaml = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n\
+                    sandbox:\n  affinity:\n    podAntiAffinity:\n      preferredDuringScheduling: []\n";
+        let cfg = InstanceConfig::from_yaml_str(yaml).unwrap();
+        // Nothing listens here: a cluster call would fail with "startup check failed".
+        let client =
+            Client::try_from(kube::Config::new("http://127.0.0.1:1".parse().unwrap())).unwrap();
+
+        let err = provisioning_config(&client, &cfg, logging::LogFormat::Text)
+            .await
+            .unwrap_err();
+
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("invalid sandbox configuration"),
+            "{message}"
+        );
+        assert!(message.contains("sandbox.affinity"), "{message}");
     }
 
     #[tokio::test]
