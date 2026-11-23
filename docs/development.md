@@ -267,6 +267,7 @@ lefthook hooks use the same versions on every machine. The exceptions run throug
 | Bump tools to the latest upstream releases | `cargo xtask update-tools` |
 | Fail if `multitool.lock.json` is stale | `cargo xtask update-tools --check` |
 | Add a tool | add an entry to `TOOLS` in `tools/xtask/src/main.rs` and to `//:bazel_env` |
+| Set the OpenCode archive checksums in `MODULE.bazel` after changing `OPENCODE_VERSION` (Renovate runs it as a post-upgrade task) | `cargo xtask update-opencode-checksums` |
 | Check Rust formatting (pinned rustfmt, hermetic) | `bazel build --config=fmt //crates/... //plugins/...` |
 | Format protos / lint protos | `bazel run //contract:format` / `bazel test //contract:buf_lint_test` |
 | Install git hooks without direnv | `LEFTHOOK_BIN=$PWD/.bazel_env/bin/lefthook .bazel_env/bin/lefthook install` (git hooks use `LEFTHOOK_BIN`) |
