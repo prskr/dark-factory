@@ -65,10 +65,10 @@ Out of scope:
   - claiming due routines with `FOR UPDATE SKIP LOCKED`;
   - firing in one transaction with `create_task`;
   - `.sqlx/`.
-- `crates/df-agent-channel`: the scheduler tick fires due routines.
+- `crates/df-orchestrator`: the scheduler tick fires due routines.
 - `crates/df-web`: `/routines` page, modal form, Run now, the rail entry and the creator in the task details.
 - Dependencies:
-  - `croner`, new, latest release, `chrono` feature;
-  - `chrono-tz`, new, for IANA timezones with a compiled-in database, because the static musl images have no `/usr/share/zoneinfo`.
+  - `croner`, new, latest release, `jiff` feature;
+  - `jiff` 1.0 with feature `tzdb-bundle-always`, for IANA timezones with a compiled-in database, because the static musl images have no `/usr/share/zoneinfo`; `jiff-sqlx` for the `timestamptz` columns. Both come with `replace-chrono-with-jiff`; this change only enables `tzdb-bundle-always`. No `chrono` crate is added (RUSTSEC-2026-0543).
 - `crates/df-e2e`: a routine is created and fired with Run now, and its task shows the routine as creator.
-- Depends on `iter3-task-dependencies`, which stores `tasks.created_by` as a `Principal`.
+- Depends on `iter3-task-dependencies`, which stores `tasks.created_by` as a `Principal`, and on `replace-chrono-with-jiff`, which moves the workspace to `jiff`.

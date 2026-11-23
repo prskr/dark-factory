@@ -9,7 +9,7 @@
   - publishes `task_changed` and `task_message_queued`.
   `iter3-task-dependencies` turns `NewTask.created_by` into a `Principal`.
 - **Principal** (`crates/df-core/src/domain.rs`): `Human`, `Agent`, `System`, serialized as JSONB in `task_messages.author` and, after `iter3-task-dependencies`, in `tasks.created_by`.
-- **Scheduler** (`crates/df-agent-channel/src/scheduler.rs`):
+- **Scheduler** (`crates/df-orchestrator/src/scheduler.rs`):
   - runs on every replica, with a `tick` every 5 s;
   - each tick reprovisions stale runs, starts queued tasks with `FOR UPDATE SKIP LOCKED` and enforces timeouts.
 - **Config UI** (`crates/df-web/src/config_pages.rs`, 1,357 lines):
@@ -17,7 +17,7 @@
   - live field feedback through a GET fragment (`/projects/forge`, `hx-trigger="keyup changed delay:300ms"`);
   - larger features live in submodules (`config_pages/push_policy.rs`).
 - **Audit**: `df_db::audit::write_audit_entry` with `NewAuditEntry::with_details`, written in the caller's transaction.
-- **Time**: `chrono` is a workspace dependency. There is no timezone database in the dependency graph, and the static musl images ship no `/usr/share/zoneinfo`.
+- **Time**: `chrono` is unmaintained (RUSTSEC-2026-0543). Change `replace-chrono-with-jiff` moves the workspace to `jiff` 1.0 (`jiff::Timestamp`, `jiff-sqlx` for `timestamptz`). The static musl images ship no `/usr/share/zoneinfo`, so a timezone database must be compiled in.
 
 ## Goals / Non-Goals
 
@@ -66,15 +66,18 @@ Alternative: a `routine_firings` history table. Rejected: the decision was "no h
 
 ### D2: `Schedule` in `df-core`
 
-`Schedule::parse(expr, tz) -> Result<Schedule, ScheduleError>` and `Schedule::next_after(DateTime<Utc>) -> Option<DateTime<Utc>>`:
+`Schedule::parse(expr, tz) -> Result<Schedule, ScheduleError>` and `Schedule::next_after(jiff::Timestamp) -> Option<jiff::Timestamp>`:
 - `expr` must split into exactly five whitespace-separated fields before it reaches `croner`. That rejects a seconds field and aliases such as `@daily`, independent of `croner`'s defaults.
-- `croner` (latest release, `chrono` feature) parses the expression. Its extensions (`L`, `W`, `#`) are accepted as they come.
-- `tz` is parsed as a `chrono_tz::Tz`. `next_after` computes the next occurrence in that zone and converts it to UTC, so 02:00 stays 02:00 local across DST changes.
+- `croner` (latest release, `default-features = false`, features `std` and `jiff`) parses the expression. Its extensions (`L`, `W`, `#`) are accepted as they come.
+- `tz` is looked up as a `jiff::tz::TimeZone` (`TimeZone::get`) in the tzdb that `jiff` compiles in (feature `tzdb-bundle-always`, crate `jiff-tzdb`). `next_after` computes the next occurrence in that zone and converts it to a `Timestamp`, so 02:00 stays 02:00 local across DST changes.
 - `ScheduleError` has two variants: invalid schedule and unknown timezone. The form maps each to its field.
+- `df-db` stores `next_fire_at` and `last_fired_at` through `jiff-sqlx` and `crates/df-db/sqlx.toml`, as set up by `replace-chrono-with-jiff`.
+
+Order: this change lands after `replace-chrono-with-jiff`. Landing first would mean `chrono` and `jiff` side by side in `df-core`, the scheduler tick, the `df-db` queries (per-column overrides, because the crate-wide `sqlx.toml` would break the `chrono` queries) and the `df-web` time helpers.
 
 Alternatives:
-- `croner` with the `jiff` feature, which has bundled tzdb. `jiff` is only a transitive dependency through `gix-date`, while `chrono` is used across the workspace. Mixing two time libraries in one domain type is worse than adding `chrono-tz`.
-- System tzdata: not present in the static images.
+- `croner` with the `chrono` feature and `chrono-tz`. Rejected: `chrono` is unmaintained (RUSTSEC-2026-0543), and it adds two `chrono` crates that `replace-chrono-with-jiff` would remove again.
+- System tzdata (`jiff` default `tz-system`): not present in the static images.
 
 ### D3: Principal `Routine`
 
@@ -122,7 +125,7 @@ D4 and D5 share one function, `fire_locked(tx, routine, now) -> Outcome`. They d
   - `POST /routines/{id}/delete` (with a confirm dialog)
   - `POST /routines/{id}/run`
   - `GET /routines/preview?schedule=&timezone=`
-- **Form**: fields project (select, fixed after creation), name, persona (select), prompt (textarea), schedule (text, placeholder `0 2 * * *`), timezone (text with a `datalist` of `chrono_tz::TZ_VARIANTS`, default `UTC`) and enabled.
+- **Form**: fields project (select, fixed after creation), name, persona (select), prompt (textarea), schedule (text, placeholder `0 2 * * *`), timezone (text with a `datalist` of the zone names in the bundled tzdb, `jiff::tz::db().available()`, default `UTC`) and enabled.
 - **Next-firing preview**: uses the `/projects/forge` pattern. Schedule and timezone trigger `hx-get` to the preview fragment, which shows either the next firing in the routine's timezone or the field error.
 - **List row**: name, project key, persona, schedule and timezone, an enabled toggle, next firing, last firing, last outcome with the task link, Run now, Edit and Delete. Run now and the toggle re-render the row.
 - **Rail**: the Routines icon goes below Requests (Projects left the rail with `ui-settings-and-task-sort`).
@@ -133,7 +136,7 @@ D4 and D5 share one function, `fire_locked(tx, routine, now) -> Outcome`. They d
 - [A 5 s tick delays a firing by up to 5 s] → acceptable for cron granularity. The tick already runs on every replica.
 - [A routine set to `* * * * *` creates a task every minute when its tasks end quickly] → the overlap rule caps it at one open task. Board members are trusted, and the cost shows in usage.
 - [DST gaps and repeats: `0 2 * * *` on a spring-forward day has no 02:00, and in autumn 02:30 occurs twice] → `croner`'s handling applies (OCPS: a skipped time fires at the next valid instant, a repeated time fires once). It is covered by a `df-core` test, and the routines reference documents it.
-- [`chrono-tz` embeds the tzdb at build time, so zone rule changes need a release] → Renovate keeps `chrono-tz` current. This is acceptable for a scheduling feature.
+- [`jiff-tzdb` embeds the tzdb at build time, so zone rule changes need a release] → Renovate keeps `jiff-tzdb` current. This is acceptable for a scheduling feature.
 - [Two changes add the "open" status set, this one and `iter3-task-tree`] → one constant in `df-core`, added by whichever lands first.
 - [`web-ui-shell` rail delta conflicts with `iter3-chats`, which adds Chats to the same requirement] → whichever of the two is archived second rebases its MODIFIED block on the archived text (tasks 6.1).
 

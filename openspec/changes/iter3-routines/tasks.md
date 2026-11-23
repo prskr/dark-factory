@@ -1,12 +1,12 @@
 # Tasks
 
-Prerequisite, merged before this change: `iter3-task-dependencies` (`tasks.created_by` as a `Principal`, the "Creator and parent in the task details" requirement). Its `task-ui` spec must be archived so that the MODIFIED delta here applies.
+Prerequisite, merged before this change: `iter3-task-dependencies` (`tasks.created_by` as a `Principal`, the "Creator and parent in the task details" requirement). Its `task-ui` spec must be archived so that the MODIFIED delta here applies. Also merged before: `replace-chrono-with-jiff` (`jiff`, `jiff-sqlx`, `crates/df-db/sqlx.toml`).
 
 Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS.md`.
 
 ## 1. Schedule and principal (`df-core`)
 
-- [ ] 1.1 Add `croner` (latest release, `default-features = false`, feature `chrono`) and `chrono-tz` (latest release) to `[workspace.dependencies]` and to `df-core`, then update `Cargo.lock` and the Bazel lock files (skill `rust`). Verify with `cargo build -p df-core` and `cargo deny check`.
+- [ ] 1.1 Add `croner` (latest release, `default-features = false`, features `std` and `jiff`) to `[workspace.dependencies]` and to `df-core`, and enable the `jiff` feature `tzdb-bundle-always` in `df-core`. Update `Cargo.lock` and the Bazel lock files (skill `rust`). Verify with `cargo build -p df-core`, `cargo deny check`, and `cargo tree -p df-core -i chrono` showing no new path through `croner`.
 - [ ] 1.2 Write failing tests, then implement `Schedule::parse(expr, tz)` and `Schedule::next_after` (design D2). The tests check that:
   - `0 2 * * *` / `Europe/Berlin` after 2026-11-03T10:00Z gives 2026-11-04T01:00Z;
   - the DST-end case from the spec gives 00:00Z on 2026-10-24 and 01:00Z on 2026-10-26;
@@ -38,9 +38,9 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
   - an enabled routine keeps its `next_fire_at`;
   - an open last task gives `skipped` and an audit entry with that outcome.
 
-## 3. Scheduler (`df-agent-channel`)
+## 3. Scheduler (`df-orchestrator`)
 
-- [ ] 3.1 Write a failing test, then call `fire_due` from `Scheduler::tick` before `start_in_background`, and log each outcome at info level with `routine_id`, `project`, `outcome` and `task`. A routine whose stored schedule no longer parses gets `enabled = false` and a `warn!`. Verify with a `df-agent-channel` DB test: one `tick` with a due routine creates the task and starts its run in the same tick, and the log capture (`df-telemetry` `test-util`) has the event.
+- [ ] 3.1 Write a failing test, then call `fire_due` from `Scheduler::tick` before `start_in_background`, and log each outcome at info level with `routine_id`, `project`, `outcome` and `task`. A routine whose stored schedule no longer parses gets `enabled = false` and a `warn!`. Verify with a `df-orchestrator` DB test: one `tick` with a due routine creates the task and starts its run in the same tick, and the log capture (`df-telemetry` `test-util`) has the event.
 
 ## 4. Web UI (`df-web`)
 
