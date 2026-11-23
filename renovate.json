@@ -22,6 +22,7 @@
       "description": "Default harness image tag (the adapter version) in code and reference docs; deploy/images/check_versions.sh lists the same copies",
       "managerFilePatterns": [
         "/^crates/df-core/src/config\\.rs$/",
+        "/^crates/df-core/src/config/tests\\.rs$/",
         "/^crates/df-k8s/README\\.md$/",
         "/^crates/df-agent-channel/docs/configuration\\.md$/"
       ],
@@ -73,6 +74,7 @@
       "description": "Default OpenCode harness image tag (the OpenCode version) in code and reference docs",
       "managerFilePatterns": [
         "/^crates/df-core/src/config\\.rs$/",
+        "/^crates/df-core/src/config/tests\\.rs$/",
         "/^crates/df-k8s/README\\.md$/",
         "/^crates/df-agent-channel/docs/configuration\\.md$/"
       ],
