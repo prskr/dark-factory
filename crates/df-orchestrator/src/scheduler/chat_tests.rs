@@ -9,7 +9,10 @@ use sqlx::PgPool;
 
 async fn tick(scheduler: &Scheduler) {
     let mut provisions = JoinSet::new();
-    scheduler.tick(&mut provisions, Utc::now()).await.unwrap();
+    scheduler
+        .tick(&mut provisions, Timestamp::now())
+        .await
+        .unwrap();
     while provisions.join_next().await.is_some() {}
 }
 

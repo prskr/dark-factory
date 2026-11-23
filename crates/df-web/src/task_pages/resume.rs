@@ -1,15 +1,16 @@
 //! Resume time and count of a task that waits for its next automatic run: the "Now" line, the
 //! "Resumes" row of the details and the subtitle of the task row.
 
-use chrono::{DateTime, Utc};
 use df_core::{CAPACITY_DETAIL, RunOutcome, TaskStatus};
 use df_db::task_views::{RunView, TaskDetail};
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 
 /// What the details panel shows about an automatic resume.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ResumeNote {
     /// When the scheduler may start the next run; `None` if the task does not wait for one.
-    pub at: Option<DateTime<Utc>>,
+    pub at: Option<Timestamp>,
     /// Why the task waits, for example "rate limit".
     pub reason: &'static str,
     /// Consecutive automatic resumes after infrastructure failures.
@@ -45,25 +46,23 @@ impl ResumeNote {
 }
 
 /// A time of day, with the date when it is not on the day of `now` (UTC, like all times).
-pub(super) fn clock_label(at: DateTime<Utc>, now: DateTime<Utc>) -> String {
-    if at.date_naive() == now.date_naive() {
-        at.format("%H:%M").to_string()
+pub(super) fn clock_label(at: Timestamp, now: Timestamp) -> String {
+    if at.to_zoned_datetime(TimeZone::UTC).date() == now.to_zoned_datetime(TimeZone::UTC).date() {
+        at.strftime("%H:%M").to_string()
     } else {
-        at.format("%b %d %H:%M").to_string()
+        at.strftime("%b %d %H:%M").to_string()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
-
     use super::*;
 
     #[test]
     fn the_date_is_shown_only_for_another_day() {
-        let now = Utc.with_ymd_and_hms(2026, 11, 2, 23, 0, 0).unwrap();
-        let same_day = Utc.with_ymd_and_hms(2026, 11, 2, 23, 30, 0).unwrap();
-        let next_day = Utc.with_ymd_and_hms(2026, 11, 3, 4, 30, 0).unwrap();
+        let now: Timestamp = "2026-11-02T23:00:00Z".parse().unwrap();
+        let same_day: Timestamp = "2026-11-02T23:30:00Z".parse().unwrap();
+        let next_day: Timestamp = "2026-11-03T04:30:00Z".parse().unwrap();
         assert_eq!(clock_label(same_day, now), "23:30");
         assert_eq!(clock_label(next_day, now), "Nov 03 04:30");
     }

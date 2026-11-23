@@ -16,10 +16,7 @@ use openidconnect::core::{
     CoreGenderClaim, CoreJsonWebKeySet, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm,
     CoreRsaPrivateSigningKey,
 };
-use openidconnect::{
-    AdditionalClaims, Audience, EndUserName, IdToken, IdTokenClaims, IssuerUrl, JsonWebKeyId,
-    Nonce, PrivateSigningKey, StandardClaims, SubjectIdentifier,
-};
+use openidconnect::{AdditionalClaims, IdToken, IdTokenClaims, JsonWebKeyId, PrivateSigningKey};
 use rsa::pkcs1::EncodeRsaPrivateKey;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -85,19 +82,22 @@ struct TokenResponder {
 
 impl TokenResponder {
     fn id_token(&self, nonce: Option<String>, roles: Vec<String>) -> String {
-        let name = EndUserName::new("Peter Test".to_string());
-        let mut claims = TestClaims::new(
-            IssuerUrl::new(self.issuer.clone()).unwrap(),
-            vec![Audience::new(CLIENT_ID.to_string())],
-            chrono::Utc::now() + chrono::Duration::hours(1),
-            chrono::Utc::now(),
-            StandardClaims::new(SubjectIdentifier::new("sub-1".to_string()))
-                .set_name(Some(name.into())),
-            RolesClaim { roles },
-        );
+        // Built from JSON: `IdTokenClaims::new` takes `chrono` times, a dependency this crate
+        // does not declare (it only comes in through `openidconnect`).
+        let now = jiff::Timestamp::now().as_second();
+        let mut claims = serde_json::json!({
+            "iss": self.issuer,
+            "aud": [CLIENT_ID],
+            "exp": now + 3600,
+            "iat": now,
+            "sub": "sub-1",
+            "name": "Peter Test",
+            "roles": roles,
+        });
         if let Some(nonce) = nonce {
-            claims = claims.set_nonce(Some(Nonce::new(nonce)));
+            claims["nonce"] = nonce.into();
         }
+        let claims: TestClaims = serde_json::from_value(claims).unwrap();
         TestIdToken::new(
             claims,
             &self.key,

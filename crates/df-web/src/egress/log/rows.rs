@@ -1,7 +1,7 @@
 //! Rows of the events table and the data the details panel reads from them.
 
-use chrono::DateTime;
 use df_proto::gateway::v1::{FlowEvent, Phase};
+use df_proto::time;
 use maud::{Markup, html};
 use serde_json::json;
 
@@ -61,8 +61,8 @@ pub(super) fn time_label(event: &FlowEvent) -> String {
     event
         .time
         .as_ref()
-        .and_then(|t| DateTime::from_timestamp(t.seconds, u32::try_from(t.nanos).unwrap_or(0)))
-        .map_or_else(String::new, |time| time.format("%H:%M:%S").to_string())
+        .and_then(time::from_proto)
+        .map_or_else(String::new, |time| time.strftime("%H:%M:%S").to_string())
 }
 
 /// The element id of a flow's row: unique per gateway pod and flow. The pod name is hex encoded
@@ -587,6 +587,12 @@ mod tests {
         })
         .into_string();
         assert!(html.contains("Events are missing") && html.contains("colspan=\"5\""));
+    }
+
+    #[test]
+    fn the_flow_time_is_shown_as_a_utc_clock_with_seconds() {
+        let flow = event(Verdict::Allowed, Phase::Closed);
+        assert_eq!(time_label(&flow), "22:13:20");
     }
 
     #[test]

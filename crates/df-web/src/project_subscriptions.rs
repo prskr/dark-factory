@@ -256,7 +256,7 @@ fn key_panel(public_key: Option<&str>, targets: ProjectTargets) -> Markup {
 fn last_delivery(subscription: &Subscription) -> Markup {
     html! {
         @if let Some(at) = subscription.last_attempt_at {
-            time datetime=(at.to_rfc3339()) { (at.format("%b %d %H:%M UTC")) }
+            time datetime=(at.to_string()) { (at.strftime("%b %d %H:%M UTC").to_string()) }
             " · "
             @if let Some(status) = subscription.last_status {
                 @let failed = !StatusCode::from_u16(status).is_ok_and(|status| status.is_success());

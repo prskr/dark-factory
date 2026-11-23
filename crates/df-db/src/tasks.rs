@@ -1,6 +1,5 @@
 //! Task management persistence operations (`specs/task-management/spec.md`).
 
-use chrono::{DateTime, Utc};
 use df_core::run_transition::RunEvent;
 use df_core::task_transition::{DoneBy, StopScope, TaskEvent, TaskSnapshot, transition};
 use df_core::{
@@ -10,6 +9,8 @@ use df_core::{
 };
 use df_proto::prost::Message;
 use df_proto::transcript::v1::{ContentBlock, TextContent, WebhookReceived, content_block};
+use jiff::Timestamp;
+use jiff_sqlx::ToSqlx;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgExecutor, PgPool};
 use uuid::Uuid;
@@ -47,7 +48,7 @@ pub struct PrSyncJob {
     pub open: bool,
     /// Mark the PR ready for review. The value is the time of the completion; a message queued
     /// after it keeps the PR a draft.
-    pub ready: Option<DateTime<Utc>>,
+    pub ready: Option<Timestamp>,
 }
 
 /// The database clock, for times that are ordered against `task_messages.queued_at` (a column
@@ -61,10 +62,11 @@ pub struct PrSyncJob {
 /// design D3).
 pub async fn clock_under_task_lock(
     conn: &mut sqlx::PgConnection,
-) -> Result<DateTime<Utc>, sqlx::Error> {
-    sqlx::query_scalar("SELECT clock_timestamp()")
+) -> Result<Timestamp, sqlx::Error> {
+    sqlx::query_scalar::<_, jiff_sqlx::Timestamp>("SELECT clock_timestamp()")
         .fetch_one(conn)
         .await
+        .map(Into::into)
 }
 
 /// Parameters for creating a new task.
@@ -146,9 +148,9 @@ pub struct TaskRow {
     /// The PR was opened outside the factory; the factory never changes it.
     pub pr_attached: bool,
     /// When a chat was archived; always `None` for a task.
-    pub archived_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub archived_at: Option<Timestamp>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
 }
 
 impl TaskRow {
@@ -174,11 +176,11 @@ pub struct TaskMessageRow {
     pub task_id: TaskId,
     pub author: Principal,
     pub content: Vec<ContentBlock>,
-    pub queued_at: DateTime<Utc>,
+    pub queued_at: Timestamp,
     pub delivered_run_id: Option<RunId>,
-    pub delivered_at: Option<DateTime<Utc>>,
+    pub delivered_at: Option<Timestamp>,
     /// Set when the message was handed to the run's runtime; held-back messages are `None`.
-    pub forwarded_at: Option<DateTime<Utc>>,
+    pub forwarded_at: Option<Timestamp>,
     /// The structured event of a webhook message, shown instead of its hidden text.
     #[serde(default)]
     pub forge_event: Option<WebhookReceived>,
@@ -330,8 +332,8 @@ pub async fn create_task_on_tx(
 struct TargetRow {
     id: Uuid,
     key: String,
-    first_completed_at: Option<DateTime<Utc>>,
-    first_done_at: Option<DateTime<Utc>>,
+    first_completed_at: Option<jiff_sqlx::Timestamp>,
+    first_done_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// The dependencies of a new task, resolved: the target rows and how many are unsatisfied.
@@ -373,8 +375,8 @@ async fn resolve_dependencies(
         resolved.targets.push((target.id, dependency.kind));
         if !is_satisfied(
             dependency.kind,
-            target.first_completed_at,
-            target.first_done_at,
+            target.first_completed_at.map(Into::into),
+            target.first_done_at.map(Into::into),
         ) {
             resolved.unsatisfied_count += 1;
         }
@@ -515,8 +517,8 @@ pub(crate) async fn insert_task(
         base_branch: attached.map(|pr| pr.base.clone()),
         pr_attached: attached.is_some(),
         archived_at: None,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
+        created_at: row.created_at.into(),
+        updated_at: row.updated_at.into(),
     })
 }
 
@@ -620,9 +622,9 @@ pub(crate) async fn insert_message(
         task_id: TaskId::from_uuid(msg_row.task_id),
         author,
         content,
-        queued_at: msg_row.queued_at,
+        queued_at: msg_row.queued_at.into(),
         delivered_run_id: msg_row.delivered_run_id.map(RunId::from_uuid),
-        delivered_at: msg_row.delivered_at,
+        delivered_at: msg_row.delivered_at.map(Into::into),
         forwarded_at: None,
         forge_event,
     })
@@ -776,12 +778,12 @@ pub async fn child_task_id(
 pub async fn has_message_queued_after(
     executor: impl PgExecutor<'_>,
     task_id: TaskId,
-    at: DateTime<Utc>,
+    at: Timestamp,
 ) -> Result<bool, DbError> {
     Ok(sqlx::query_scalar!(
         r#"SELECT EXISTS (SELECT 1 FROM task_messages WHERE task_id = $1 AND queued_at > $2) AS "queued!""#,
         task_id.as_uuid(),
-        at
+        at.to_sqlx()
     )
     .fetch_one(executor)
     .await?)
@@ -848,9 +850,9 @@ pub async fn get_task(
             branch: r.branch,
             base_branch: r.base_branch,
             pr_attached: r.pr_attached,
-            archived_at: r.archived_at,
-            created_at: r.created_at,
-            updated_at: r.updated_at,
+            archived_at: r.archived_at.map(Into::into),
+            created_at: r.created_at.into(),
+            updated_at: r.updated_at.into(),
         })
     })
     .transpose()
@@ -862,10 +864,10 @@ struct MessageRecord {
     task_id: Uuid,
     author: serde_json::Value,
     content: serde_json::Value,
-    queued_at: DateTime<Utc>,
+    queued_at: Timestamp,
     delivered_run_id: Option<Uuid>,
-    delivered_at: Option<DateTime<Utc>>,
-    forwarded_at: Option<DateTime<Utc>>,
+    delivered_at: Option<jiff_sqlx::Timestamp>,
+    forwarded_at: Option<jiff_sqlx::Timestamp>,
     forge_event: Option<Vec<u8>>,
 }
 
@@ -880,8 +882,8 @@ impl TryFrom<MessageRecord> for TaskMessageRow {
             content: serde_json::from_value(r.content)?,
             queued_at: r.queued_at,
             delivered_run_id: r.delivered_run_id.map(RunId::from_uuid),
-            delivered_at: r.delivered_at,
-            forwarded_at: r.forwarded_at,
+            delivered_at: r.delivered_at.map(Into::into),
+            forwarded_at: r.forwarded_at.map(Into::into),
             forge_event: r
                 .forge_event
                 .as_deref()

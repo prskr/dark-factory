@@ -10,12 +10,13 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
-chrono.workspace = true
 df-core.workspace = true
 df-proto.workspace = true
 df-sandbox-contract.workspace = true
 futures.workspace = true
 hex.workspace = true
+jiff.workspace = true
+jiff-sqlx.workspace = true
 opentelemetry.workspace = true
 secrecy.workspace = true
 serde.workspace = true

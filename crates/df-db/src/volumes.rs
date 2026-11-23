@@ -4,11 +4,12 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use df_core::{
     Principal, ProviderError, RunId, RunState, SandboxProvider, TaskId, TaskKey, TaskStatus,
     TaskVolumeSpec,
 };
+use jiff::Timestamp;
+use jiff_sqlx::ToSqlx;
 use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
@@ -59,8 +60,8 @@ pub async fn lock_task(
 /// `only` narrows the result to one task, to check again that it is still due under its lock.
 pub async fn due_for_retention(
     executor: impl PgExecutor<'_>,
-    closed_cutoff: Option<DateTime<Utc>>,
-    any_cutoff: Option<DateTime<Utc>>,
+    closed_cutoff: Option<Timestamp>,
+    any_cutoff: Option<Timestamp>,
     only: Option<TaskId>,
 ) -> Result<Vec<(TaskId, String)>, DbError> {
     let rows = sqlx::query!(
@@ -83,8 +84,8 @@ pub async fn due_for_retention(
           AND ($3::uuid IS NULL OR t.id = $3)
         ORDER BY t.created_at
         "#,
-        closed_cutoff,
-        any_cutoff,
+        closed_cutoff.map(ToSqlx::to_sqlx),
+        any_cutoff.map(ToSqlx::to_sqlx),
         only.map(|task| task.as_uuid()),
         &state_list(RunState::TERMINAL),
         &status_list(TaskStatus::CLOSED)

@@ -5,13 +5,14 @@
 //! executes the effects, all in the caller's transaction. The rules live in `df-core`; this
 //! module only reads, writes and locks.
 
-use chrono::{DateTime, TimeDelta, Utc};
 use df_core::run_transition::{
     FinalizeReason, RunEffect, RunEnd, RunEvent, RunSnapshot, RunTransition, TaskCue,
     run_transition,
 };
 use df_core::task_transition::{RunEnded, TaskEvent, Transition};
 use df_core::{Principal, RunId, RunOutcome, RunState, TaskId, TaskStatus};
+use jiff::{SignedDuration, Timestamp};
+use jiff_sqlx::ToSqlx;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
@@ -32,7 +33,7 @@ pub struct RunEnv<'a> {
     /// `runs.maxAutoResumes`.
     pub max_auto_resumes: u32,
     /// `scheduling.resumeBackoffSeconds`.
-    pub resume_backoff: TimeDelta,
+    pub resume_backoff: SignedDuration,
 }
 
 impl<'a> RunEnv<'a> {
@@ -40,7 +41,7 @@ impl<'a> RunEnv<'a> {
     pub const fn new(
         events: &'a EventSinks,
         max_auto_resumes: u32,
-        resume_backoff: TimeDelta,
+        resume_backoff: SignedDuration,
     ) -> Self {
         Self {
             events,
@@ -52,7 +53,7 @@ impl<'a> RunEnv<'a> {
     /// For events that enqueue sandbox lifecycle events but end no run (provisioning started,
     /// sandbox started): no resume policy.
     pub const fn events_only(events: &'a EventSinks) -> Self {
-        Self::new(events, 0, TimeDelta::zero())
+        Self::new(events, 0, SignedDuration::ZERO)
     }
 }
 
@@ -79,11 +80,11 @@ pub struct AppliedRun {
 struct Facts {
     task_id: Uuid,
     state: String,
-    stop_requested_at: Option<DateTime<Utc>>,
-    connected_at: Option<DateTime<Utc>>,
-    started_at: DateTime<Utc>,
-    provisioning_started_at: Option<DateTime<Utc>>,
-    sandbox_started_at: Option<DateTime<Utc>>,
+    stop_requested_at: Option<jiff_sqlx::Timestamp>,
+    connected_at: Option<jiff_sqlx::Timestamp>,
+    started_at: Timestamp,
+    provisioning_started_at: Option<jiff_sqlx::Timestamp>,
+    sandbox_started_at: Option<jiff_sqlx::Timestamp>,
     finalize_reason: Option<String>,
 }
 
@@ -111,8 +112,8 @@ pub async fn apply_run_event(
     let snapshot = RunSnapshot {
         run_id,
         state: facts.state.parse()?,
-        stop_requested_at: facts.stop_requested_at,
-        connected_at: facts.connected_at,
+        stop_requested_at: facts.stop_requested_at.map(Into::into),
+        connected_at: facts.connected_at.map(Into::into),
         provisioning_began: facts.provisioning_started_at.is_some(),
         finalize_reason: facts
             .finalize_reason
@@ -193,7 +194,7 @@ async fn write(
     tx: &mut Transaction<'_, Postgres>,
     run_id: RunId,
     next: &RunTransition,
-) -> Result<Option<DateTime<Utc>>, DbError> {
+) -> Result<Option<Timestamp>, DbError> {
     let set = &next.set;
     let end = set.end.as_ref();
     let row = sqlx::query!(
@@ -235,21 +236,21 @@ async fn write(
         set.finalize_reason.map(FinalizeReason::as_str),
         end.map(|e| e.outcome.as_str()),
         end.map_or("", |e| e.detail.as_str()),
-        end.and_then(|e| e.retry_after),
+        end.and_then(|e| e.retry_after).map(ToSqlx::to_sqlx),
         end.map_or("", |e| e.harness_session_id.as_str()),
         end.map_or("", |e| e.task_branch_sha.as_str()),
         end.map_or("", |e| e.wip_sha.as_str()),
     )
     .fetch_one(&mut **tx)
     .await?;
-    Ok(row.ended_at)
+    Ok(row.ended_at.map(Into::into))
 }
 
 /// The closing sandbox event of a run whose provisioning began (design D2 pairing).
 fn sandbox_closed(
     next: &RunTransition,
     facts: &Facts,
-    ended_at: Option<DateTime<Utc>>,
+    ended_at: Option<Timestamp>,
 ) -> Option<Event> {
     let end = next.set.end.as_ref()?;
     if end.outcome == RunOutcome::ProvisioningFailed {
@@ -261,8 +262,8 @@ fn sandbox_closed(
     Some(Event::SandboxDestroyed {
         run_id: end.run_id,
         outcome: end.outcome,
-        started_at: facts.sandbox_started_at,
-        ended_at: ended_at.unwrap_or_else(Utc::now),
+        started_at: facts.sandbox_started_at.map(Into::into),
+        ended_at: ended_at.unwrap_or_else(Timestamp::now),
     })
 }
 
@@ -297,7 +298,7 @@ async fn raise_run_ended(
         stop_requested_at: run.stop_requested_at,
         max_auto_resumes: env.max_auto_resumes,
         resume_backoff: env.resume_backoff,
-        now: Utc::now(),
+        now: Timestamp::now(),
     });
     let next = raise_task_event(tx, task_id, event, &Principal::system("run.ended")).await?;
     record_run_report(&mut **tx, task_id, &end.harness_session_id, end.diverged).await?;

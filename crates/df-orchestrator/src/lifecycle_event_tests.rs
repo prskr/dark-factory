@@ -1,9 +1,10 @@
 //! Tests of the lifecycle events the scheduler, the run end and the volume deletions emit.
 
-use chrono::{DateTime, TimeDelta, Utc};
 use df_core::run_transition::RunEnd;
 use df_core::testing::SandboxCall;
 use df_core::{ProviderError, RunId, RunOutcome, SandboxEvent};
+use jiff::{SignedDuration, Timestamp};
+use jiff_sqlx::ToSqlx;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tokio::task::JoinSet;
@@ -44,20 +45,27 @@ async fn only_run_id(pool: &PgPool) -> RunId {
     RunId::from_uuid(id)
 }
 
-async fn run_times(pool: &PgPool, run_id: RunId) -> (Option<DateTime<Utc>>, Option<DateTime<Utc>>) {
-    sqlx::query_as("SELECT provisioning_started_at, sandbox_started_at FROM runs WHERE id = $1")
+async fn run_times(pool: &PgPool, run_id: RunId) -> (Option<Timestamp>, Option<Timestamp>) {
+    let (provisioning, sandbox): (Option<jiff_sqlx::Timestamp>, Option<jiff_sqlx::Timestamp>) =
+        sqlx::query_as(
+            "SELECT provisioning_started_at, sandbox_started_at FROM runs WHERE id = $1",
+        )
         .bind(run_id.as_uuid())
         .fetch_one(pool)
         .await
-        .unwrap()
+        .unwrap();
+    (provisioning.map(Into::into), sandbox.map(Into::into))
 }
 
-async fn volume_provisioned_at(env: &Env) -> Option<DateTime<Utc>> {
-    sqlx::query_scalar("SELECT volume_provisioned_at FROM tasks WHERE id = $1")
-        .bind(env.task.id.as_uuid())
-        .fetch_one(&env.ctx.pool)
-        .await
-        .unwrap()
+async fn volume_provisioned_at(env: &Env) -> Option<Timestamp> {
+    sqlx::query_scalar::<_, Option<jiff_sqlx::Timestamp>>(
+        "SELECT volume_provisioned_at FROM tasks WHERE id = $1",
+    )
+    .bind(env.task.id.as_uuid())
+    .fetch_one(&env.ctx.pool)
+    .await
+    .unwrap()
+    .map(Into::into)
 }
 
 /// Ends the runs of the task and queues a message, so the next tick starts another run.
@@ -324,7 +332,7 @@ async fn retention_emits_volume_destroyed_and_the_next_run_provisions_again() {
 
     assert_eq!(
         Retention::new(env.ctx.clone())
-            .scan(Utc::now())
+            .scan(Timestamp::now())
             .await
             .unwrap(),
         1
@@ -379,18 +387,18 @@ async fn reset_workspace_emits_volume_destroyed_and_the_next_run_provisions_agai
 async fn deleting_a_volume_that_was_never_provisioned_emits_nothing() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = env(&pool).await;
-    let ended = Utc::now() - TimeDelta::days(40);
+    let ended = Timestamp::now() - SignedDuration::from_hours(24 * 40);
     let run_id = env.insert_run(env.task.id, 1, "succeeded").await;
     sqlx::query("UPDATE runs SET started_at = $2, ended_at = $2 WHERE id = $1")
         .bind(run_id.as_uuid())
-        .bind(ended)
+        .bind(ended.to_sqlx())
         .execute(&pool)
         .await
         .unwrap();
 
     assert_eq!(
         Retention::new(env.ctx.clone())
-            .scan(Utc::now())
+            .scan(Timestamp::now())
             .await
             .unwrap(),
         1

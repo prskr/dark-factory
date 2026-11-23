@@ -4,6 +4,12 @@ use super::*;
 use df_core::Principal;
 
 #[test]
+fn the_full_time_shows_date_and_seconds_in_utc() {
+    let at: Timestamp = "2026-10-03T04:05:06Z".parse().unwrap();
+    assert_eq!(format_time(at), "2026-10-03 04:05:06 UTC");
+}
+
+#[test]
 fn filters_parse_and_serialize_without_defaults() {
     assert_eq!(Filters::new(None, None, None).query(), "");
     assert_eq!(
@@ -80,7 +86,7 @@ fn run(number: i64) -> RunView {
         outcome: None,
         detail: String::new(),
         retry_after: None,
-        started_at: DateTime::UNIX_EPOCH,
+        started_at: Timestamp::UNIX_EPOCH,
         ended_at: None,
         usage: vec![],
         unknown_usage_requests: 0,
@@ -147,7 +153,7 @@ fn queued(n: usize) -> Vec<TaskMessageRow> {
                 )),
                 hidden: false,
             }],
-            queued_at: DateTime::UNIX_EPOCH,
+            queued_at: Timestamp::UNIX_EPOCH,
             delivered_run_id: None,
             delivered_at: None,
             forwarded_at: None,

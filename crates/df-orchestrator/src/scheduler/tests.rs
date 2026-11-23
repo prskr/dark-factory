@@ -8,11 +8,12 @@ use df_core::run_transition::cancel_deadline;
 use df_core::testing::SandboxCall;
 use df_core::{ProviderError, TaskStatus};
 use df_db::runs::{get_run, list_overdue_runs};
+use jiff_sqlx::ToSqlx;
 use sqlx::PgPool;
 
 /// One pass of the production code: start and provision what is queued, then enforce
 /// timeouts.
-async fn tick(scheduler: &Scheduler, now: DateTime<Utc>) -> Result<(), OrchestratorError> {
+async fn tick(scheduler: &Scheduler, now: Timestamp) -> Result<(), OrchestratorError> {
     let mut provisions = JoinSet::new();
     let ticked = scheduler.tick(&mut provisions, now).await;
     while provisions.join_next().await.is_some() {}
@@ -49,7 +50,7 @@ async fn list_runs(pool: &PgPool) -> Vec<RunRow> {
 async fn new_task_gets_a_run_and_a_sandbox() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
 
@@ -71,12 +72,15 @@ async fn new_task_gets_a_run_and_a_sandbox() {
     assert_eq!(spec.labels["dark-factory.io/task-key"], "DF-1");
 }
 
-async fn volume_deleted_at(pool: &PgPool, env: &Env) -> Option<DateTime<Utc>> {
-    sqlx::query_scalar("SELECT volume_deleted_at FROM tasks WHERE id = $1")
-        .bind(env.task.id.as_uuid())
-        .fetch_one(pool)
-        .await
-        .unwrap()
+async fn volume_deleted_at(pool: &PgPool, env: &Env) -> Option<Timestamp> {
+    sqlx::query_scalar::<_, Option<jiff_sqlx::Timestamp>>(
+        "SELECT volume_deleted_at FROM tasks WHERE id = $1",
+    )
+    .bind(env.task.id.as_uuid())
+    .fetch_one(pool)
+    .await
+    .unwrap()
+    .map(Into::into)
 }
 
 async fn mark_volume_deleted(pool: &PgPool, env: &Env) {
@@ -93,7 +97,7 @@ async fn deleted_volume_is_recreated_before_the_next_run_and_the_marker_cleared(
     let env = Env::new(pool.clone()).await;
     mark_volume_deleted(&pool, &env).await;
 
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
 
@@ -111,7 +115,7 @@ async fn failed_volume_creation_keeps_the_deletion_marker() {
     env.provider
         .push_ensure_volume_result(Err(ProviderError::Backend("storage down".into())));
 
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
 
@@ -147,7 +151,7 @@ async fn the_next_run_after_a_workspace_reset_recreates_the_volume() {
     df_db::queue_message(&pool, env.task.id, env.human(), vec![])
         .await
         .unwrap();
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
 
@@ -164,7 +168,7 @@ async fn two_schedulers_create_exactly_one_run() {
     let env = Env::new(pool.clone()).await;
     let a = Scheduler::new(env.ctx.clone());
     let b = Scheduler::new(env.other_replica().await);
-    let now = Utc::now();
+    let now = Timestamp::now();
     let (ra, rb) = tokio::join!(tick(&a, now), tick(&b, now));
     ra.unwrap();
     rb.unwrap();
@@ -183,7 +187,7 @@ async fn task_with_an_active_run_is_not_started_again() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
     env.insert_run(env.task.id, 1, "running").await;
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
     assert_eq!(list_runs(&pool).await.len(), 1);
@@ -197,7 +201,7 @@ async fn project_with_an_adapter_command_gets_no_harness_mount() {
         .execute(&pool)
         .await
         .unwrap();
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
 
@@ -221,7 +225,7 @@ async fn missing_harness_image_ends_the_run_provisioning_failed_naming_the_harne
         .push_provision_result(Err(ProviderError::InvalidSpec(
             "no image is configured for harness `claude-code`".into(),
         )));
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
 
@@ -236,7 +240,7 @@ async fn provider_rejection_fails_the_run_and_resumes_the_task_later() {
     let env = Env::new(pool.clone()).await;
     env.provider
         .push_provision_result(Err(ProviderError::Backend("quota exceeded".into())));
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
 
@@ -259,7 +263,7 @@ async fn capacity_rejection_requeues_the_task_without_counting_a_resume() {
     let env = Env::new(pool.clone()).await;
     env.provider
         .push_provision_result(Err(ProviderError::Capacity("exceeded quota".into())));
-    let before = Utc::now();
+    let before = Timestamp::now();
     tick(&Scheduler::new(env.ctx.clone()), before)
         .await
         .unwrap();
@@ -271,7 +275,7 @@ async fn capacity_rejection_requeues_the_task_without_counting_a_resume() {
     assert_eq!(auto_resumes(&pool, &env).await, 0);
     let wait = resume_at(&pool, &env).await.unwrap() - before;
     assert!(
-        (chrono::Duration::seconds(110)..=chrono::Duration::seconds(130)).contains(&wait),
+        (SignedDuration::from_secs(110)..=SignedDuration::from_secs(130)).contains(&wait),
         "{wait}"
     );
 }
@@ -303,7 +307,7 @@ async fn sandbox_lost_task_is_resumed_after_the_backoff_without_a_message() {
     assert_eq!(auto_resumes(&pool, &env).await, 1);
 
     // Not due yet.
-    tick(&scheduler, Utc::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
     assert_eq!(list_runs(&pool).await.len(), 1);
 
     // Due: the resume time is 2 minutes after the loss.
@@ -312,7 +316,7 @@ async fn sandbox_lost_task_is_resumed_after_the_backoff_without_a_message() {
         .execute(&pool)
         .await
         .unwrap();
-    tick(&scheduler, Utc::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
     assert_eq!(list_runs(&pool).await.len(), 2);
     assert_eq!(task_status(&pool, &env).await, "running");
     assert_eq!(resume_at(&pool, &env).await, None);
@@ -336,7 +340,7 @@ async fn due_rate_limited_task_resumes_with_a_continuation_prompt() {
     .await
     .unwrap();
 
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
 
@@ -377,7 +381,7 @@ async fn due_task_with_an_undelivered_message_gets_no_continuation_prompt() {
         .await
         .unwrap();
 
-        tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+        tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
             .await
             .unwrap();
 
@@ -411,7 +415,7 @@ async fn auto_resumes(pool: &PgPool, env: &Env) -> i32 {
     task_resume_state(pool, env.task.id).await.auto_resumes
 }
 
-async fn resume_at(pool: &PgPool, env: &Env) -> Option<DateTime<Utc>> {
+async fn resume_at(pool: &PgPool, env: &Env) -> Option<Timestamp> {
     task_resume_state(pool, env.task.id).await.resume_at
 }
 
@@ -447,7 +451,7 @@ async fn interrupted_provisioning_is_retried_and_the_run_connects() {
     let scheduler = Scheduler::new(env.ctx.clone());
     // The replica stopped after creating the run, before the sandbox.
     let run_id = stale_run(&pool, &env, "pending", "2 minutes").await;
-    tick(&scheduler, Utc::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
     assert_eq!(provisions_of(&env, run_id), 1);
     assert_eq!(
         get_run(&pool, run_id).await.unwrap().unwrap().state,
@@ -473,12 +477,12 @@ async fn a_stale_run_whose_sandbox_exists_is_not_provisioned_again() {
     let env = Env::new(pool.clone()).await;
     let scheduler = Scheduler::new(env.ctx.clone());
     let run_id = stale_run(&pool, &env, "pending", "2 minutes").await;
-    tick(&scheduler, Utc::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
     assert_eq!(provisions_of(&env, run_id), 1);
 
     // The sandbox exists now but has not reported yet.
-    tick(&scheduler, Utc::now()).await.unwrap();
-    tick(&scheduler, Utc::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
     assert_eq!(provisions_of(&env, run_id), 1);
 }
 
@@ -492,13 +496,13 @@ async fn a_transient_failure_on_a_retry_of_a_stale_run_leaves_the_run_alone() {
     // The existence check fails, then the provisioning itself.
     env.provider
         .push_exists_result(Err(ProviderError::Backend("api unavailable".into())));
-    tick(&scheduler, Utc::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
     env.provider.push_exists_result(Ok(false));
     env.provider
         .push_provision_result(Err(ProviderError::Backend(
             "timeout trying to create".into(),
         )));
-    tick(&scheduler, Utc::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
 
     let run = get_run(&pool, run_id).await.unwrap().unwrap();
     assert_eq!((run.state, run.outcome), (RunState::Provisioning, None));
@@ -512,7 +516,7 @@ async fn retry_rejected_with(env: &Env, error: ProviderError) -> RunRow {
     env.provider.push_exists_result(Ok(false));
     env.provider.push_provision_result(Err(error));
     env.provider.push_exists_result(Ok(false));
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
     get_run(&env.ctx.pool, run_id).await.unwrap().unwrap()
@@ -564,7 +568,7 @@ async fn capacity_rejection_on_a_retry_keeps_a_run_whose_sandbox_appeared_meanwh
         .push_provision_result(Err(ProviderError::Capacity("exceeded quota".into())));
     env.provider.push_exists_result(Ok(true));
 
-    tick(&scheduler, Utc::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
 
     let run = get_run(&pool, run_id).await.unwrap().unwrap();
     assert_eq!((run.state, run.outcome), (RunState::Provisioning, None));
@@ -580,14 +584,14 @@ async fn a_retry_still_in_flight_is_not_started_again() {
     let run_id = stale_run(&pool, &env, "provisioning", "2 minutes").await;
     let mut background = JoinSet::new();
     scheduler
-        .reprovision_stale(&mut background, Utc::now())
+        .reprovision_stale(&mut background, Timestamp::now())
         .await;
     entered.notified().await;
 
     // The next tick still finds the run without a sandbox.
     env.provider.push_exists_result(Ok(false));
     scheduler
-        .reprovision_stale(&mut background, Utc::now())
+        .reprovision_stale(&mut background, Timestamp::now())
         .await;
     assert_eq!(background.len(), 1);
     release.notify_one();
@@ -596,7 +600,7 @@ async fn a_retry_still_in_flight_is_not_started_again() {
     // Once the attempt finished, a later tick retries again (with the answer queued above).
     release.notify_one();
     scheduler
-        .reprovision_stale(&mut background, Utc::now())
+        .reprovision_stale(&mut background, Timestamp::now())
         .await;
     while background.join_next().await.is_some() {}
     assert_eq!(provisions_of(&env, run_id), 2);
@@ -607,7 +611,7 @@ async fn young_unprovisioned_runs_are_left_alone() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
     let run_id = stale_run(&pool, &env, "pending", "10 seconds").await;
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
     assert_eq!(provisions_of(&env, run_id), 0);
@@ -636,7 +640,7 @@ async fn unresolvable_cluster_target_leaves_the_run_provisioning_and_logs_the_ta
         .push_provision_result(Err(unresolvable_target()));
     let (logs, _guard) = df_telemetry::testing::capture("warn");
 
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
 
@@ -657,13 +661,13 @@ async fn run_with_an_unresolvable_target_is_provisioned_once_the_target_resolves
     let scheduler = Scheduler::new(env.ctx.clone());
     env.provider
         .push_provision_result(Err(unresolvable_target()));
-    let now = Utc::now();
+    let now = Timestamp::now();
     tick(&scheduler, now).await.unwrap();
     let run_id = only_run(&pool).await.id;
 
     // A later tick: the target resolves, the provider creates the sandbox.
     env.provider.push_exists_result(Ok(false));
-    tick(&scheduler, now + chrono::Duration::seconds(61))
+    tick(&scheduler, now + SignedDuration::from_secs(61))
         .await
         .unwrap();
     assert_eq!(provisions_of(&env, run_id), 2);
@@ -686,12 +690,12 @@ async fn run_whose_target_never_resolves_ends_with_connect_timeout() {
     let scheduler = Scheduler::new(env.ctx.clone());
     env.provider
         .push_provision_result(Err(unresolvable_target()));
-    let now = Utc::now();
+    let now = Timestamp::now();
     tick(&scheduler, now).await.unwrap();
     let run_id = only_run(&pool).await.id;
 
     script_unavailable_retry(&env);
-    tick(&scheduler, now + chrono::Duration::seconds(61))
+    tick(&scheduler, now + SignedDuration::from_secs(61))
         .await
         .unwrap();
     assert_eq!(provisions_of(&env, run_id), 2);
@@ -701,7 +705,7 @@ async fn run_whose_target_never_resolves_ends_with_connect_timeout() {
     );
 
     script_unavailable_retry(&env);
-    tick(&scheduler, now + chrono::Duration::seconds(601))
+    tick(&scheduler, now + SignedDuration::from_secs(601))
         .await
         .unwrap();
     let run = get_run(&pool, run_id).await.unwrap().unwrap();
@@ -717,7 +721,7 @@ async fn started_event_moves_the_run_to_connecting_with_the_pod_ip() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
     let scheduler = Scheduler::new(env.ctx.clone());
-    tick(&scheduler, Utc::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
     let run = only_run(&pool).await;
 
     let event = SandboxEvent::Started {
@@ -777,17 +781,17 @@ async fn sandbox_that_never_connects_fails_with_connect_timeout() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
     let scheduler = Scheduler::new(env.ctx.clone());
-    let now = Utc::now();
+    let now = Timestamp::now();
     tick(&scheduler, now).await.unwrap();
 
     scheduler
-        .enforce_timeouts(now + chrono::Duration::seconds(599))
+        .enforce_timeouts(now + SignedDuration::from_secs(599))
         .await
         .unwrap();
     assert_eq!(only_run(&pool).await.state, RunState::Provisioning);
 
     scheduler
-        .enforce_timeouts(now + chrono::Duration::seconds(601))
+        .enforce_timeouts(now + SignedDuration::from_secs(601))
         .await
         .unwrap();
     let run = only_run(&pool).await;
@@ -813,7 +817,7 @@ async fn run_past_budget_and_both_graces_is_torn_down() {
 
     // 2 h budget + 2 x 5 min grace
     scheduler
-        .enforce_timeouts(started + chrono::Duration::seconds(7200 + 599))
+        .enforce_timeouts(started + SignedDuration::from_secs(7200 + 599))
         .await
         .unwrap();
     assert_eq!(
@@ -822,7 +826,7 @@ async fn run_past_budget_and_both_graces_is_torn_down() {
     );
 
     scheduler
-        .enforce_timeouts(started + chrono::Duration::seconds(7200 + 601))
+        .enforce_timeouts(started + SignedDuration::from_secs(7200 + 601))
         .await
         .unwrap();
     let run = get_run(&pool, run_id).await.unwrap().unwrap();
@@ -835,9 +839,9 @@ async fn run_past_budget_and_both_graces_is_torn_down() {
 #[test]
 fn cancel_comes_after_budget_plus_one_grace() {
     let cfg = RunsConfig::default();
-    let started = Utc::now();
+    let started = Timestamp::now();
     let deadline = cancel_deadline(started, &cfg).unwrap();
-    assert_eq!(deadline - started, chrono::Duration::seconds(7500));
+    assert_eq!(deadline - started, SignedDuration::from_secs(7500));
 }
 
 #[test]
@@ -848,7 +852,7 @@ fn huge_budgets_mean_no_deadline_instead_of_a_panic() {
         cancel_grace_seconds: u64::MAX,
         ..RunsConfig::default()
     };
-    assert_eq!(cancel_deadline(Utc::now(), &cfg), None);
+    assert_eq!(cancel_deadline(Timestamp::now(), &cfg), None);
 }
 
 #[tokio::test]
@@ -856,9 +860,9 @@ async fn a_run_that_connected_after_being_listed_is_not_ended() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
     let scheduler = Scheduler::new(env.ctx.clone());
-    let now = Utc::now();
+    let now = Timestamp::now();
     tick(&scheduler, now).await.unwrap();
-    let late = now + chrono::Duration::seconds(601);
+    let late = now + SignedDuration::from_secs(601);
     let run_id = only_run(&pool).await.id;
     let cfg = &env.ctx.config.runs;
     // The enforcement listed the run as overdue ...
@@ -897,7 +901,7 @@ async fn enforcing_timeouts_with_unbounded_budgets_does_not_panic() {
     });
     let run_id = env.insert_run(env.task.id, 1, "running").await;
     Scheduler::new(env.ctx.clone())
-        .enforce_timeouts(Utc::now() + chrono::Duration::days(3650))
+        .enforce_timeouts(Timestamp::now() + SignedDuration::from_hours(24 * 3650))
         .await
         .unwrap();
     let run = get_run(&pool, run_id).await.unwrap().unwrap();
@@ -913,17 +917,17 @@ async fn wall_clock_budget_counts_from_the_runtime_connect() {
     // The sandbox needed an hour to come up.
     sqlx::query("UPDATE runs SET connected_at = $2 WHERE id = $1")
         .bind(run_id.as_uuid())
-        .bind(started + chrono::Duration::hours(1))
+        .bind((started + SignedDuration::from_hours(1)).to_sqlx())
         .execute(&pool)
         .await
         .unwrap();
     let scheduler = Scheduler::new(env.ctx.clone());
     let state = || async { get_run(&pool, run_id).await.unwrap().unwrap().state };
 
-    let before_stop = started + chrono::Duration::seconds(3600 + 7200 + 599);
+    let before_stop = started + SignedDuration::from_secs(3600 + 7200 + 599);
     scheduler.enforce_timeouts(before_stop).await.unwrap();
     assert_eq!(state().await, RunState::Running);
-    let after_stop = started + chrono::Duration::seconds(3600 + 7200 + 601);
+    let after_stop = started + SignedDuration::from_secs(3600 + 7200 + 601);
     scheduler.enforce_timeouts(after_stop).await.unwrap();
     assert_eq!(state().await, RunState::Failed);
 }
@@ -938,7 +942,7 @@ async fn bookkeeping_failure_after_the_run_was_created_ends_it_as_provisioning_f
         .await
         .unwrap();
 
-    tick(&Scheduler::new(env.ctx.clone()), Utc::now())
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
         .await
         .unwrap();
 
@@ -1007,7 +1011,7 @@ async fn an_unreadable_run_does_not_stop_the_timeouts_of_the_others() {
         .unwrap();
 
     Scheduler::new(env.ctx.clone())
-        .enforce_timeouts(Utc::now() + chrono::Duration::days(1))
+        .enforce_timeouts(Timestamp::now() + SignedDuration::from_hours(24))
         .await
         .unwrap();
 
@@ -1255,14 +1259,14 @@ async fn stopping_a_run_that_is_provisioning_tears_it_down_and_keeps_the_volume(
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
     let scheduler = Scheduler::new(env.ctx.clone());
-    tick(&scheduler, Utc::now()).await.unwrap();
+    tick(&scheduler, Timestamp::now()).await.unwrap();
     let run = only_run(&pool).await;
     assert_eq!(run.state, RunState::Provisioning);
 
     df_db::stop_run(&pool, env.task.id, env.human())
         .await
         .unwrap();
-    scheduler.enforce_timeouts(Utc::now()).await.unwrap();
+    scheduler.enforce_timeouts(Timestamp::now()).await.unwrap();
 
     let run = only_run(&pool).await;
     assert_eq!(
@@ -1291,10 +1295,10 @@ async fn runtime_that_does_not_report_within_the_stop_timeout_is_torn_down() {
     df_db::stop_run(&pool, env.task.id, env.human())
         .await
         .unwrap();
-    let stopped = Utc::now();
+    let stopped = Timestamp::now();
 
     scheduler
-        .enforce_timeouts(stopped + chrono::Duration::seconds(110))
+        .enforce_timeouts(stopped + SignedDuration::from_secs(110))
         .await
         .unwrap();
     assert_eq!(
@@ -1303,7 +1307,7 @@ async fn runtime_that_does_not_report_within_the_stop_timeout_is_torn_down() {
     );
 
     scheduler
-        .enforce_timeouts(stopped + chrono::Duration::seconds(130))
+        .enforce_timeouts(stopped + SignedDuration::from_secs(130))
         .await
         .unwrap();
     let run = get_run(&pool, run_id).await.unwrap().unwrap();
@@ -1340,7 +1344,7 @@ async fn a_stop_while_the_sandbox_is_created_tears_it_down_afterwards() {
     df_db::stop_run(&pool, env.task.id, env.human())
         .await
         .unwrap();
-    scheduler.enforce_timeouts(Utc::now()).await.unwrap();
+    scheduler.enforce_timeouts(Timestamp::now()).await.unwrap();
     release.notify_one();
     provisioning.await.unwrap().unwrap();
 

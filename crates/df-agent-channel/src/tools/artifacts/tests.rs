@@ -453,3 +453,21 @@ async fn cross_task_reads_are_audited_with_target_and_artifact_also_when_refused
     assert_eq!(details[0]["error"], "task not found or not related");
     assert!(details[1].get("target_task").is_none(), "{}", details[1]);
 }
+
+#[test]
+fn the_metadata_line_shows_the_update_time_as_rfc3339_utc() {
+    let meta = df_db::artifacts::ArtifactMeta {
+        name: "plan.md".into(),
+        kind: "text".into(),
+        mime_type: "text/markdown".into(),
+        size: 12,
+        width: None,
+        height: None,
+        sha256: String::new(),
+        updated_at: "2026-11-23T08:00:00Z".parse().unwrap(),
+    };
+    assert_eq!(
+        super::line(&meta),
+        "plan.md \u{b7} text \u{b7} text/markdown \u{b7} 12 bytes \u{b7} updated 2026-11-23T08:00:00Z"
+    );
+}

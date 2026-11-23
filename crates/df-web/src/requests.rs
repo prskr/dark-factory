@@ -13,7 +13,6 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Form, Router};
-use chrono::{DateTime, Utc};
 use df_core::{RequestId, TaskId};
 use df_db::Notification;
 use df_db::network_access::{NETWORK_ACCESS, deny_always as deny_host_always};
@@ -29,6 +28,7 @@ use tokio::sync::broadcast;
 use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::components::forms::INPUT_CLASS;
+use crate::components::short_time;
 use crate::components::{ButtonKind, EmptyPanel, EmptySize, action_class, page_header, tone_badge};
 use crate::components::{Tone, chip};
 use crate::layout::{Nav, Shell, layout};
@@ -181,7 +181,7 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
             @if let Some(error) = error {
                 p role="alert" class="text-sm text-danger" { (error) }
             }
-            time class="block text-[11px] text-faint" datetime=(row.created_at.to_rfc3339()) { (clock(row.created_at)) }
+            time class="block text-[11px] text-faint" datetime=(row.created_at.to_string()) { (short_time(row.created_at)) }
         }
     }
 }
@@ -356,10 +356,6 @@ fn outcome(row: &RequestRow) -> String {
         RequestState::Closed => format!("Closed: {}", row.close_reason.as_deref().unwrap_or("-")),
         RequestState::Pending => String::new(),
     }
-}
-
-fn clock(at: DateTime<Utc>) -> String {
-    at.format("%b %d %H:%M").to_string()
 }
 
 #[derive(Debug, Default, Deserialize)]

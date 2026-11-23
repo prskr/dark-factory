@@ -4,11 +4,12 @@
 //! The state lists of the queries come from [`RunState`] constants and are bound as arrays, so a
 //! new state is added in one place.
 
-use chrono::{DateTime, Utc};
 use df_core::config::RunsConfig;
 use df_core::run_transition::{FinalizeReason, RunEnd, RunEvent, STOP_TIMEOUT_SECONDS};
 use df_core::task_transition::TaskEvent;
 use df_core::{Principal, RunId, RunOutcome, RunState, TaskId, TaskKind, TaskStatus};
+use jiff::Timestamp;
+use jiff_sqlx::ToSqlx;
 use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -57,22 +58,27 @@ pub struct RunRow {
     pub pod_ip: Option<String>,
     pub last_persisted_seq: u64,
     pub harness_session_id: String,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
     /// First `Hello` of the run's runtime; `None` until it connected.
-    pub connected_at: Option<DateTime<Utc>>,
+    pub connected_at: Option<Timestamp>,
     /// When a board member stopped the run (design D1); `None` for a run nobody stopped.
-    pub stop_requested_at: Option<DateTime<Utc>>,
+    pub stop_requested_at: Option<Timestamp>,
     /// Why the run is `finalizing`; `None` for a run that is not.
     pub finalize_reason: Option<FinalizeReason>,
 }
 
 impl RunRow {
     /// Start of the wall-clock budget: when the runtime connected, else when the run was created.
-    pub fn budget_start(&self) -> DateTime<Utc> {
+    pub fn budget_start(&self) -> Timestamp {
         self.connected_at.unwrap_or(self.started_at)
     }
 }
 
+/// A `runs` row as `query_as!` returns it. `timestamptz` columns arrive as `jiff_sqlx::Timestamp`
+/// (`sqlx.toml`); `query_as!` converts a NOT NULL field with `.into()`, so those are plain
+/// `jiff::Timestamp`. `Option<jiff::Timestamp>: From<Option<jiff_sqlx::Timestamp>>` does not exist,
+/// so nullable fields keep the wrapper and `TryFrom` unwraps them with `.map(Into::into)`; the
+/// other records of this crate follow the same split.
 struct RunRecord {
     id: Uuid,
     task_id: Uuid,
@@ -83,9 +89,9 @@ struct RunRecord {
     pod_ip: Option<String>,
     last_persisted_seq: i64,
     harness_session_id: String,
-    started_at: DateTime<Utc>,
-    connected_at: Option<DateTime<Utc>>,
-    stop_requested_at: Option<DateTime<Utc>>,
+    started_at: Timestamp,
+    connected_at: Option<jiff_sqlx::Timestamp>,
+    stop_requested_at: Option<jiff_sqlx::Timestamp>,
     finalize_reason: Option<String>,
 }
 
@@ -105,8 +111,8 @@ impl TryFrom<RunRecord> for RunRow {
                 .map_err(|_negative| DbError::InvalidData("negative last_persisted_seq".into()))?,
             harness_session_id: r.harness_session_id,
             started_at: r.started_at,
-            connected_at: r.connected_at,
-            stop_requested_at: r.stop_requested_at,
+            connected_at: r.connected_at.map(Into::into),
+            stop_requested_at: r.stop_requested_at.map(Into::into),
             finalize_reason: r.finalize_reason.map(|r| r.parse()).transpose()?,
         })
     }
@@ -183,7 +189,7 @@ pub async fn list_active_runs(executor: impl PgExecutor<'_>) -> Result<Vec<RunRo
 /// stopped: their provisioning was interrupted or is still waiting for the sandbox to start.
 pub async fn list_unprovisioned_runs(
     executor: impl PgExecutor<'_>,
-    before: DateTime<Utc>,
+    before: Timestamp,
 ) -> Result<Vec<RunRow>, DbError> {
     sqlx::query_as!(
         RunRecord,
@@ -195,7 +201,7 @@ pub async fn list_unprovisioned_runs(
         ORDER BY started_at
         "#,
         &state_list(NOT_STARTED),
-        before
+        before.to_sqlx()
     )
     .fetch_all(executor)
     .await?
@@ -217,7 +223,7 @@ pub async fn list_unprovisioned_runs(
 /// branch then matches nothing: no deadline, as in the caller.
 pub async fn list_overdue_runs(
     executor: impl PgExecutor<'_>,
-    now: DateTime<Utc>,
+    now: Timestamp,
     cfg: &RunsConfig,
 ) -> Result<Vec<RunRow>, DbError> {
     let hard_stop = cfg
@@ -244,7 +250,7 @@ pub async fn list_overdue_runs(
         &state_list(RunState::TERMINAL),
         &state_list(UNCONNECTED),
         interval_seconds(STOP_TIMEOUT_SECONDS),
-        now,
+        now.to_sqlx(),
         interval_seconds(cfg.connect_timeout_seconds),
         &state_list(CONNECTED),
         interval_seconds(hard_stop),
@@ -482,7 +488,7 @@ pub async fn lock_task(tx: &mut Transaction<'_, Postgres>, task_id: TaskId) -> R
 pub async fn has_undelivered_message(
     tx: &mut Transaction<'_, Postgres>,
     task_id: TaskId,
-    after: Option<DateTime<Utc>>,
+    after: Option<Timestamp>,
 ) -> Result<bool, DbError> {
     Ok(sqlx::query_scalar!(
         r#"
@@ -492,7 +498,7 @@ pub async fn has_undelivered_message(
               AND ($2::timestamptz IS NULL OR queued_at > $2)) AS "undelivered!"
         "#,
         task_id.as_uuid(),
-        after
+        after.map(ToSqlx::to_sqlx)
     )
     .fetch_one(&mut **tx)
     .await?)
@@ -531,7 +537,7 @@ pub async fn end_run_tx(
 pub async fn end_overdue(
     pool: &PgPool,
     run_id: RunId,
-    now: DateTime<Utc>,
+    now: Timestamp,
     limits: &RunsConfig,
     env: &RunEnv<'_>,
 ) -> Result<Option<EndedRun>, DbError> {

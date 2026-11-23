@@ -1,0 +1,3 @@
+[macros.type-overrides]
+# Key is the type's display name and is case-sensitive: 'timestamptz' would be ignored.
+'TIMESTAMPTZ' = "jiff_sqlx::Timestamp"

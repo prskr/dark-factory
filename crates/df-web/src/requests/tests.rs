@@ -731,8 +731,7 @@ async fn images_in_agent_text_are_not_rendered() {
 
 #[test]
 fn cards_merge_into_the_transcript_by_time() {
-    use chrono::{TimeZone, Utc};
-    let at = |m| Utc.with_ymd_and_hms(2026, 1, 1, 10, m, 0).unwrap();
+    let at = |m: u32| -> jiff::Timestamp { format!("2026-01-01T10:{m:02}:00Z").parse().unwrap() };
     let item = |id: &str, m| crate::transcript::Item::test_agent(id, at(m));
     let items = [item("a", 0), item("b", 10)];
     let cards = [
@@ -774,7 +773,7 @@ fn push_check_card(findings: serde_json::Value) -> super::CardData {
         decided_by: None,
         decided_at: None,
         close_reason: None,
-        created_at: chrono::Utc::now(),
+        created_at: jiff::Timestamp::now(),
     };
     super::CardData::new(
         &df_db::requests::ApprovalTypes::builtin(),

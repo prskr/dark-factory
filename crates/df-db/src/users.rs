@@ -39,7 +39,7 @@ mod tests {
         let first = upsert_user(&pool, "https://kc/realms/df", "sub-1", "Peter")
             .await
             .unwrap();
-        let (seen,): (chrono::DateTime<chrono::Utc>,) =
+        let (seen,): (jiff_sqlx::Timestamp,) =
             sqlx::query_as("SELECT last_seen FROM users WHERE id = $1")
                 .bind(first.as_uuid())
                 .fetch_one(&pool)
@@ -49,7 +49,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first, again);
-        let (name, seen_again): (String, chrono::DateTime<chrono::Utc>) =
+        let (name, seen_again): (String, jiff_sqlx::Timestamp) =
             sqlx::query_as("SELECT display_name, last_seen FROM users WHERE id = $1")
                 .bind(first.as_uuid())
                 .fetch_one(&pool)

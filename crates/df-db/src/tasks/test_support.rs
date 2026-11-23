@@ -1,8 +1,8 @@
 //! Test helpers shared by the task tests and the webhook tests.
 
-use chrono::{TimeDelta, Utc};
 use df_core::task_transition::TaskEvent;
 use df_core::{Principal, RunId, TaskId};
+use jiff::{SignedDuration, Timestamp};
 use sqlx::PgPool;
 
 use super::{list_undelivered_messages, plain_text};
@@ -17,8 +17,8 @@ pub(crate) fn completed_run_ended(run_id: RunId) -> TaskEvent {
         task_branch_pushed: false,
         stop_requested_at: None,
         max_auto_resumes: 3,
-        resume_backoff: TimeDelta::minutes(2),
-        now: Utc::now(),
+        resume_backoff: SignedDuration::from_mins(2),
+        now: Timestamp::now(),
     })
 }
 

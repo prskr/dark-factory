@@ -666,7 +666,7 @@ async fn a_message_clears_the_resume_time_and_count() {
         .await
         .unwrap();
 
-    let (status, resume_at, count): (String, Option<DateTime<Utc>>, i32) =
+    let (status, resume_at, count): (String, Option<jiff_sqlx::Timestamp>, i32) =
         sqlx::query_as("SELECT status, resume_at, auto_resumes FROM tasks WHERE id = $1")
             .bind(task.id.as_uuid())
             .fetch_one(&pool)
@@ -1315,7 +1315,7 @@ fn a_pr_sync_job_survives_a_serde_round_trip() {
         task_id: TaskId::new(),
         run_id: Some(RunId::new()),
         open: true,
-        ready: Some(Utc::now()),
+        ready: Some(Timestamp::now()),
     };
     let back: PrSyncJob = serde_json::from_value(serde_json::to_value(job).unwrap()).unwrap();
     assert_eq!(back, job);
@@ -1411,20 +1411,26 @@ async fn wait_for_lock_waiter(pool: &PgPool) {
     .expect("no session waited for a lock");
 }
 
-async fn last_message_queued_at(pool: &PgPool, task: TaskId) -> DateTime<Utc> {
-    sqlx::query_scalar("SELECT max(queued_at) FROM task_messages WHERE task_id = $1")
-        .bind(task.as_uuid())
-        .fetch_one(pool)
-        .await
-        .unwrap()
+async fn last_message_queued_at(pool: &PgPool, task: TaskId) -> Timestamp {
+    sqlx::query_scalar::<_, jiff_sqlx::Timestamp>(
+        "SELECT max(queued_at) FROM task_messages WHERE task_id = $1",
+    )
+    .bind(task.as_uuid())
+    .fetch_one(pool)
+    .await
+    .unwrap()
+    .into()
 }
 
-async fn stop_requested_at(pool: &PgPool, task: TaskId) -> DateTime<Utc> {
-    sqlx::query_scalar("SELECT stop_requested_at FROM runs WHERE task_id = $1")
-        .bind(task.as_uuid())
-        .fetch_one(pool)
-        .await
-        .unwrap()
+async fn stop_requested_at(pool: &PgPool, task: TaskId) -> Timestamp {
+    sqlx::query_scalar::<_, jiff_sqlx::Timestamp>(
+        "SELECT stop_requested_at FROM runs WHERE task_id = $1",
+    )
+    .bind(task.as_uuid())
+    .fetch_one(pool)
+    .await
+    .unwrap()
+    .into()
 }
 
 #[tokio::test]

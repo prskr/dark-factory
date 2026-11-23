@@ -1,7 +1,7 @@
 //! Tests of the lifecycle event storage, enqueue and envelope.
 
-use chrono::TimeZone;
 use df_core::ProjectId;
+use jiff::SignedDuration;
 use serde_json::json;
 use sqlx::PgPool;
 
@@ -341,7 +341,7 @@ async fn migration_backfills_the_volume_marker_of_tasks_with_an_existing_volume(
         .unwrap();
 
     for (task, backfilled) in [(&with_run, true), (&deleted, false), (&without_run, false)] {
-        let marker: Option<DateTime<Utc>> =
+        let marker: Option<jiff_sqlx::Timestamp> =
             sqlx::query_scalar("SELECT volume_provisioned_at FROM tasks WHERE id = $1")
                 .bind(task.task.as_uuid())
                 .fetch_one(&pool)
@@ -349,13 +349,14 @@ async fn migration_backfills_the_volume_marker_of_tasks_with_an_existing_volume(
                 .unwrap();
         assert_eq!(marker.is_some(), backfilled);
     }
-    let (provisioning, sandbox): (Option<DateTime<Utc>>, Option<DateTime<Utc>>) = sqlx::query_as(
-        "SELECT provisioning_started_at, sandbox_started_at FROM runs WHERE id = $1",
-    )
-    .bind(with_run.run.as_uuid())
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (provisioning, sandbox): (Option<jiff_sqlx::Timestamp>, Option<jiff_sqlx::Timestamp>) =
+        sqlx::query_as(
+            "SELECT provisioning_started_at, sandbox_started_at FROM runs WHERE id = $1",
+        )
+        .bind(with_run.run.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!((provisioning, sandbox), (None, None));
 }
 
@@ -373,8 +374,16 @@ fn subject(run: bool) -> Subject {
 }
 
 #[test]
+fn the_event_timestamp_has_three_fractional_digits_and_a_z_suffix() {
+    let whole: Timestamp = "2026-11-23T08:00:00Z".parse().unwrap();
+    let at = whole + SignedDuration::from_nanos(123_456_789);
+    assert_eq!(rfc3339(&at), "2026-11-23T08:00:00.123Z");
+    assert_eq!(rfc3339(&whole), "2026-11-23T08:00:00.000Z");
+}
+
+#[test]
 fn envelope_of_each_event_type() {
-    let at = Utc.with_ymd_and_hms(2026, 11, 4, 10, 0, 0).unwrap();
+    let at: Timestamp = "2026-11-04T10:00:00Z".parse().unwrap();
     let run_id = RunId::from_uuid(Uuid::from_u128(4));
     let id = Uuid::from_u128(9);
     let common = json!({
@@ -457,7 +466,7 @@ fn envelope_of_each_event_type() {
 
 #[test]
 fn destroyed_envelope_carries_the_sandbox_start() {
-    let at = Utc.with_ymd_and_hms(2026, 11, 4, 10, 0, 0).unwrap();
+    let at: Timestamp = "2026-11-04T10:00:00Z".parse().unwrap();
     let event = Event::SandboxDestroyed {
         run_id: RunId::from_uuid(Uuid::from_u128(4)),
         outcome: RunOutcome::Completed,

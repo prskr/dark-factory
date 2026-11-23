@@ -6,6 +6,41 @@
 )]
 
 use super::{RunScenario, id_prompt, prompts_body};
+use crate::runner::retry_time;
+use jiff::{SignedDuration, Timestamp};
+
+#[test]
+fn a_retry_delay_beyond_a_signed_duration_falls_back_to_one_hour() {
+    let now = Timestamp::now();
+    assert_eq!(
+        retry_time(now, std::time::Duration::from_secs(u64::MAX)) - now,
+        SignedDuration::from_hours(1)
+    );
+}
+
+#[test]
+fn a_retry_delay_beyond_the_time_range_falls_back_to_one_hour() {
+    let now = Timestamp::now();
+    assert_eq!(
+        retry_time(now, std::time::Duration::from_secs(i64::MAX.unsigned_abs())) - now,
+        SignedDuration::from_hours(1)
+    );
+}
+
+#[test]
+fn a_retry_delay_at_the_end_of_time_does_not_panic() {
+    let at = retry_time(Timestamp::MAX, std::time::Duration::from_secs(u64::MAX));
+    assert_eq!(at, Timestamp::MAX);
+}
+
+#[test]
+fn a_retry_delay_is_added_to_now() {
+    let now = Timestamp::now();
+    assert_eq!(
+        retry_time(now, std::time::Duration::from_secs(90)) - now,
+        SignedDuration::from_secs(90)
+    );
+}
 
 #[test]
 fn test_determine_run_outcome_priority() {

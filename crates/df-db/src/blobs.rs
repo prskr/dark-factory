@@ -1,6 +1,6 @@
 //! Content-addressed PostgreSQL blob store (`blobs` table, keyed by SHA-256).
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -14,7 +14,7 @@ pub struct BlobRow {
     pub mime_type: String,
     pub size: i64,
     pub data: Vec<u8>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 /// Computes the lowercase hex-encoded SHA-256 digest of `data`.
@@ -75,7 +75,7 @@ impl PgBlobStore {
             mime_type: r.mime_type,
             size: r.size,
             data: r.data,
-            created_at: r.created_at,
+            created_at: r.created_at.into(),
         }))
     }
 }

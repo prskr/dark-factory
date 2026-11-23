@@ -15,11 +15,11 @@ ignore = [
     # only to load its bundled syntax and theme dumps, which this repository does not control.
     # Revisit when syntect moves to another serialization crate.
     { id = "RUSTSEC-2025-0141", reason = "bincode 1 unmaintained: syntect loads its bundled dumps with it" },
-    # `chrono` is unmaintained (no fixed release); not a vulnerability. Besides our own crates it is
-    # pulled in by sqlx, openidconnect, oauth2, rmcp, schemars and pbjson-types, so dropping it from
-    # our code alone does not clear the advisory. Revisit when those dependencies move to `jiff` or
-    # `time` (backlog row in product/iterations/roadmap.md).
-    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained: required by sqlx, openidconnect, oauth2 and others" },
+    # `chrono` is unmaintained (no fixed release); not a vulnerability. Our crates use `jiff`; only
+    # openidconnect, oauth2, rmcp, schemars and pbjson-types still pull `chrono` in (`bans` below
+    # keeps it from coming back as a direct dependency). Drop this entry once those dependencies
+    # move to `jiff` or `time` (backlog row in product/iterations/roadmap.md).
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained: required by openidconnect, oauth2, rmcp, schemars and pbjson-types" },
 ]
 
 [licenses]
@@ -54,6 +54,7 @@ wildcards = "allow"
 deny = [
     { name = "aws-lc-rs", reason = "Use the ring crypto provider instead for musl cross-compilation compatibility" },
     { name = "aws-lc-sys", reason = "Use the ring crypto provider instead for musl cross-compilation compatibility" },
+    { name = "chrono", wrappers = ["oauth2", "openidconnect", "pbjson-types", "rmcp", "schemars"], reason = "Unmaintained (RUSTSEC-2026-0543): use jiff; only these third-party crates still require it" },
 ]
 
 [sources]

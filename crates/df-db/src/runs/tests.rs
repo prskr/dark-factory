@@ -1,8 +1,8 @@
 //! Tests of the run rows: start query, run end mapping and resume plan (container-backed).
 
-use chrono::TimeDelta;
 use df_core::config::{RunsConfig, SchedulingConfig};
 use df_core::{CAPACITY_DETAIL, PersonaId, ProjectId};
+use jiff::SignedDuration;
 
 use super::*;
 use crate as df_db;
@@ -17,7 +17,7 @@ const MAX_AUTO_RESUMES: u32 = 3;
 /// The resume policy of the tests.
 struct Policy {
     max_auto_resumes: u32,
-    resume_backoff: TimeDelta,
+    resume_backoff: SignedDuration,
 }
 
 fn config() -> Policy {
@@ -128,7 +128,7 @@ async fn new_task(
 #[derive(Debug, sqlx::FromRow)]
 struct TaskResumeState {
     status: String,
-    resume_at: Option<DateTime<Utc>>,
+    resume_at: Option<jiff_sqlx::Timestamp>,
     auto_resumes: i32,
 }
 
@@ -277,8 +277,9 @@ fn end_with(run_id: RunId, outcome: RunOutcome) -> RunEnd {
     RunEnd::failure(run_id, outcome, "")
 }
 
-fn minutes_from_now(at: Option<DateTime<Utc>>) -> i64 {
-    (at.expect("a resume time") - Utc::now() + TimeDelta::seconds(30)).num_minutes()
+fn minutes_from_now(at: Option<jiff_sqlx::Timestamp>) -> i64 {
+    let at = at.expect("a resume time").to_jiff();
+    (at - Timestamp::now() + SignedDuration::from_secs(30)).as_mins()
 }
 
 #[tokio::test]
@@ -287,7 +288,7 @@ async fn rate_limit_sets_the_resume_time_to_the_reported_retry_time() {
     let env = Env::new(pool.clone()).await;
     deliver_all(&pool, env.task.id).await;
     let run_id = env.insert_run(env.task.id, 1, "finalizing").await;
-    let retry = Utc::now() + TimeDelta::minutes(150);
+    let retry = Timestamp::now() + SignedDuration::from_mins(150);
     let end = RunEnd {
         retry_after: Some(retry),
         ..end_with(run_id, RunOutcome::RateLimited)
@@ -296,8 +297,8 @@ async fn rate_limit_sets_the_resume_time_to_the_reported_retry_time() {
     let state = task_resume_state(&pool, env.task.id).await;
     assert_eq!(state.status, "rate_limited");
     assert_eq!(
-        state.resume_at.map(|t| t.timestamp_micros()),
-        Some(retry.timestamp_micros())
+        state.resume_at.map(|t| t.to_jiff().as_microsecond()),
+        Some(retry.as_microsecond())
     );
     assert_eq!(state.auto_resumes, 0);
 }
@@ -460,19 +461,20 @@ async fn a_lost_sandbox_resumes_after_the_configured_resume_backoff() {
     deliver_all(&pool, env.task.id).await;
     let run_id = env.insert_run(env.task.id, 1, "running").await;
     let mut config = config();
-    config.resume_backoff = TimeDelta::seconds(5);
+    config.resume_backoff = SignedDuration::from_secs(5);
 
-    let before = Utc::now();
+    let before = Timestamp::now();
     end_run(&pool, &end_with(run_id, RunOutcome::SandboxLost), &config)
         .await
         .unwrap();
-    let after = Utc::now();
+    let after = Timestamp::now();
 
     let state = task_resume_state(&pool, env.task.id).await;
     assert_eq!(state.status, "queued");
-    let resume_at = state.resume_at.expect("a resume time");
+    let resume_at = state.resume_at.expect("a resume time").to_jiff();
     assert!(
-        resume_at >= before + TimeDelta::seconds(5) && resume_at <= after + TimeDelta::seconds(6),
+        resume_at >= before + SignedDuration::from_secs(5)
+            && resume_at <= after + SignedDuration::from_secs(6),
         "resume at {resume_at}, ended between {before} and {after}"
     );
 }
@@ -1071,7 +1073,7 @@ async fn aged_run(
 }
 
 async fn overdue(pool: &PgPool, cfg: &RunsConfig) -> Vec<RunId> {
-    list_overdue_runs(pool, Utc::now(), cfg)
+    list_overdue_runs(pool, Timestamp::now(), cfg)
         .await
         .unwrap()
         .into_iter()

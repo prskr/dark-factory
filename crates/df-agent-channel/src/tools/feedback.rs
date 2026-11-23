@@ -1,7 +1,7 @@
 //! `read_pull_request_feedback` and `comment_on_pull_request` on the task's own pull request.
 
-use chrono::{DateTime, Duration, FixedOffset, SecondsFormat, Utc};
 use df_core::{Feedback, ReviewThread};
+use jiff::{SignedDuration, Timestamp};
 use serde_json::Value;
 
 use super::{Outcome, forge_error, text_arg};
@@ -17,7 +17,7 @@ const FEEDBACK_BUDGET_BYTES: usize = 48 * 1024;
 /// `next_since` lies this far before the newest activity returned. The plugin lists comments,
 /// reviews and review comments in separate requests, so an item can appear between two of them. A
 /// call is bounded by `plugins.<name>.callTimeoutSeconds`, which is at most 300 s.
-const CURSOR_OVERLAP: Duration = Duration::minutes(5);
+const CURSOR_OVERLAP: SignedDuration = SignedDuration::from_mins(5);
 
 const NO_PULL_REQUEST: &str =
     "no pull request opened yet; it is opened after your first commits are pushed";
@@ -31,7 +31,7 @@ pub(super) async fn read_feedback(
     let since = text_arg(args, "since");
     if since
         .as_deref()
-        .is_some_and(|s| DateTime::parse_from_rfc3339(s).is_err())
+        .is_some_and(|s| s.parse::<Timestamp>().is_err())
     {
         return Ok(Outcome::error(
             "since must be an RFC 3339 timestamp such as 2026-11-03T08:00:00Z",
@@ -111,7 +111,7 @@ struct Item {
     kind: Kind,
     /// Position in the plugin's result; items with the same activity keep it.
     position: usize,
-    activity: Option<DateTime<FixedOffset>>,
+    activity: Option<Timestamp>,
     value: Value,
     /// Encoded length plus the separating comma.
     size: usize,
@@ -207,26 +207,24 @@ fn assemble(kept: &[Item], truncated: bool, cursor: Option<String>) -> Value {
 
 /// The cursor for the next read, in UTC: `newest` minus [`CURSOR_OVERLAP`], but never before
 /// `since`. Without a newest activity it is `since`, or `None`.
-fn next_since(newest: Option<DateTime<FixedOffset>>, since: Option<&str>) -> Option<String> {
-    let cursor = newest.map(|n| n.with_timezone(&Utc) - CURSOR_OVERLAP);
-    let since_utc = since
-        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-        .map(|s| s.with_timezone(&Utc));
-    // `AutoSi` keeps fractional seconds, so the cursor is never rounded below `since`.
-    cursor
-        .max(since_utc)
-        .map(|c| c.to_rfc3339_opts(SecondsFormat::AutoSi, true))
+fn next_since(newest: Option<Timestamp>, since: Option<&str>) -> Option<String> {
+    // Near `Timestamp::MIN` there is no room for the overlap: the cursor is `n` itself.
+    let cursor = newest.map(|n| n.checked_sub(CURSOR_OVERLAP).unwrap_or(n));
+    let since = since.and_then(|s| s.parse::<Timestamp>().ok());
+    // `Timestamp` prints every fractional digit it has, so the cursor is never rounded below
+    // `since`.
+    cursor.max(since).map(|c| c.to_string())
 }
 
 /// Latest of RFC 3339 `timestamps` as an instant; unparsable ones are ignored.
-fn latest<'a>(timestamps: impl IntoIterator<Item = &'a String>) -> Option<DateTime<FixedOffset>> {
+fn latest<'a>(timestamps: impl IntoIterator<Item = &'a String>) -> Option<Timestamp> {
     timestamps
         .into_iter()
-        .filter_map(|t| DateTime::parse_from_rfc3339(t).ok())
+        .filter_map(|t| t.parse::<Timestamp>().ok())
         .max()
 }
 
-fn thread_activity(thread: &ReviewThread) -> Option<DateTime<FixedOffset>> {
+fn thread_activity(thread: &ReviewThread) -> Option<Timestamp> {
     latest(
         thread
             .comments

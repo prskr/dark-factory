@@ -7,7 +7,8 @@
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use chrono::{Datelike, Utc};
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use serde::Deserialize;
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
@@ -66,8 +67,11 @@ fn release_tags(json: &str) -> Result<Vec<String>> {
 }
 
 fn utc_year_month() -> (u32, u32) {
-    let now = Utc::now();
-    (now.year().unsigned_abs(), now.month())
+    let now = Timestamp::now().to_zoned_datetime(TimeZone::UTC);
+    (
+        now.year().unsigned_abs().into(),
+        now.month().unsigned_abs().into(),
+    )
 }
 
 fn output(cmd: &mut Command, what: &str) -> Result<String> {

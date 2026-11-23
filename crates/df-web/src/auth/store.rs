@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use sqlx::{PgPool, Postgres, Transaction};
 use tower_sessions::cookie::time::OffsetDateTime;
 use tower_sessions::session::{Id, Record};
@@ -57,8 +57,8 @@ impl PgSessionStore {
 
     async fn insert(&self, record: &Record, overwrite: bool) -> Result<u64> {
         let data = serde_json::to_value(&record.data).map_err(|e| Error::Encode(e.to_string()))?;
-        let expires_at = DateTime::<Utc>::from_timestamp(record.expiry_date.unix_timestamp(), 0)
-            .ok_or_else(|| Error::Encode("expiry out of range".into()))?;
+        let expires_at = Timestamp::from_second(record.expiry_date.unix_timestamp())
+            .map_err(|e| Error::Encode(format!("expiry out of range: {e}")))?;
         let sql = if overwrite {
             "INSERT INTO web_sessions (id, data, expires_at) VALUES ($1, $2, $3)
              ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, expires_at = EXCLUDED.expires_at"
@@ -69,7 +69,7 @@ impl PgSessionStore {
         let result = sqlx::query(sql)
             .bind(record.id.to_string())
             .bind(data)
-            .bind(expires_at)
+            .bind(jiff_sqlx::Timestamp::from(expires_at))
             .execute(&self.pool)
             .await
             .map_err(backend)?;
@@ -120,7 +120,7 @@ impl SessionStore for PgSessionStore {
     }
 
     async fn load(&self, session_id: &Id) -> Result<Option<Record>> {
-        let row: Option<(serde_json::Value, DateTime<Utc>)> = sqlx::query_as(
+        let row: Option<(serde_json::Value, jiff_sqlx::Timestamp)> = sqlx::query_as(
             "SELECT data, expires_at FROM web_sessions WHERE id = $1 AND expires_at > now()",
         )
         .bind(session_id.to_string())
@@ -130,7 +130,7 @@ impl SessionStore for PgSessionStore {
         row.map(|(data, expires_at)| {
             let data: HashMap<String, serde_json::Value> =
                 serde_json::from_value(data).map_err(|e| Error::Decode(e.to_string()))?;
-            let expiry_date = OffsetDateTime::from_unix_timestamp(expires_at.timestamp())
+            let expiry_date = OffsetDateTime::from_unix_timestamp(expires_at.to_jiff().as_second())
                 .map_err(|e| Error::Decode(e.to_string()))?;
             Ok(Record {
                 id: *session_id,

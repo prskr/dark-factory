@@ -3,7 +3,6 @@
 
 use std::sync::LazyLock;
 
-use chrono::{DateTime, Utc};
 use df_core::harness::{self, ConfigInput, HarnessProfile, INFERENCE_PATH, PLACEHOLDER_KEY};
 use df_core::model_provider::ProviderModel;
 use df_core::{Principal, RewritePolicy, TaskId};
@@ -18,7 +17,8 @@ use df_proto::agent::v1::{
     RewritePolicy as RewritePolicyProto, TaskRef, ToolAnnotations, ToolDescriptor, Workspace,
     harness as harness_kind,
 };
-use df_proto::pbjson_types::{Duration, Timestamp};
+use df_proto::pbjson_types::Duration;
+use df_proto::time::to_proto;
 use df_proto::transcript::v1 as transcript;
 use df_sandbox_contract::LandlockMode;
 use df_sandbox_contract::paths::{INSTANCE_CA_PATH, SANDBOX_HOME_DIR, SANDBOX_REPO_DIR};
@@ -402,14 +402,7 @@ fn prompt_from_row(row: TaskMessageRow) -> Prompt {
         author: Some(principal(&row.author)),
         author_name: row.author.display_name().to_string(),
         content: row.content,
-        queued_at: Some(timestamp(row.queued_at)),
-    }
-}
-
-fn timestamp(at: DateTime<Utc>) -> Timestamp {
-    Timestamp {
-        seconds: at.timestamp(),
-        nanos: i32::try_from(at.timestamp_subsec_nanos()).unwrap_or(0),
+        queued_at: Some(to_proto(row.queued_at)),
     }
 }
 

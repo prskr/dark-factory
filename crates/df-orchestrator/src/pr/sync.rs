@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use df_core::{
     ForgeClient, IntegrationError, NewPullRequest, PullRequest, RunId, TaskId, TaskStatus,
 };
@@ -21,6 +20,7 @@ use df_db::{DbError, TaskRow};
 use df_proto::transcript::v1::{
     ForgeActivity, PullRequestOpened, PullRequestReady, forge_activity,
 };
+use jiff::Timestamp;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
@@ -178,7 +178,7 @@ impl PrSyncHandler {
         &self,
         task: &TaskRow,
         pr: &RecordedPr,
-        ready_at: DateTime<Utc>,
+        ready_at: Timestamp,
         run_id: Option<RunId>,
     ) -> Result<(), OrchestratorError> {
         let mut tx = lock_task_pr(&self.pool, task.id).await?;

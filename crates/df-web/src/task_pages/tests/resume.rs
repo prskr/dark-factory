@@ -8,11 +8,13 @@ async fn waiting_task(app: &TestApp, status: &str, count: i32) {
     let seed = seed(&app.pool).await;
     let task = new_task(&app.pool, &seed, "t").await;
     // Built from the date the page compares against, so "04:30" holds across UTC midnight.
-    let resume_at = chrono::Utc::now()
-        .date_naive()
-        .and_hms_opt(4, 30, 0)
+    let resume_at = jiff::Timestamp::now()
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+        .date()
+        .at(4, 30, 0, 0)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .unwrap()
-        .and_utc();
+        .timestamp();
     sqlx::query(
         "UPDATE tasks SET status = $2, resume_at = $4,
              auto_resumes = $3,
@@ -21,7 +23,7 @@ async fn waiting_task(app: &TestApp, status: &str, count: i32) {
     .bind(task.id.as_uuid())
     .bind(status)
     .bind(count)
-    .bind(resume_at)
+    .bind(jiff_sqlx::Timestamp::from(resume_at))
     .execute(&app.pool)
     .await
     .unwrap();
@@ -44,11 +46,12 @@ async fn end_last_run(app: &TestApp, outcome: &str, detail: &str) {
 
 /// The stored resume time as the page writes it in the `datetime` attribute.
 async fn stored_resume_time(app: &TestApp) -> String {
-    sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>("SELECT resume_at FROM tasks")
+    sqlx::query_scalar::<_, jiff_sqlx::Timestamp>("SELECT resume_at FROM tasks")
         .fetch_one(&app.pool)
         .await
         .unwrap()
-        .to_rfc3339()
+        .to_jiff()
+        .to_string()
 }
 
 fn now_section(html: &str) -> &str {

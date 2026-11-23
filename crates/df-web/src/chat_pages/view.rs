@@ -2,7 +2,6 @@
 //! chat dialog (`specs/chat-ui/spec.md`). The live-update regions (`#chat-head`, `#chat-overview`,
 //! `#chat-rows`, and the shared `#runs`, `#pending`, ...) are re-rendered by `crate::sse`.
 
-use chrono::{DateTime, Utc};
 use df_core::{TITLE_MAX_CHARS, TaskStatus, TitleSource};
 use df_db::catalog::PersonaRecord;
 use df_db::chat_views::{ChatListItem, ChatProject};
@@ -11,6 +10,7 @@ use maud::{Markup, html};
 
 use crate::artifacts::{ArtifactCard, chat_details_heading};
 use crate::components::forms::{INPUT_CLASS, MenuItem};
+use crate::components::short_time;
 use crate::components::{
     ButtonKind, DialogStyle, EmptyPanel, EmptySize, FormErrors, ICON_BUTTON_CLASS, Icon,
     ROUND_ACTION_CLASS, Tone, action_class, avatar, definition_list, details_panel_with_heading,
@@ -35,10 +35,6 @@ pub(super) fn archive_blocker(detail: &TaskDetail) -> Option<String> {
 
 fn url_encode(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
-}
-
-fn short_time(time: DateTime<Utc>) -> String {
-    time.format("%b %d %H:%M").to_string()
 }
 
 /// The dot of a chat that needs a board member: an open approval request.
@@ -72,7 +68,7 @@ pub(crate) fn chat_rows(
                                 span class="min-w-0 truncate text-sm font-medium" { (chat.persona_name) }
                                 @if chat.needs_you { (needs_you_dot()) }
                                 @else if chat.status != TaskStatus::Waiting { (status_badge(chat.status)) }
-                                time datetime=(chat.last_activity_at.to_rfc3339()) class="ml-auto shrink-0 font-mono text-xs text-faint" { (short_time(chat.last_activity_at)) }
+                                time datetime=(chat.last_activity_at.to_string()) class="ml-auto shrink-0 font-mono text-xs text-faint" { (short_time(chat.last_activity_at)) }
                             }
                             div title=(chat.title) class={"mt-1 truncate text-[15px] font-medium" @if chat.title_source == TitleSource::Placeholder { " italic text-muted" }} { (chat.title) }
                             @if chat.title_source == TitleSource::Placeholder {

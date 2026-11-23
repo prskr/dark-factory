@@ -131,13 +131,11 @@ async fn first_login_creates_the_user_record() {
         (issuer, subject, name),
         (app.idp.server.uri(), "sub-1".into(), "Peter Test".into())
     );
-    let (first_seen, last_seen): (
-        Option<chrono::DateTime<chrono::Utc>>,
-        Option<chrono::DateTime<chrono::Utc>>,
-    ) = sqlx::query_as("SELECT first_seen, last_seen FROM users")
-        .fetch_one(&app.pool)
-        .await
-        .unwrap();
+    let (first_seen, last_seen): (Option<jiff_sqlx::Timestamp>, Option<jiff_sqlx::Timestamp>) =
+        sqlx::query_as("SELECT first_seen, last_seen FROM users")
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
     assert!(first_seen.is_some() && last_seen.is_some());
 }
 

@@ -54,6 +54,7 @@ pub mod gateway {
 }
 
 pub mod push_reasons;
+pub mod time;
 
 #[cfg(test)]
 mod tests {

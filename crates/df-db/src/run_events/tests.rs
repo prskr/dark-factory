@@ -5,6 +5,7 @@ use std::time::Duration;
 use df_core::run_transition::RunEnd;
 use df_core::task_transition::{DoneBy, StopScope};
 use df_core::{InstanceSubscription, LifecycleEventsConfig};
+use jiff::SignedDuration;
 use sqlx::PgPool;
 
 use super::*;
@@ -157,7 +158,7 @@ async fn a_finalize_stores_its_reason_and_an_end_stores_the_outcome() {
     let mut end = RunEnd::failure(run_id, RunOutcome::Cancelled, "task marked done");
     end.task_branch_sha = "abc".into();
     let sinks = EventSinks::default();
-    let env = RunEnv::new(&sinks, 3, TimeDelta::minutes(2));
+    let env = RunEnv::new(&sinks, 3, SignedDuration::from_mins(2));
     let applied = apply(&pool, run_id, RunEvent::Ended(end), &env)
         .await
         .unwrap();
@@ -273,7 +274,7 @@ async fn the_sandbox_lifecycle_events_follow_the_run() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
     let (_, run_id) = run_in(&pool, TaskStatus::Running, "pending").await;
     let sinks = instance_sinks();
-    let env = RunEnv::new(&sinks, 3, TimeDelta::minutes(2));
+    let env = RunEnv::new(&sinks, 3, SignedDuration::from_mins(2));
 
     apply(&pool, run_id, RunEvent::ProvisioningStarted, &env).await;
     let started = RunEvent::SandboxStarted {
@@ -297,7 +298,7 @@ async fn a_run_whose_provisioning_failed_closes_with_provisioning_failed() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
     let (_, run_id) = run_in(&pool, TaskStatus::Running, "pending").await;
     let sinks = instance_sinks();
-    let env = RunEnv::new(&sinks, 3, TimeDelta::minutes(2));
+    let env = RunEnv::new(&sinks, 3, SignedDuration::from_mins(2));
 
     apply(&pool, run_id, RunEvent::ProvisioningStarted, &env).await;
     let failed = failure(run_id, RunOutcome::ProvisioningFailed);
@@ -314,7 +315,7 @@ async fn a_run_that_never_began_provisioning_enqueues_no_closing_event() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
     let (_, run_id) = run_in(&pool, TaskStatus::Running, "pending").await;
     let sinks = instance_sinks();
-    let env = RunEnv::new(&sinks, 3, TimeDelta::minutes(2));
+    let env = RunEnv::new(&sinks, 3, SignedDuration::from_mins(2));
 
     apply(&pool, run_id, failure(run_id, RunOutcome::Cancelled), &env).await;
 

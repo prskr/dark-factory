@@ -1,9 +1,10 @@
 //! Lifecycle events (`lifecycle-events` design D1): the recorded envelope and one outbox job per
 //! receiver that subscribed to the event.
 
-use chrono::{DateTime, SecondsFormat, Utc};
 use df_core::lifecycle::matches_filter;
 use df_core::{EventType, InstanceSubscription, LifecycleEventsConfig, RunId, RunOutcome, TaskId};
+use jiff::Timestamp;
+use jiff_sqlx::ToSqlx;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sqlx::{PgConnection, PgPool};
@@ -75,8 +76,8 @@ pub enum Event {
     SandboxDestroyed {
         run_id: RunId,
         outcome: RunOutcome,
-        started_at: Option<DateTime<Utc>>,
-        ended_at: DateTime<Utc>,
+        started_at: Option<Timestamp>,
+        ended_at: Timestamp,
     },
 }
 
@@ -152,7 +153,7 @@ pub enum Target {
 pub struct Delivery {
     /// The envelope, sent as the body.
     pub payload: Value,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub url: String,
 }
 
@@ -221,7 +222,7 @@ pub async fn enqueue(
         "#,
         event_id,
         event_type.as_str(),
-        occurred_at,
+        occurred_at.to_sqlx(),
         subject.project_id,
         payload,
     )
@@ -235,7 +236,7 @@ pub async fn enqueue(
 }
 
 /// The event as sent: `evt_<uuidv7>` ID, type, time and `data` (spec "Event envelope").
-pub fn envelope(id: Uuid, occurred_at: DateTime<Utc>, subject: &Subject, event: &Event) -> Value {
+pub fn envelope(id: Uuid, occurred_at: Timestamp, subject: &Subject, event: &Event) -> Value {
     let mut data = Map::new();
     data.insert(
         "project".into(),
@@ -296,7 +297,7 @@ pub async fn load_delivery(pool: &PgPool, job: &DeliverJob) -> Result<Option<Del
     };
     Ok(Some(Delivery {
         payload: event.payload,
-        occurred_at: event.occurred_at,
+        occurred_at: event.occurred_at.into(),
         url,
     }))
 }
@@ -346,7 +347,7 @@ pub async fn delete_unreferenced(pool: &PgPool) -> Result<u64, DbError> {
 async fn load_subject(
     conn: &mut PgConnection,
     event: &Event,
-) -> Result<(Subject, DateTime<Utc>), DbError> {
+) -> Result<(Subject, Timestamp), DbError> {
     let run_id = event.run_id().map(|id| id.as_uuid());
     let row = sqlx::query!(
         r#"
@@ -386,11 +387,11 @@ async fn load_subject(
         persona_name: row.persona_name,
         run,
     };
-    Ok((subject, row.occurred_at))
+    Ok((subject, row.occurred_at.into()))
 }
 
-fn rfc3339(time: &DateTime<Utc>) -> String {
-    time.to_rfc3339_opts(SecondsFormat::Millis, true)
+fn rfc3339(time: &Timestamp) -> String {
+    format!("{time:.3}")
 }
 
 #[cfg(test)]

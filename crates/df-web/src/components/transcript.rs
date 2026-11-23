@@ -2,7 +2,7 @@
 //! these functions only render. Every item's outer element carries `id`, the stable target of
 //! live updates.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use maud::{Markup, html};
 
 use super::actions::ICON_BUTTON_CLASS;
@@ -11,8 +11,8 @@ use super::shell::{avatar, initials};
 use crate::markdown;
 
 /// Time shown under a bubble.
-fn clock(at: DateTime<Utc>) -> String {
-    at.format("%H:%M").to_string()
+fn clock(at: Timestamp) -> String {
+    at.strftime("%H:%M").to_string()
 }
 
 /// A message of a board member: a bubble on the right with name and time below it. The avatar is
@@ -23,7 +23,7 @@ pub fn user_message(
     id: &str,
     prompt_id: &str,
     author: &str,
-    at: DateTime<Utc>,
+    at: Timestamp,
     parts: &[(String, bool)],
 ) -> Markup {
     let visible = parts
@@ -58,7 +58,7 @@ pub fn user_message(
 pub fn agent_message(
     id: &str,
     author: &str,
-    at: DateTime<Utc>,
+    at: Timestamp,
     body: Markup,
     markdown: bool,
 ) -> Markup {
@@ -79,11 +79,11 @@ pub fn agent_message(
     }
 }
 
-fn meta(author: &str, at: DateTime<Utc>, class: &str) -> Markup {
+fn meta(author: &str, at: Timestamp, class: &str) -> Markup {
     html! {
         div class={"mt-1 text-xs text-faint" @if !class.is_empty() { " " (class) }} {
             @if !author.is_empty() { (author) " · " }
-            time datetime=(at.to_rfc3339()) { (clock(at)) }
+            time datetime=(at.to_string()) { (clock(at)) }
         }
     }
 }
@@ -118,11 +118,11 @@ pub fn thought(id: &str, text: &str, complete: bool) -> Markup {
 }
 
 /// The start of a run, as a divider with the run's start time.
-pub fn run_divider(id: &str, number: i64, started_at: DateTime<Utc>) -> Markup {
+pub fn run_divider(id: &str, number: i64, started_at: Timestamp) -> Markup {
     html! {
         div id=(id) role="separator" class="flex items-center gap-3 py-2 text-xs text-faint" {
             span class="h-px flex-1 bg-line" {}
-            span { "Run #" (number) " started · " time datetime=(started_at.to_rfc3339()) { (started_at.format("%b %d %H:%M")) } }
+            span { "Run #" (number) " started · " time datetime=(started_at.to_string()) { (started_at.strftime("%b %d %H:%M").to_string()) } }
             span class="h-px flex-1 bg-line" {}
         }
     }
@@ -147,7 +147,7 @@ pub fn queued_message(
     id: &str,
     author_prefix: Option<&str>,
     parts: &[(String, bool)],
-    queued_at: DateTime<Utc>,
+    queued_at: Timestamp,
     state: QueuedState,
 ) -> Markup {
     let editable = state == QueuedState::Editable;
@@ -178,7 +178,7 @@ pub fn queued_message(
                 }
             }
             div class="shrink-0 text-xs text-faint" {
-                time datetime=(queued_at.to_rfc3339()) { (clock(queued_at)) }
+                time datetime=(queued_at.to_string()) { (clock(queued_at)) }
                 @match state {
                     QueuedState::Editable => {}
                     QueuedState::WaitingForDelivery => { " · waiting for delivery" }
@@ -455,12 +455,20 @@ pub fn unreadable(id: &str) -> Markup {
 mod tests {
     use super::*;
 
-    use chrono::TimeZone;
-
     use crate::testkit::tag_around;
 
-    fn at() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 10, 23, 10, 42, 0).unwrap()
+    fn at() -> Timestamp {
+        "2026-10-23T10:42:00Z".parse().unwrap()
+    }
+
+    #[test]
+    fn times_show_utc_clock_text_and_an_rfc3339_datetime_attribute() {
+        let divider = run_divider("r1", 3, at()).into_string();
+        assert!(
+            divider.contains("<time datetime=\"2026-10-23T10:42:00Z\">Oct 23 10:42</time>"),
+            "{divider}"
+        );
+        assert_eq!(clock(at()), "10:42");
     }
 
     #[test]

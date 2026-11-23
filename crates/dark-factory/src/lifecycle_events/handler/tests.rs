@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use df_db::Notifier;
 use df_db::outbox::{Dispatcher, enqueue};
 use df_telemetry::testing::Probe;
+use jiff_sqlx::ToSqlx;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -154,11 +155,11 @@ impl Env {
     /// Records an event that happened `age` ago and one delivery job per target.
     async fn event(&self, age: Duration, targets: &[Target]) -> Uuid {
         let id = Uuid::now_v7();
-        let occurred_at = Utc::now() - age;
+        let occurred_at = Timestamp::now() - age;
         let payload = json!({
             "id": format!("evt_{id}"),
             "type": "sandbox.provisioned",
-            "timestamp": occurred_at.to_rfc3339(),
+            "timestamp": occurred_at.to_string(),
             "data": {},
         });
         let mut tx = self.pool.begin().await.unwrap();
@@ -167,7 +168,7 @@ impl Env {
              VALUES ($1, 'sandbox.provisioned', $2, $3, $4)",
         )
         .bind(id)
-        .bind(occurred_at)
+        .bind(occurred_at.to_sqlx())
         .bind(self.project)
         .bind(&payload)
         .execute(&mut *tx)
@@ -183,7 +184,7 @@ impl Env {
                 .unwrap();
         }
         sqlx::query("UPDATE outbox SET created_at = $1 WHERE payload->>'event_id' = $2")
-            .bind(occurred_at)
+            .bind(occurred_at.to_sqlx())
             .bind(id.to_string())
             .execute(&mut *tx)
             .await
@@ -312,7 +313,7 @@ async fn a_receiver_down_twice_gets_the_event_on_the_third_attempt() {
     assert!(env.job(&subscription(sub)).await.1, "delivered");
     let sent = env.receivers.sent_to(UP);
     assert_eq!(sent.len(), 3);
-    let now = Utc::now().timestamp();
+    let now = Timestamp::now().as_second();
     for (headers, body, _) in &sent {
         assert_eq!(
             header(headers, "webhook-id"),

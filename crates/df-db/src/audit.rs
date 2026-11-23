@@ -5,8 +5,8 @@
 //! struct containing a `SecretString` is rejected at compile time when passed to
 //! [`AuditEntry::with_details`].
 
-use chrono::{DateTime, Utc};
 use df_core::{CredentialRef, Principal};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgExecutor;
@@ -75,7 +75,7 @@ impl NewAuditEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditLogRow {
     pub id: i64,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub actor: Principal,
     pub roles: Vec<String>,
     pub action: String,
@@ -112,7 +112,7 @@ where
     let actor: Principal = serde_json::from_value(row.actor)?;
     Ok(AuditLogRow {
         id: row.id,
-        occurred_at: row.occurred_at,
+        occurred_at: row.occurred_at.into(),
         actor,
         roles: row.roles,
         action: row.action,

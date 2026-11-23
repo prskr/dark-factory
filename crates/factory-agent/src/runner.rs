@@ -21,8 +21,10 @@ use df_proto::agent::v1::{
     RunOutcome, RunPhase, RunReport, RuntimeOperation, RuntimeTiming, Workspace, agent_message,
     control_message,
 };
+use df_proto::time::to_proto;
 use df_proto::transcript::v1::{Notice, NoticeLevel, StopReason};
 use df_sandbox_contract::LandlockMode;
+use jiff::SignedDuration;
 use tokio::sync::{Mutex, Notify, broadcast, mpsc};
 
 use crate::git::Git;
@@ -1480,12 +1482,18 @@ fn final_run_report(mut run_report: RunReport, loop_outcome: &TurnLoopOutcome) -
         .harness_session_id
         .clone_from(&loop_outcome.session_id);
     if let Some(retry_dur) = loop_outcome.end.retry_after {
-        let retry_timestamp = chrono::Utc::now()
-            + chrono::Duration::from_std(retry_dur).unwrap_or(chrono::Duration::hours(1));
-        run_report.retry_after = Some(df_proto::pbjson_types::Timestamp {
-            seconds: retry_timestamp.timestamp(),
-            nanos: 0,
-        });
+        run_report.retry_after = Some(to_proto(retry_time(jiff::Timestamp::now(), retry_dur)));
     }
     run_report
+}
+
+/// `now` plus the harness's `retry_after`; one hour when the delay does not fit the time range.
+pub(crate) fn retry_time(now: jiff::Timestamp, retry_after: Duration) -> jiff::Timestamp {
+    SignedDuration::try_from(retry_after)
+        .ok()
+        .and_then(|delay| now.checked_add(delay).ok())
+        .unwrap_or_else(|| {
+            now.checked_add(SignedDuration::from_hours(1))
+                .unwrap_or(now)
+        })
 }

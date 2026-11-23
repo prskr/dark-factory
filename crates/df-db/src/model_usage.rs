@@ -1,8 +1,9 @@
 //! Token usage per model request, as reported by the gateways (iter3-inference-gateway design D4,
 //! D5). One row per request; the request id makes a retried report idempotent.
 
-use chrono::{DateTime, Utc};
 use df_core::model_provider::WireApi;
+use jiff::Timestamp;
+use jiff_sqlx::ToSqlx;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -14,7 +15,7 @@ pub struct UsageRecord {
     /// Chosen by the gateway (`UUIDv7`).
     pub request_id: Uuid,
     pub run_id: Uuid,
-    pub recorded_at: DateTime<Utc>,
+    pub recorded_at: Timestamp,
     /// The model named in the response; `None` if unknown.
     pub model: Option<String>,
     pub wire_api: WireApi,
@@ -51,7 +52,7 @@ pub async fn insert_usage(pool: &PgPool, record: &UsageRecord) -> Result<Inserte
     )
     .bind(record.request_id)
     .bind(record.run_id)
-    .bind(record.recorded_at)
+    .bind(record.recorded_at.to_sqlx())
     .bind(&record.model)
     .bind(record.wire_api.as_str())
     .bind(record.upstream_status)

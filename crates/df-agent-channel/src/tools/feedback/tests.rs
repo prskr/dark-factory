@@ -547,6 +547,14 @@ fn next_since_is_the_newest_activity_minus_five_minutes_in_utc() {
 }
 
 #[test]
+fn next_since_of_the_earliest_representable_activity_is_that_time() {
+    assert_eq!(
+        next_since(Some(Timestamp::MIN), None),
+        Some(Timestamp::MIN.to_string())
+    );
+}
+
+#[test]
 fn next_since_never_moves_before_the_given_since() {
     let feedback = Feedback {
         comments: vec![pr_comment("c", AuthorRole::Member, "2026-11-03T09:02:00Z")],
@@ -572,7 +580,7 @@ fn next_since_keeps_the_fractional_seconds_of_the_given_since() {
     )
     .unwrap();
 
-    assert_eq!(result["next_since"], "2026-11-05T10:15:00.900Z");
+    assert_eq!(result["next_since"], "2026-11-05T10:15:00.9Z");
 }
 
 #[test]
@@ -592,7 +600,7 @@ fn an_empty_result_returns_the_given_since_or_null() {
 #[test]
 fn cursor_overlap_covers_the_longest_plugin_call() {
     let max_call = i64::try_from(df_core::MAX_PLUGIN_CALL_TIMEOUT_SECONDS).unwrap();
-    assert!(CURSOR_OVERLAP.num_seconds() >= max_call);
+    assert!(CURSOR_OVERLAP.as_secs() >= max_call);
 }
 
 #[tokio::test]

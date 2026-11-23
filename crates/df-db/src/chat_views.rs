@@ -1,8 +1,8 @@
 //! Read models of the chat pages (`specs/chat-ui/spec.md`): the projects with their chats, the
 //! chat list with its order, and the archive with its search.
 
-use chrono::{DateTime, Utc};
 use df_core::{TaskStatus, TitleSource};
+use jiff::Timestamp;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -32,13 +32,13 @@ pub struct ChatListItem {
     pub persona_id: Uuid,
     pub persona_name: String,
     /// The latest transcript event or message, or the creation.
-    pub last_activity_at: DateTime<Utc>,
+    pub last_activity_at: Timestamp,
     /// The latest message of the board member or the agent, as plain text.
     pub last_message: String,
     /// The chat has an open approval request.
     pub needs_you: bool,
     pub artifacts: i64,
-    pub archived_at: Option<DateTime<Utc>>,
+    pub archived_at: Option<Timestamp>,
 }
 
 struct ChatRecord {
@@ -48,11 +48,11 @@ struct ChatRecord {
     status: String,
     persona_id: Uuid,
     persona_name: String,
-    last_activity_at: DateTime<Utc>,
+    last_activity_at: Timestamp,
     last_message: String,
     needs_you: bool,
     artifacts: i64,
-    archived_at: Option<DateTime<Utc>>,
+    archived_at: Option<jiff_sqlx::Timestamp>,
 }
 
 impl TryFrom<ChatRecord> for ChatListItem {
@@ -70,7 +70,7 @@ impl TryFrom<ChatRecord> for ChatListItem {
             last_message: row.last_message,
             needs_you: row.needs_you,
             artifacts: row.artifacts,
-            archived_at: row.archived_at,
+            archived_at: row.archived_at.map(Into::into),
         })
     }
 }

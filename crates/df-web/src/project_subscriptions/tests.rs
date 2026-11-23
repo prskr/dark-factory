@@ -266,6 +266,24 @@ async fn the_settings_show_the_last_delivery_and_the_public_key() {
     );
 }
 
+#[test]
+fn the_last_delivery_shows_the_time_in_utc_and_an_rfc3339_datetime() {
+    let subscription = Subscription {
+        id: uuid::Uuid::nil(),
+        url: "https://up.example.org/".into(),
+        events: vec![],
+        created_at: "2026-10-01T00:00:00Z".parse().unwrap(),
+        last_attempt_at: Some("2026-10-03T04:05:06Z".parse().unwrap()),
+        last_status: Some(204),
+        last_error: None,
+    };
+    let html = super::last_delivery(&subscription).into_string();
+    assert!(
+        html.starts_with("<time datetime=\"2026-10-03T04:05:06Z\">Oct 03 04:05 UTC</time>"),
+        "{html}"
+    );
+}
+
 async fn event_subscriptions_attempt(
     app: &TestApp,
     id: uuid::Uuid,
