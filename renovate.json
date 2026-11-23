@@ -220,6 +220,17 @@
       "groupName": "rpi"
     },
     {
+      "description": "One PR for gitoxide: gix pins the versions of its gix-* crates, which release together",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "gix",
+        "gix-*"
+      ],
+      "groupName": "gitoxide"
+    },
+    {
       "description": "One PR for the adapter: package.json, pnpm-lock.yaml and every copy of the image tag",
       "matchPackageNames": [
         "@agentclientprotocol/claude-agent-acp"
