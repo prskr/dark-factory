@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-11-23
+# Library swap: no requirement or observable behavior changes (wire formats, UI text and
+# stored values stay the same).
+skip_specs: true
