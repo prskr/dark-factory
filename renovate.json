@@ -57,7 +57,7 @@
     },
     {
       "customType": "regex",
-      "description": "OpenCode release the opencode-harness image ships; the checksums of the two archives in MODULE.bazel are updated by hand (deploy/images/check_versions.sh lists the copies of the version)",
+      "description": "OpenCode release the opencode-harness image ships; the post-upgrade task deploy/images/update_opencode_checksums.sh (packageRules) sets the checksums of the two archives in MODULE.bazel (deploy/images/check_versions.sh lists the copies of the version)",
       "managerFilePatterns": [
         "/^MODULE\\.bazel$/"
       ],
@@ -161,6 +161,23 @@
     }
   ],
   "packageRules": [
+    {
+      "description": "OpenCode: set the archive checksums in MODULE.bazel for the new version; replaces the global postUpgradeTasks, so it repeats `bazel mod tidy`",
+      "matchDepNames": [
+        "anomalyco/opencode"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "deploy/images/update_opencode_checksums.sh",
+          "bazel mod tidy"
+        ],
+        "fileFilters": [
+          "MODULE.bazel",
+          "MODULE.bazel.lock"
+        ],
+        "executionMode": "update"
+      }
+    },
     {
       "description": "sqlx 0.9.1 query macros need cargo (`cargo metadata`), which the Bazel build does not have; skip that release (hold in Cargo.toml)",
       "matchManagers": [
