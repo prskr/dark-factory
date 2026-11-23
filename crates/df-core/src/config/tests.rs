@@ -317,7 +317,7 @@ fn opencode_defaults_and_overrides_come_from_the_instance_config() {
     );
     assert_eq!(
         cfg.harness.opencode.image,
-        "ghcr.io/prskr/dark-factory/opencode-harness:2.2.5"
+        "ghcr.io/prskr/dark-factory/opencode-harness:2.4.1"
     );
     assert!(cfg.harness.opencode.env.is_empty());
     assert_eq!(cfg.harness.images().len(), 2);
