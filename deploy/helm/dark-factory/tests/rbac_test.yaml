@@ -231,7 +231,7 @@ tests:
       sandboxNamespace.create: true
     asserts:
       - hasDocuments:
-          count: 5
+          count: 4
       - isKind:
           of: Namespace
         documentIndex: 0
@@ -250,15 +250,16 @@ tests:
           of: ResourceQuota
         documentIndex: 2
       - isKind:
-          of: LimitRange
-        documentIndex: 3
-      - isKind:
           of: ServiceAccount
-        documentIndex: 4
+        documentSelector:
+          path: kind
+          value: ServiceAccount
       - equal:
           path: automountServiceAccountToken
           value: false
-        documentIndex: 4
+        documentSelector:
+          path: kind
+          value: ServiceAccount
 
   - it: renders no sandbox namespace objects when sandboxNamespace.create is false
     template: sandbox-namespace.yaml
@@ -272,7 +273,7 @@ tests:
     template: rbac.yaml
     documentIndex: 2
     set:
-      sandboxNamespace.imagePullSecrets:
+      sandbox.imagePullSecrets:
         - name: corp-mirror
     asserts:
       - isKind:

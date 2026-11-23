@@ -23,6 +23,7 @@ spec:
     spec:
       serviceAccountName: {{ include "dark-factory.controlPlane.serviceAccountName" . }}
       automountServiceAccountToken: true
+      {{- include "dark-factory.podAffinity" (dict "ctx" . "values" .Values.controlPlane "selector" "dark-factory.controlPlane.selectorLabels") | nindent 6 }}
       {{- with .Values.image.pullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

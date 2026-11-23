@@ -27,6 +27,10 @@ An empty string for `storageClass` or `runtimeClassName` counts as unset.
 | `sandbox.storageClass` | no | unset | StorageClass of task PVCs. Unset: no `storageClassName` is rendered and the cluster's default StorageClass applies. |
 | `sandbox.pvcSize` | no | `20Gi` | Storage request of task PVCs. |
 | `sandbox.runtimeClassName` | no | unset | Runtime class of sandbox pods. Unset: no `runtimeClassName` is rendered and the cluster's default runtime applies. Set `kata` for microVM isolation. |
+| `sandbox.nodeSelector` | no | `{}` | Labels (key to value) a node must carry to run a sandbox pod; set as the pod's `nodeSelector`. Empty: no `nodeSelector`. Keys and values are validated at startup. |
+| `sandbox.tolerations` | no | `[]` | Taints sandbox pods tolerate, as Kubernetes tolerations (`key`, `operator` `Equal` or `Exists`, `value`, `effect`, `tolerationSeconds`), in order. Empty: no tolerations. Unknown fields and invalid combinations fail startup. |
+| `sandbox.affinity` | no | unset | Kubernetes `affinity` (`nodeAffinity`, `podAffinity`, `podAntiAffinity`) set on every sandbox pod unchanged, next to the node selector and tolerations. `{}` counts as unset. Startup fails on an unknown field, a weight outside 1-100, a missing `topologyKey`, an unknown selector operator or `values` that do not fit the operator; the API server checks the rest. |
+| `sandbox.resources` | no | empty `requests` and `limits` | Requests and limits (resource name to quantity) of the agent container. The control plane has no defaults: it sets exactly these entries, and an empty map sets none, so a LimitRange of the namespace applies. The Helm chart sets the defaults (`250m`/`512Mi` requests, `2`/`4Gi` limits). Names and quantities are validated at startup. |
 | `sandbox.issuerName` | no | `dark-factory-ca-issuer` | cert-manager issuer for sandbox client certificates. |
 | `sandbox.issuerKind` | no | `ClusterIssuer` | Kind of that issuer. Sandbox certificates are requested from the sandbox namespace, so this must be a `ClusterIssuer`. |
 | `sandbox.issuerGroup` | no | `cert-manager.io` | API group of that issuer. |

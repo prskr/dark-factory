@@ -77,7 +77,7 @@ publicUrl: https://factory.example.org
 oidc:
   issuerUrl: https://id.example.org/realms/dark-factory
 
-sandboxNamespace:
+sandbox:
   runtimeClassName: kata
 
 # Publish the UI through an existing Gateway API Gateway.
@@ -97,7 +97,8 @@ networkPolicy:
 
 Everything else has a default; the [chart README](https://github.com/prskr/dark-factory/blob/main/deploy/helm/dark-factory/README.md#values-reference)
 lists every key. Set `publicUrl` (top level) to the URL the browser uses: without it the web UI stays
-unavailable.
+unavailable. To run sandboxes on dedicated nodes or change their size, see
+[Sandbox nodes and resources](operations/sandbox-nodes-and-resources.md).
 
 ## 4. Install
 

@@ -1,4 +1,5 @@
 {{- if .Values.sandboxNamespace.create }}
+{{- include "dark-factory.sandbox.checkQuota" . }}
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -43,26 +44,9 @@ spec:
     persistentvolumeclaims: {{ .Values.sandboxNamespace.resourceQuota.persistentVolumeClaims | quote }}
 ---
 apiVersion: v1
-kind: LimitRange
-metadata:
-  name: {{ include "dark-factory.fullname" . }}-sandbox-limits
-  namespace: {{ .Values.sandboxNamespace.name }}
-  labels:
-    {{- include "dark-factory.labels" . | nindent 4 }}
-spec:
-  limits:
-    - type: Container
-      default:
-        cpu: {{ .Values.sandboxNamespace.limitRange.defaultCpu | quote }}
-        memory: {{ .Values.sandboxNamespace.limitRange.defaultMemory | quote }}
-      defaultRequest:
-        cpu: {{ .Values.sandboxNamespace.limitRange.defaultRequestCpu | quote }}
-        memory: {{ .Values.sandboxNamespace.limitRange.defaultRequestMemory | quote }}
----
-apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ .Values.sandboxNamespace.serviceAccountName }}
+  name: {{ .Values.sandbox.serviceAccountName }}
   namespace: {{ .Values.sandboxNamespace.name }}
   labels:
     {{- include "dark-factory.labels" . | nindent 4 }}

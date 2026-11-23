@@ -8,8 +8,8 @@ use df_core::{RunId, TaskKey, TaskVolumeSpec};
 use k8s_openapi::api::core::v1::{
     CSIVolumeSource, Capabilities, Container, EmptyDirVolumeSource, EnvVar, HostAlias,
     ImageVolumeSource, LocalObjectReference, PersistentVolumeClaim, PersistentVolumeClaimSpec,
-    PersistentVolumeClaimVolumeSource, Pod, PodSecurityContext, PodSpec, SeccompProfile,
-    SecurityContext, Volume, VolumeMount, VolumeResourceRequirements,
+    PersistentVolumeClaimVolumeSource, Pod, PodSecurityContext, PodSpec, ResourceRequirements,
+    SeccompProfile, SecurityContext, Toleration, Volume, VolumeMount, VolumeResourceRequirements,
 };
 use k8s_openapi::api::networking::v1::{
     IPBlock, NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyPeer, NetworkPolicyPort,
@@ -134,9 +134,13 @@ pub fn render_pod(
             spec,
             agent_env(config, &no_proxy_entries.join(",")),
             volume_mounts,
+            effective_resources(spec, config),
         )],
         volumes: Some(volumes),
         image_pull_secrets: image_pull_secrets(config),
+        node_selector: non_empty(config.sandbox.node_selector.clone()),
+        tolerations: tolerations(config),
+        affinity: config.affinity.clone(),
         ..Default::default()
     };
 
@@ -378,11 +382,58 @@ fn image_pull_secrets(config: &ProvisioningConfig) -> Option<Vec<LocalObjectRefe
     })
 }
 
+/// `None` for an empty map so Pods without configured entries stay unchanged.
+fn non_empty(map: BTreeMap<String, String>) -> Option<BTreeMap<String, String>> {
+    (!map.is_empty()).then_some(map)
+}
+
+/// The tolerations of the instance configuration; `None` for an empty list.
+fn tolerations(config: &ProvisioningConfig) -> Option<Vec<Toleration>> {
+    let configured = &config.sandbox.tolerations;
+    (!configured.is_empty()).then(|| {
+        configured
+            .iter()
+            .map(|t| Toleration {
+                key: t.key.clone().filter(|key| !key.is_empty()),
+                operator: Some(t.operator.as_str().to_string()),
+                value: t.value.clone(),
+                effect: t.effect.map(|effect| effect.as_str().to_string()),
+                toleration_seconds: t.toleration_seconds,
+            })
+            .collect()
+    })
+}
+
+/// The resources of the run's agent container. Today the instance-wide `sandbox.resources`;
+/// sandbox profiles will resolve theirs here (design D5).
+fn effective_resources(
+    _spec: &RunSandboxSpec,
+    config: &ProvisioningConfig,
+) -> Option<ResourceRequirements> {
+    let to_quantities = |entries: &BTreeMap<String, String>| {
+        (!entries.is_empty()).then(|| {
+            entries
+                .iter()
+                .map(|(name, quantity)| (name.clone(), Quantity(quantity.clone())))
+                .collect::<BTreeMap<_, _>>()
+        })
+    };
+    let resources = &config.sandbox.resources;
+    let requests = to_quantities(&resources.requests);
+    let limits = to_quantities(&resources.limits);
+    (requests.is_some() || limits.is_some()).then_some(ResourceRequirements {
+        requests,
+        limits,
+        ..Default::default()
+    })
+}
+
 /// The agent container: unprivileged, all capabilities dropped.
 fn agent_container(
     spec: &RunSandboxSpec,
     env: Vec<EnvVar>,
     volume_mounts: Vec<VolumeMount>,
+    resources: Option<ResourceRequirements>,
 ) -> Container {
     Container {
         name: "agent".to_string(),
@@ -393,6 +444,7 @@ fn agent_container(
         ]),
         env: Some(env),
         volume_mounts: Some(volume_mounts),
+        resources,
         security_context: Some(SecurityContext {
             allow_privilege_escalation: Some(false),
             capabilities: Some(Capabilities {

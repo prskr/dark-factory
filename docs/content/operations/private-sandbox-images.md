@@ -29,7 +29,7 @@ When one of them lives in a private registry, give the pods an image pull secret
 2. Reference it in the Helm values and upgrade the release:
 
    ```yaml
-   sandboxNamespace:
+   sandbox:
      imagePullSecrets:
        - name: corp-mirror
    ```
@@ -52,7 +52,7 @@ harness image, also when they live in different registries.
 
 | Setting | Required | Default | Effect |
 | --- | --- | --- | --- |
-| Helm value `sandboxNamespace.imagePullSecrets` | no | `[]` | List of `{ name: <Secret> }`. The chart renders the names as `sandbox.imagePullSecrets` and creates no Secret. An entry without a `name` fails the schema validation. |
+| Helm value `sandbox.imagePullSecrets` | no | `[]` | List of `{ name: <Secret> }`. The chart renders the names as `sandbox.imagePullSecrets` and creates no Secret. An entry without a `name` fails the schema validation. |
 | Instance key `sandbox.imagePullSecrets` | no | empty | List of Secret names in the sandbox namespace, applied to every sandbox pod. Each name must be a valid Kubernetes name (at most 253 characters: lowercase letters, digits, `-` and `.`, starting and ending with a letter or digit); otherwise the control plane refuses to start and names the option and the entry. |
 
 ## Troubleshooting

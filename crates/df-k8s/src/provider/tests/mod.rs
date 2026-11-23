@@ -35,6 +35,7 @@ fn test_config() -> ProvisioningConfig {
             git_port: 8443,
         },
     )
+    .unwrap()
 }
 
 /// Run 1 of task `DF-1` with a fresh run id; `harness` selects the harness volume.

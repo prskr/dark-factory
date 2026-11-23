@@ -487,6 +487,7 @@ fn test_config() -> ProvisioningConfig {
             git_port: 8443,
         },
     )
+    .unwrap()
 }
 
 /// A `PodList` with one run pod per `(name, deletion timestamp)`.

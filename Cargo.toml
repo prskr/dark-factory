@@ -142,6 +142,8 @@ rust-embed = { version = "8", features = ["interpolate-folder-path", "debug-embe
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
+serde_ignored = "0.1"
+serde_path_to_error = "0.1"
 serde_json = "1"
 serde-saphyr = "2.0.0"
 sha2 = "0.11"

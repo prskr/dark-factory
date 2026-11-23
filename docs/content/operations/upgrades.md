@@ -42,6 +42,49 @@ To go back, restore the database backup taken before the upgrade, then roll back
 
 ## Release-specific steps
 
+### Sandbox values moved, no sandbox LimitRange
+
+The chart no longer renders a `LimitRange` in the sandbox namespace. The size of sandbox pods is
+`sandbox.resources` (defaults: requests `250m`/`512Mi`, limits `2`/`4Gi`, the values the LimitRange
+applied), and every sandbox pod carries it ([Sandbox nodes and resources](sandbox-nodes-and-resources.md)).
+Three values moved from `sandboxNamespace` to `sandbox`, and the old keys fail the render with a
+message naming the new key:
+
+| Old value | New value |
+| --- | --- |
+| `sandboxNamespace.runtimeClassName` | `sandbox.runtimeClassName` |
+| `sandboxNamespace.imagePullSecrets` | `sandbox.imagePullSecrets` |
+| `sandboxNamespace.serviceAccountName` | `sandbox.serviceAccountName` |
+| `sandboxNamespace.limitRange.defaultRequestCpu` | `sandbox.resources.requests.cpu` |
+| `sandboxNamespace.limitRange.defaultRequestMemory` | `sandbox.resources.requests.memory` |
+| `sandboxNamespace.limitRange.defaultCpu` | `sandbox.resources.limits.cpu` |
+| `sandboxNamespace.limitRange.defaultMemory` | `sandbox.resources.limits.memory` |
+
+- Upgrade with `--values` or `--reset-then-reuse-values` (Helm 3.14 or newer). `--reuse-values` carries
+  the old keys, so the render fails, and it misses the defaults of the new keys.
+- The control plane and the gateway roll once (new pod template, anti-affinity). Running sandboxes
+  keep their spec. Brief unavailability during the roll:
+  - Control plane: a surge pod starts first and the leader Lease passes to it. The web UI and the
+    agent port drop their connections during the switch; sandboxes reconnect.
+  - Gateway: the connections of the terminating pod (sandbox egress, Git proxy) are cut, also with
+    two or more replicas (the PodDisruptionBudget does not apply to rolling updates). With one
+    replica new connections fail until the new pod is ready; with two or more they go to a ready
+    replica.
+- Later changes of `sandbox.nodeSelector`, `sandbox.tolerations`, `sandbox.affinity`,
+  `sandbox.resources` or `sandbox.runtimeClassName` roll both as well (both hash the whole
+  configuration); running sandboxes keep their spec and new values apply to pods created afterwards.
+  A change of `podAntiAffinity` or `affinity` of a component rolls only that component.
+- Upgrade window: Helm deletes the LimitRange while the old control plane still leads. Sandbox pods
+  it creates in that time have no resources and the `ResourceQuota` rejects them
+  (`must specify limits.cpu`); the run ends `provisioning_failed` and is queued again, which counts
+  towards `runs.maxAutoResumes`. Upgrade when no run is starting to avoid it.
+- With `sandboxNamespace.create: false`, sandboxes now get the chart defaults instead of no size from
+  Dark Factory. On runc that is a 4Gi memory limit (a heavy build can end `OOMKilled`); an
+  operator-managed LimitRange stops filling in defaults, and its `max` or ratio rules can reject the
+  new values. To keep the old behaviour set `sandbox.resources: {requests: null, limits: null}`.
+- `controlPlane.podAntiAffinity` and `gateway.podAntiAffinity` default to `soft`: the replicas prefer
+  different nodes, a single-node cluster is unaffected.
+
 ### Gateway replicas
 
 `gateway.replicas` now defaults to `1` (was `2`, minimum `2`) and the gateway PodDisruptionBudget

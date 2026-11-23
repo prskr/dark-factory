@@ -80,7 +80,7 @@ pub struct SandboxResources {
 }
 ```
 
-`deny_unknown_fields` catches typos (`operater`). `df-k8s` maps these into `k8s_openapi` `Toleration` and `ResourceRequirements` (`Quantity`) in `render_pod`. `SandboxResources` has no defaults of its own (empty maps, confirmed Q6): the control plane puts exactly the configured entries on the pod, and an empty map gives the pod no entries of that kind. The defaults live in the chart (D4).
+`deny_unknown_fields` catches typos (`effects` for `effect`). `df-k8s` maps these into `k8s_openapi` `Toleration` and `ResourceRequirements` (`Quantity`) in `render_pod`. `SandboxResources` has no defaults of its own (empty maps, confirmed Q6): the control plane puts exactly the configured entries on the pod, and an empty map gives the pod no entries of that kind. The defaults live in the chart (D4).
 
 `validate()` (already called at startup for `imagePullSecrets`) gets checks with the error naming the option and entry:
 
@@ -118,6 +118,8 @@ Shape: mirroring the Kubernetes `Affinity` type (node and pod affinity, preferre
 - Semantic checks on the parsed value (parsing cannot see them, for example `weight: 101`): preferred term weights 1–100; every pod (anti-)affinity term has a non-empty `topologyKey`; label selector operators `In`, `NotIn`, `Exists`, `DoesNotExist`; node selector operators additionally `Gt`, `Lt`; `In`/`NotIn` with at least one value, `Exists`/`DoesNotExist` without values. These are the mistakes operators make by hand. The full Kubernetes validation (label syntax inside selectors, field selectors, `matchLabelKeys`) is not repeated: such an affinity reaches the API server, which rejects the pod, and the run ends `provisioning_failed` with the API message.
 - `render_pod` uses the parsed `Affinity`.
 - Chart schema: `sandbox.affinity` allows only `nodeAffinity`, `podAffinity` and `podAntiAffinity` at the top level; deeper checks are left to the control plane (copying the Kubernetes JSON schema into `values.schema.json` is large and goes stale).
+
+Check of "Spread falls back on a single node": `just e2e-local` with the soft spread above (`dark-factory.io/instance: e2e`) as `sandbox.affinity` in `deploy/values-e2e.yaml` (temporary), run with `E2E_TEST_ARGS="--ignored --test-threads=2 coordinator_delegates a_researcher_hands"`. While two tasks ran at once, `kubectl -n dark-factory-sandboxes get pods -o wide` showed `run-dg-2-1` and `run-rs-2-1` both on `df-e2e-control-plane`; both tests passed.
 
 Risks, in the docs: a **required** pod anti-affinity among sandboxes allows one sandbox per node, so runs above the node count stay `Pending` and end `connect_timeout`. Affinity rules also combine with the node pinning of `ReadWriteOnce` task volumes on node-local storage: a later run of a task must go to its volume's node, and a rule that excludes it leaves the pod `Pending`. A preferred rule never blocks scheduling.
 
@@ -171,6 +173,14 @@ Runtime differences:
 
 - **runc:** requests and limits map to the container cgroup (`cpu.weight`, `cpu.max`, `memory.max`). On cgroup v2, since Kubernetes 1.28, the kubelet sets `memory.oom.group`, so an OOM kills every process of the container (unless the node sets the kubelet option `singleProcessOOMKill: true`, added in 1.32). PID 1 is `factory-agent`, so the container ends with `OOMKilled`, exit code 137.
 - **Kata:** the pod runs in a microVM. The VM starts with the runtime's base size (`default_vcpus`, `default_memory`; 1 vCPU and 2 GiB with the stock configuration) and grows by the container limits: the memory limit is hot-plugged on top of the base memory, the CPU limit adds `ceil(limit)` vCPUs. Requests do not change the VM size. Without limits the container gets only the base VM size, so with Kata `limits` are the effective sandbox size. The memory `emptyDir` at `/run/factory` uses guest memory and counts against the limit in both runtimes (it holds only a few certificates and tokens). By default a Kata guest does not give memory it has touched back to the host, so a Burstable sandbox (request 512Mi, limit 4Gi) can keep up to its limit on the node after a peak; Kata nodes overcommit much more than runc nodes with the same values. The docs say so (task 5.1); the default size stays (Q2). How Kata reports a guest OOM to the kubelet (`OOMKilled` or a plain error exit) is checked in task 1.1; the spec scenario "Container killed for memory" is written for runc.
+
+Spike result (task 1.1), runc only. Cluster: the e2e kind cluster (Kubernetes 1.37, runc, cgroup v2, node with 8 CPUs and 16 GB memory). Pod `agent` container from `python:3.13-alpine`, requests `250m`/`512Mi`, limits `cpu: 2`, `memory: 1Gi`, command `sh -c 'nproc; grep MemTotal /proc/meminfo; cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max; python -c "b = b\"x\" * (2 * 1024**3)"; echo python exited $?'`:
+
+- In the container: `nproc` 8 and `MemTotal` 16368076 kB (the node, runc does not shrink the view), `memory.max` 1073741824, `cpu.max` `200000 100000`.
+- Pod phase `Failed`, no `status.reason`, no `status.message`; container `agent` terminated with `reason: OOMKilled`, `exitCode: 137`. The shell (PID 1) was killed together with its python child (`python exited` was never printed), so the whole container is killed, as D4 states for `memory.oom.group`.
+- This is the case `map_pod_event` reads (D6): the detail becomes `OOMKilled (exit code 137)`.
+
+Kata was not checked: no cluster with a Kata `RuntimeClass` was reachable (the only other cluster in the environment offers `gvisor`, not Kata, and is not a test cluster). The Kata statements above (VM size grows with the limits, guest memory is kept, how a guest OOM reaches the kubelet) stay documentation-based and are unverified. The troubleshooting docs describe only the runc observation. To close the gap, repeat the pod above with `runtimeClassName: kata` and record `nproc`, `MemTotal`, the container state and the pod phase; add a Kata scenario to "Sandbox events" if the reason is not `OOMKilled`.
 
 ### D5. Ready for sandbox profiles
 
@@ -241,6 +251,11 @@ affinity:
 - **Rendered for 1 replica too:** the pod template does not depend on the replica count, so changing `replicas` never rolls the pods, and the surge pod of a rollout prefers another node.
 
 The helper `dark-factory.podAffinity` (args: root context, component values, selector labels template name) renders the block for both Deployments.
+
+Checks in the single-node e2e kind cluster (Kubernetes 1.37):
+
+- "Single-node cluster": `just e2e-local` with `gateway.replicas: 2` added to `deploy/values-e2e.yaml` (temporary), default `gateway.podAntiAffinity: soft`. `kubectl -n dark-factory get pods -o wide` showed both gateway pods `Running` on `df-e2e-control-plane`; the Deployment reported 2 of 2 ready.
+- "Hard rule does not block a rollout": not checked. It needs a cluster with two nodes, and only the single-node kind cluster was available.
 
 Alternative: one `affinity` value only, with the default anti-affinity in `values.yaml`. Rejected: an operator who wants to add one node affinity term must then copy the whole default, and an empty `{}` override would silently remove the spread.
 

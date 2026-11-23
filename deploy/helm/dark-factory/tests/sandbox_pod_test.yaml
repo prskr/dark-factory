@@ -1,0 +1,315 @@
+suite: Dark Factory Helm Chart - sandbox pod values
+templates:
+  - configmap.yaml
+  - sandbox-namespace.yaml
+  - rbac.yaml
+tests:
+  # --- sandbox pod values and their old homes ---
+  - it: renders the sandbox runtime class into both instance configs
+    template: configmap.yaml
+    set:
+      sandbox.runtimeClassName: kata
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  runtimeClassName: "kata"$'
+        documentIndex: 0
+      - matchRegex:
+          path: data["migrate-config.yaml"]
+          pattern: '(?m)^  runtimeClassName: "kata"$'
+        documentIndex: 1
+
+  - it: renders the sandbox service account into the config and as an object
+    set:
+      sandboxNamespace.create: true
+      sandbox.serviceAccountName: agents
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  serviceAccountName: "agents"$'
+        template: configmap.yaml
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: agents
+        template: sandbox-namespace.yaml
+        documentSelector:
+          path: kind
+          value: ServiceAccount
+
+  - it: renders the default sandbox service account
+    template: sandbox-namespace.yaml
+    documentSelector:
+      path: kind
+      value: ServiceAccount
+    asserts:
+      - equal:
+          path: metadata.name
+          value: dark-factory-sandbox
+
+  - it: refuses the old sandbox pod keys below sandboxNamespace and names the new key
+    template: configmap.yaml
+    set:
+      sandboxNamespace.runtimeClassName: kata
+    asserts:
+      - failedTemplate:
+          errorPattern: sandboxNamespace.runtimeClassName moved to sandbox.runtimeClassName
+
+  - it: refuses the old image pull secrets key and names the new key
+    template: configmap.yaml
+    set:
+      sandboxNamespace.imagePullSecrets:
+        - name: corp-mirror
+    asserts:
+      - failedTemplate:
+          errorPattern: sandboxNamespace.imagePullSecrets moved to sandbox.imagePullSecrets
+
+  - it: refuses the old service account key and names the new key
+    template: configmap.yaml
+    set:
+      sandboxNamespace.serviceAccountName: agents
+    asserts:
+      - failedTemplate:
+          errorPattern: sandboxNamespace.serviceAccountName moved to sandbox.serviceAccountName
+
+  - it: refuses the removed LimitRange values and points to sandbox.resources
+    template: configmap.yaml
+    set:
+      sandboxNamespace.limitRange.defaultCpu: "2"
+    asserts:
+      - failedTemplate:
+          errorPattern: sandbox.resources
+
+  - it: renders no LimitRange in the sandbox namespace
+    template: sandbox-namespace.yaml
+    set:
+      sandboxNamespace.create: true
+    asserts:
+      - hasDocuments:
+          count: 4
+      - isKind:
+          of: ResourceQuota
+        documentIndex: 2
+      - isKind:
+          of: ServiceAccount
+        documentIndex: 3
+
+  # --- scheduling values ---
+  - it: renders the dedicated node values into both instance configs
+    template: configmap.yaml
+    set:
+      sandbox.nodeSelector:
+        dark-factory.io/pool: sandbox
+      sandbox.tolerations:
+        - key: dark-factory.io/sandbox
+          operator: Exists
+          effect: NoSchedule
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  nodeSelector:\n    dark-factory.io/pool: sandbox$'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  tolerations:\n    - effect: NoSchedule\n      key: dark-factory.io/sandbox\n      operator: Exists$'
+        documentIndex: 0
+      - matchRegex:
+          path: data["migrate-config.yaml"]
+          pattern: '(?m)^  nodeSelector:\n    dark-factory.io/pool: sandbox$'
+        documentIndex: 1
+
+  - it: renders a soft spread affinity
+    template: configmap.yaml
+    set:
+      sandbox.affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    dark-factory.io/instance: homelab
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  affinity:\n    podAntiAffinity:\n      preferredDuringSchedulingIgnoredDuringExecution:\n      - podAffinityTerm:\n          labelSelector:\n            matchLabels:\n              dark-factory.io/instance: homelab\n          topologyKey: kubernetes.io/hostname\n        weight: 100$'
+        documentIndex: 0
+
+  - it: renders no sandbox scheduling by default
+    template: configmap.yaml
+    asserts:
+      - notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'nodeSelector|tolerations|affinity'
+        documentIndex: 0
+      - notMatchRegex:
+          path: data["migrate-config.yaml"]
+          pattern: 'nodeSelector|tolerations|affinity'
+        documentIndex: 1
+
+  - it: refuses an affinity with an unknown top level key
+    template: configmap.yaml
+    set:
+      sandbox.affinity:
+        antiAffinity: {}
+    asserts:
+      - failedTemplate: {}
+
+  - it: refuses a toleration with the operator In
+    template: configmap.yaml
+    set:
+      sandbox.tolerations:
+        - key: a
+          operator: In
+    asserts:
+      - failedTemplate: {}
+
+  - it: refuses a toleration with an unknown field
+    template: configmap.yaml
+    set:
+      sandbox.tolerations:
+        - key: a
+          effects: NoSchedule
+    asserts:
+      - failedTemplate: {}
+
+  - it: refuses a toleration with the effect NoRun
+    template: configmap.yaml
+    set:
+      sandbox.tolerations:
+        - key: a
+          effect: NoRun
+    asserts:
+      - failedTemplate: {}
+
+  - it: refuses a node selector value that is not a string
+    template: configmap.yaml
+    set:
+      sandbox.nodeSelector:
+        dedicated: true
+    asserts:
+      - failedTemplate: {}
+
+  - it: refuses an unknown key below sandbox
+    template: configmap.yaml
+    set:
+      sandbox.nodeSelectors:
+        a: b
+    asserts:
+      - failedTemplate: {}
+
+  # --- resource values ---
+  - it: renders the default sandbox size
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  resources:\n    requests:\n      "cpu": "250m"\n      "memory": "512Mi"\n    limits:\n      "cpu": "2"\n      "memory": "4Gi"$'
+        documentIndex: 0
+      - matchRegex:
+          path: data["migrate-config.yaml"]
+          pattern: '(?m)^  resources:\n    requests:\n      "cpu": "250m"'
+        documentIndex: 1
+
+  - it: merges a resource override per key
+    template: configmap.yaml
+    set:
+      sandbox.resources.limits.memory: 8Gi
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^    limits:\n      "cpu": "2"\n      "memory": "8Gi"$'
+        documentIndex: 0
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^    requests:\n      "cpu": "250m"\n      "memory": "512Mi"$'
+        documentIndex: 0
+
+  - it: removes a resource entry with null
+    template: configmap.yaml
+    set:
+      sandboxNamespace.create: false
+      sandbox.resources.limits.cpu: null
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^    limits:\n      "memory": "4Gi"$'
+        documentIndex: 0
+
+  - it: removes both resource maps with null
+    template: configmap.yaml
+    set:
+      sandboxNamespace.create: false
+      sandbox.resources:
+        requests: null
+        limits: null
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^  resources:\n    requests: \{\}\n    limits: \{\}$'
+        documentIndex: 0
+
+  - it: renders a numeric quantity as a string
+    template: configmap.yaml
+    set:
+      sandbox.resources.limits.cpu: 2
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^      "cpu": "2"$'
+        documentIndex: 0
+
+  - it: refuses a boolean quantity
+    template: configmap.yaml
+    set:
+      sandbox.resources.limits.cpu: true
+    asserts:
+      - failedTemplate: {}
+
+  - it: refuses an unknown key below sandbox.resources
+    template: configmap.yaml
+    set:
+      sandbox.resources.limit:
+        cpu: "1"
+    asserts:
+      - failedTemplate: {}
+
+  # --- quota ---
+  - it: refuses a removed memory limit when the chart renders the quota
+    template: sandbox-namespace.yaml
+    set:
+      sandboxNamespace.create: true
+      sandbox.resources.limits.memory: null
+    asserts:
+      - failedTemplate:
+          errorPattern: sandbox.resources.limits.memory
+
+  - it: names every missing quota key
+    template: sandbox-namespace.yaml
+    set:
+      sandboxNamespace.create: true
+      sandbox.resources.limits.cpu: null
+      sandbox.resources.requests.memory: null
+    asserts:
+      - failedTemplate:
+          errorPattern: sandbox.resources.requests.memory, sandbox.resources.limits.cpu
+
+  - it: accepts the default size with the quota
+    template: sandbox-namespace.yaml
+    set:
+      sandboxNamespace.create: true
+    asserts:
+      - hasDocuments:
+          count: 4
+
+  - it: accepts a removed size in an existing namespace
+    template: sandbox-namespace.yaml
+    set:
+      sandboxNamespace.create: false
+      sandbox.resources:
+        requests: null
+        limits: null
+    asserts:
+      - hasDocuments:
+          count: 0

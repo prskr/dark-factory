@@ -74,7 +74,7 @@ tests:
   - it: renders the sandbox image pull secret names into both instance configs
     template: configmap.yaml
     set:
-      sandboxNamespace.imagePullSecrets:
+      sandbox.imagePullSecrets:
         - name: corp-mirror
     asserts:
       - matchRegex:
@@ -116,14 +116,14 @@ tests:
   - it: rejects a sandbox image pull secret without a name
     template: configmap.yaml
     set:
-      sandboxNamespace.imagePullSecrets:
+      sandbox.imagePullSecrets:
         - name: ""
     asserts:
       - failedTemplate: {}
 
   - it: renders no Secret for the sandbox image pull secrets
     set:
-      sandboxNamespace.imagePullSecrets:
+      sandbox.imagePullSecrets:
         - name: corp-mirror
     asserts:
       - notEqual:

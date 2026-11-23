@@ -16,8 +16,8 @@
 ## 2. Sandbox namespace (defined by the chart or the operator)
 - Pod Security Admission labels: `restricted`.
 - Default-deny `NetworkPolicy` for ingress and egress as a baseline; the per-run policies (`design/egress.md`) open what each run needs.
-- `ResourceQuota` (storage, PVC count, pods, CPU/memory) and a `LimitRange`.
-- No Secrets except the image pull secrets the operator places here for `sandboxNamespace.imagePullSecrets` (never mounted into a sandbox, never readable by the control plane): harness credentials are delivered over the agent stream, never stored in this namespace.
+- `ResourceQuota` (storage, PVC count, pods, CPU/memory). No `LimitRange`: every sandbox pod carries its own size (`sandbox.resources`), the chart rejects a size the quota cannot admit.
+- No Secrets except the image pull secrets the operator places here for `sandbox.imagePullSecrets` (never mounted into a sandbox, never readable by the control plane): harness credentials are delivered over the agent stream, never stored in this namespace.
 
 ## 3. Kubernetes RBAC
 

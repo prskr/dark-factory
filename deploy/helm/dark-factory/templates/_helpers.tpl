@@ -59,6 +59,31 @@ app.kubernetes.io/component: gateway
 {{- end }}
 
 {{/*
+The `affinity:` of a Deployment pod: the `affinity` override when set, else the pod anti-affinity
+preset (`soft`, `hard`, `none`) against pods of the same component, release and revision.
+Arguments: dict "ctx" <root context> "values" <component values> "selector" <selector labels template name>
+*/}}
+{{- define "dark-factory.podAffinity" -}}
+{{- if .values.affinity }}
+affinity:
+  {{- toYaml .values.affinity | nindent 2 }}
+{{- else if ne .values.podAntiAffinity "none" }}
+{{- $term := dict "topologyKey" "kubernetes.io/hostname" "matchLabelKeys" (list "pod-template-hash") "labelSelector" (dict "matchLabels" (include .selector .ctx | fromYaml)) }}
+affinity:
+  podAntiAffinity:
+    {{- if eq .values.podAntiAffinity "hard" }}
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - {{- toYaml $term | nindent 8 }}
+    {{- else }}
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          {{- toYaml $term | nindent 10 }}
+    {{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Gateway mount path of the Git mirror emptyDir, also rendered as gateway.mirrorDir
 */}}
 {{- define "dark-factory.gateway.mirrorDir" -}}
@@ -207,21 +232,55 @@ sandbox namespace, where only a ClusterIssuer can be referenced, so anything els
 {{- end }}
 
 {{/*
+Fails with the new home of a value that moved or went away. Renders nothing otherwise.
+*/}}
+{{- define "dark-factory.sandbox.refuseOldKeys" -}}
+{{- range $key := list "runtimeClassName" "imagePullSecrets" "serviceAccountName" }}
+{{- if hasKey $.Values.sandboxNamespace $key }}
+{{- fail (printf "sandboxNamespace.%s moved to sandbox.%s: move the value and remove the old key" $key $key) }}
+{{- end }}
+{{- end }}
+{{- if hasKey .Values.sandboxNamespace "limitRange" }}
+{{- fail "sandboxNamespace.limitRange was removed: the chart renders no LimitRange, the sandbox size is sandbox.resources (defaultRequestCpu -> requests.cpu, defaultRequestMemory -> requests.memory, defaultCpu -> limits.cpu, defaultMemory -> limits.memory)" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Fails when sandbox.resources lacks a cpu or memory request or limit: the sandbox ResourceQuota
+rejects every pod without all four.
+*/}}
+{{- define "dark-factory.sandbox.checkQuota" -}}
+{{- $resources := .Values.sandbox.resources | default dict }}
+{{- $missing := list }}
+{{- range $kind := list "requests" "limits" }}
+{{- range $name := list "cpu" "memory" }}
+{{- if not (get (get $resources $kind | default dict) $name) }}
+{{- $missing = append $missing (printf "sandbox.resources.%s.%s" $kind $name) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if $missing }}
+{{- fail (printf "the sandbox ResourceQuota needs a cpu and a memory request and limit on every sandbox pod, but %s are not set: set them, or use an existing namespace (sandboxNamespace.create=false)" (join ", " $missing)) }}
+{{- end }}
+{{- end }}
+
+{{/*
 The `sandbox:` section of the instance configuration (shared by the config and migrate ConfigMaps).
 */}}
 {{- define "dark-factory.sandboxConfig" -}}
+{{- include "dark-factory.sandbox.refuseOldKeys" . -}}
 sandbox:
   logLevel: {{ .Values.sandbox.logLevel | quote }}
   landlock: {{ .Values.sandbox.landlock | quote }}
   namespace: {{ .Values.sandboxNamespace.name | quote }}
   instanceNamespace: {{ .Release.Namespace | quote }}
-  serviceAccountName: {{ .Values.sandboxNamespace.serviceAccountName | quote }}
+  serviceAccountName: {{ .Values.sandbox.serviceAccountName | quote }}
   {{- if hasKey .Values.sandboxNamespace "storageClass" }}
   storageClass: {{ .Values.sandboxNamespace.storageClass | quote }}
   {{- end }}
   pvcSize: {{ .Values.sandboxNamespace.pvcSize | quote }}
-  {{- if hasKey .Values.sandboxNamespace "runtimeClassName" }}
-  runtimeClassName: {{ .Values.sandboxNamespace.runtimeClassName | quote }}
+  {{- if hasKey .Values.sandbox "runtimeClassName" }}
+  runtimeClassName: {{ .Values.sandbox.runtimeClassName | quote }}
   {{- end }}
   issuerName: {{ .Values.sandboxNamespace.issuerName | default (include "dark-factory.issuer.name" .) | quote }}
   issuerKind: {{ include "dark-factory.sandbox.issuerKind" . | quote }}
@@ -233,12 +292,37 @@ sandbox:
   controlPlaneServiceName: {{ printf "%s-control-plane" (include "dark-factory.fullname" .) | quote }}
   gatewayServiceName: {{ printf "%s-gateway" (include "dark-factory.fullname" .) | quote }}
   controlPlaneTlsServerName: {{ printf "%s-control-plane" (include "dark-factory.fullname" .) | quote }}
-  {{- with .Values.sandboxNamespace.imagePullSecrets }}
+  {{- with .Values.sandbox.imagePullSecrets }}
   imagePullSecrets:
     {{- range . }}
     - {{ .name | quote }}
     {{- end }}
   {{- end }}
+  {{- with .Values.sandbox.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.sandbox.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.sandbox.affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  resources:
+    {{- $resources := .Values.sandbox.resources | default dict }}
+    {{- range $kind := list "requests" "limits" }}
+    {{- $entries := get $resources $kind | default dict }}
+    {{- if $entries }}
+    {{ $kind }}:
+      {{- range $name, $quantity := $entries }}
+      {{ $name | quote }}: {{ $quantity | quote }}
+      {{- end }}
+    {{- else }}
+    {{ $kind }}: {}
+    {{- end }}
+    {{- end }}
   {{- if .Values.sandboxNamespace.controlPlaneIp }}
   controlPlaneIp: {{ .Values.sandboxNamespace.controlPlaneIp | quote }}
   {{- end }}

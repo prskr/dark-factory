@@ -30,8 +30,9 @@ fn test_config() -> ProvisioningConfig {
             cluster_domain: "cluster.local".to_string(),
             log_level: "info".to_string(),
             landlock: df_sandbox_contract::LandlockMode::Enforce,
-            image_pull_secrets: Vec::new(),
+            ..Default::default()
         },
+        affinity: None,
         control_plane_ip: IpAddr::V4(Ipv4Addr::new(10, 103, 178, 202)),
         control_plane_port: 9443,
         control_plane_tls_server_name: "dark-factory-control-plane.dark-factory-dev.svc"
@@ -864,4 +865,154 @@ fn no_image_pull_secrets_leave_the_field_absent() {
         .spec
         .unwrap();
     assert_eq!(pod_spec.image_pull_secrets, None);
+}
+
+fn pod_spec_of(config: &ProvisioningConfig) -> PodSpec {
+    render_pod(&test_spec(), &[], config).unwrap().spec.unwrap()
+}
+
+#[test]
+fn node_selector_is_set_on_the_pod() {
+    let mut config = test_config();
+    config.sandbox.node_selector =
+        BTreeMap::from([("dark-factory.io/pool".to_string(), "sandbox".to_string())]);
+    assert_eq!(
+        pod_spec_of(&config).node_selector,
+        Some(BTreeMap::from([(
+            "dark-factory.io/pool".to_string(),
+            "sandbox".to_string()
+        )]))
+    );
+}
+
+#[test]
+fn unset_scheduling_leaves_the_pod_fields_absent() {
+    let json = serde_json::to_value(pod_spec_of(&test_config())).unwrap();
+    for field in ["nodeSelector", "tolerations", "affinity"] {
+        assert!(json.get(field).is_none(), "{field}: {json}");
+    }
+}
+
+#[test]
+fn tolerations_are_set_in_configured_order() {
+    use df_core::config::{SandboxToleration, TaintEffect, TolerationOperator};
+    let mut config = test_config();
+    config.sandbox.tolerations = vec![
+        SandboxToleration {
+            key: Some("dark-factory.io/sandbox".into()),
+            operator: TolerationOperator::Exists,
+            value: None,
+            effect: Some(TaintEffect::NoSchedule),
+            toleration_seconds: None,
+        },
+        SandboxToleration {
+            key: Some("gpu".into()),
+            operator: TolerationOperator::Equal,
+            value: Some("true".into()),
+            effect: Some(TaintEffect::NoExecute),
+            toleration_seconds: Some(60),
+        },
+        SandboxToleration {
+            key: None,
+            operator: TolerationOperator::Exists,
+            value: None,
+            effect: None,
+            toleration_seconds: None,
+        },
+    ];
+    let json = serde_json::to_value(pod_spec_of(&config).tolerations).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!([
+            {"key": "dark-factory.io/sandbox", "operator": "Exists", "effect": "NoSchedule"},
+            {"key": "gpu", "operator": "Equal", "value": "true", "effect": "NoExecute", "tolerationSeconds": 60},
+            {"operator": "Exists"},
+        ])
+    );
+}
+
+fn agent_resources(config: &ProvisioningConfig) -> Option<ResourceRequirements> {
+    pod_spec_of(config)
+        .containers
+        .into_iter()
+        .find(|c| c.name == "agent")
+        .unwrap()
+        .resources
+}
+
+#[test]
+fn configured_resources_are_set_on_the_agent_container_without_defaults() {
+    let mut config = test_config();
+    config.sandbox.resources = df_core::config::SandboxResources {
+        requests: BTreeMap::from([
+            ("cpu".to_string(), "1".to_string()),
+            ("memory".to_string(), "2Gi".to_string()),
+        ]),
+        limits: BTreeMap::from([("memory".to_string(), "8Gi".to_string())]),
+    };
+    let resources = serde_json::to_value(agent_resources(&config)).unwrap();
+    assert_eq!(
+        resources,
+        serde_json::json!({
+            "requests": {"cpu": "1", "memory": "2Gi"},
+            "limits": {"memory": "8Gi"},
+        })
+    );
+}
+
+#[test]
+fn no_resources_leave_the_agent_container_without_requests_and_limits() {
+    let resources = agent_resources(&test_config());
+    assert!(resources.is_none(), "{resources:?}");
+}
+
+#[test]
+fn only_limits_render_no_requests() {
+    let mut config = test_config();
+    config
+        .sandbox
+        .resources
+        .limits
+        .insert("cpu".into(), "2".into());
+    let resources = agent_resources(&config).unwrap();
+    assert_eq!(resources.requests, None);
+    assert_eq!(resources.limits.unwrap().len(), 1);
+}
+
+fn config_with_affinity(affinity: serde_json::Value) -> ProvisioningConfig {
+    let base = test_config();
+    ProvisioningConfig::from_sandbox_config(
+        base.instance_name.clone(),
+        &df_core::SandboxProvisioningConfig {
+            affinity: Some(affinity),
+            ..base.sandbox.clone()
+        },
+        crate::config::ControlPlaneEndpoint {
+            ip: base.control_plane_ip,
+            port: base.control_plane_port,
+            tls_server_name: base.control_plane_tls_server_name.clone(),
+        },
+        crate::config::GatewayEndpoint {
+            ip: base.gateway_ip,
+            proxy_port: base.gateway_proxy_port,
+            git_host: base.gateway_git_host.clone(),
+            git_port: base.gateway_git_port,
+        },
+    )
+    .unwrap()
+    .with_harness_images(base.harness_images)
+}
+
+#[test]
+fn configured_affinity_is_set_on_the_pod_unchanged() {
+    let affinity = serde_json::json!({"podAntiAffinity": {"preferredDuringSchedulingIgnoredDuringExecution": [{
+        "weight": 100,
+        "podAffinityTerm": {
+            "topologyKey": "kubernetes.io/hostname",
+            "labelSelector": {"matchLabels": {"dark-factory.io/instance": "homelab"}},
+        },
+    }]}});
+    let config = config_with_affinity(affinity.clone());
+    let rendered = serde_json::to_value(pod_spec_of(&config).affinity).unwrap();
+    assert_eq!(rendered, affinity);
 }

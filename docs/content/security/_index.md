@@ -35,7 +35,7 @@ boundary of the sandbox instead of inside it.
 
 | Layer | Setting |
 | --- | --- |
-| Runtime class | Kata Containers microVM where configured (`sandboxNamespace.runtimeClassName`); without it the sandbox shares the node kernel |
+| Runtime class | Kata Containers microVM where configured (`sandbox.runtimeClassName`); without it the sandbox shares the node kernel |
 | Pod security | The sandbox namespace enforces Pod Security `restricted`: non-root, no privilege escalation, all capabilities dropped |
 | Kubernetes API | No service account token (`automountServiceAccountToken: false`); the sandbox namespace holds no Secrets other than the image pull secrets the operator places there ([details](../operations/private-sandbox-images.md)); they are never mounted into a sandbox |
 | Network | A generated NetworkPolicy per run: egress only to the control plane agent port, the gateway and allowed cluster services; no ingress; no DNS |

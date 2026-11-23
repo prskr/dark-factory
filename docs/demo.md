@@ -101,11 +101,11 @@ No process on the host holds a connection to a pod: a restart of a pod (the reus
 | `network.allowPlainHttp` | `true` | Forgejo in the cluster serves plain http: the control plane, the gateway's Git proxy, the inference endpoint's upstreams and the project form accept `http://` URLs (sandboxes use HTTPS to the gateway). The control plane and the gateway log a startup warning; the token travels unencrypted inside the throwaway cluster. |
 | `runs.keepAliveSeconds` | `0` | A run ends with its turn, so the follow-up message starts run 2 (the `loaded` session of the script). |
 | `plugins.forgejo.webhookSecret` | Secret `forge-webhooks`, key `forgejo` | Enables `POST /webhooks/forgejo` for the repository webhook. |
-| `sandboxNamespace.runtimeClassName` | `''` | No Kata in kind. |
+| `sandbox.runtimeClassName` | `''` | No Kata in kind. |
 | `sandbox.landlock` | `enforce`; `just e2e-local` passes `disabled` when the node kernel has no Landlock ABI 6 | Without ABI 6 every run would fail with `sandbox.landlock_unavailable`. |
 | `clusterTargets.namespaces` | `[forgejo]` | Sandboxes reach Forgejo as a cluster Service. |
 | `networkPolicy.ingressController.allowAll` | `true` | The browser pod reaches the UI. |
-| `sandboxNamespace.resourceQuota.pods`, `limitRange` | 4 pods, 1 Gi default memory | Memory budget, see below. |
+| `sandboxNamespace.resourceQuota.pods`, `sandbox.resources` | 4 pods, requests `100m`/`128Mi`, limits `1`/`1Gi` | Memory budget, see below. |
 | `sandboxNamespace.resourceQuota.persistentVolumeClaims`, `requestsStorage` | 96, `96Gi` | One 1 Gi volume per task, kept while the task is open and after a cancellation. A run of the suite creates about 30 tasks, and `E2E_REPEAT` runs it again without a reset (with 32 the second run's tasks fail provisioning with `capacity`). `local-path` does not reserve the size. |
 
 ## Environment variables

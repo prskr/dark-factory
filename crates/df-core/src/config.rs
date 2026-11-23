@@ -13,6 +13,10 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod sandbox_pod;
+
+pub use sandbox_pod::{SandboxResources, SandboxToleration, TaintEffect, TolerationOperator};
+
 /// Default path to the instance configuration YAML file.
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/dark-factory/config.yaml";
 
@@ -444,22 +448,49 @@ pub struct SandboxProvisioningConfig {
     pub landlock: LandlockMode,
     /// Secrets in the sandbox namespace, applied to every sandbox Pod.
     pub image_pull_secrets: Vec<String>,
+    /// Labels a node must carry to run a sandbox pod.
+    pub node_selector: BTreeMap<String, String>,
+    /// Taints sandbox pods tolerate.
+    pub tolerations: Vec<SandboxToleration>,
+    /// Kubernetes `affinity` of sandbox pods, passed through as is (`df-k8s` parses and checks
+    /// it). An empty object counts as unset.
+    #[serde(deserialize_with = "non_empty_object")]
+    pub affinity: Option<serde_json::Value>,
+    /// Requests and limits of the agent container. No defaults: the chart sets them.
+    pub resources: SandboxResources,
 }
 
 impl SandboxProvisioningConfig {
     fn validate(&self) -> Result<(), ConfigError> {
-        match self
+        if let Some(name) = self
             .image_pull_secrets
             .iter()
             .find(|name| !crate::host::is_dns_subdomain(name))
         {
-            Some(name) => Err(ConfigError::Invalid(format!(
+            return Err(ConfigError::Invalid(format!(
                 "`sandbox.imagePullSecrets` entry {name:?} is not a valid Secret name: \
                  use at most 253 lowercase alphanumerics, `-` or `.`, starting and ending with an alphanumeric"
-            ))),
-            None => Ok(()),
+            )));
+        }
+        sandbox_pod::validate_node_selector(&self.node_selector)?;
+        sandbox_pod::validate_tolerations(&self.tolerations)?;
+        sandbox_pod::validate_resources(&self.resources)?;
+        match &self.affinity {
+            Some(serde_json::Value::Object(_)) | None => Ok(()),
+            Some(_) => Err(ConfigError::Invalid(
+                "`sandbox.affinity` must be an object with `nodeAffinity`, `podAffinity` or `podAntiAffinity`"
+                    .into(),
+            )),
         }
     }
+}
+
+fn non_empty_object<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.filter(|v| v.as_object().is_none_or(|o| !o.is_empty())))
 }
 
 /// Optional overrides for the addresses sandboxes use to reach the control plane and the
@@ -510,6 +541,10 @@ impl Default for SandboxProvisioningConfig {
             log_level: "info".to_string(),
             landlock: LandlockMode::default(),
             image_pull_secrets: Vec::new(),
+            node_selector: BTreeMap::new(),
+            tolerations: Vec::new(),
+            affinity: None,
+            resources: SandboxResources::default(),
         }
     }
 }

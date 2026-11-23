@@ -1,7 +1,9 @@
 //! Sandbox events: mapping pod states, deduplication, relists and the event stream.
 
 use super::*;
-use k8s_openapi::api::core::v1::{ContainerState, ContainerStateWaiting, ContainerStatus};
+use k8s_openapi::api::core::v1::{
+    ContainerState, ContainerStateTerminated, ContainerStateWaiting, ContainerStatus,
+};
 use uuid::Uuid;
 
 #[test]
@@ -145,6 +147,68 @@ async fn event_loop_emits_gone_for_image_pull_failure_without_a_prior_started() 
             run_id,
             reason: "ErrImagePull: pull access denied".to_string()
         }]
+    );
+}
+
+/// A failed pod of `run_id` whose agent container terminated with `reason` and `exit_code`.
+fn failed_pod_with_terminated_agent(
+    pod_reason: Option<&str>,
+    terminated: Option<(&str, i32)>,
+) -> (RunId, Pod) {
+    let run_id = RunId::from_uuid(Uuid::from_u128(7));
+    let mut pod = pod_for(run_id, "Failed", None);
+    let status = pod.status.as_mut().unwrap();
+    status.reason = pod_reason.map(str::to_string);
+    status.container_statuses = terminated.map(|(reason, exit_code)| {
+        vec![ContainerStatus {
+            name: "agent".to_string(),
+            state: Some(ContainerState {
+                terminated: Some(ContainerStateTerminated {
+                    reason: Some(reason.to_string()),
+                    exit_code,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }]
+    });
+    (run_id, pod)
+}
+
+#[test]
+fn failed_pod_with_an_oom_killed_container_names_the_reason_and_exit_code() {
+    let (run_id, pod) = failed_pod_with_terminated_agent(None, Some(("OOMKilled", 137)));
+    assert_eq!(
+        map_pod_event(&pod),
+        Some(SandboxEvent::Gone {
+            run_id,
+            reason: "OOMKilled (exit code 137)".to_string()
+        })
+    );
+}
+
+#[test]
+fn evicted_pod_reason_wins_over_the_container_state() {
+    let (run_id, pod) = failed_pod_with_terminated_agent(Some("Evicted"), Some(("Error", 137)));
+    assert_eq!(
+        map_pod_event(&pod),
+        Some(SandboxEvent::Gone {
+            run_id,
+            reason: "Evicted".to_string()
+        })
+    );
+}
+
+#[test]
+fn failed_pod_without_container_state_is_still_reported_as_pod_failed() {
+    let (run_id, pod) = failed_pod_with_terminated_agent(None, None);
+    assert_eq!(
+        map_pod_event(&pod),
+        Some(SandboxEvent::Gone {
+            run_id,
+            reason: "pod failed".to_string()
+        })
     );
 }
 
