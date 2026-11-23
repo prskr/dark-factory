@@ -35,7 +35,7 @@ image:
     # df-core default of harness.opencode.image).
     opencode:
       repository: ghcr.io/prskr/dark-factory/opencode-harness
-      tag: '2.2.5'
+      tag: '2.4.0'
       digest: ''
   testProject:
     repository: ghcr.io/prskr/dark-factory/test-project

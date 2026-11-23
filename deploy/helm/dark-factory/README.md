@@ -33,7 +33,7 @@ Every key in `values.yaml` is documented below:
 | `image.harness.claudeCode.tag` | `string` | `"0.107.0"` | Tag of the harness image when `digest` is empty (the adapter version). Required when `digest` is empty; the render fails otherwise. |
 | `image.harness.claudeCode.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.harness.claudeCode.tag`. |
 | `image.harness.opencode.repository` | `string` | `"ghcr.io/prskr/dark-factory/opencode-harness"` | OCI repository of the OpenCode harness image (release binary and the musl runtime it needs) that sandboxes mount at `/opt/harness/opencode`. Rendered as `harness.opencode.image`. |
-| `image.harness.opencode.tag` | `string` | `"2.2.5"` | Tag of the OpenCode harness image when `digest` is empty (the OpenCode version). Required when `digest` is empty; the render fails otherwise. |
+| `image.harness.opencode.tag` | `string` | `"2.4.0"` | Tag of the OpenCode harness image when `digest` is empty (the OpenCode version). Required when `digest` is empty; the render fails otherwise. |
 | `image.harness.opencode.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.harness.opencode.tag`. |
 | `image.testProject.repository` | `string` | `"ghcr.io/prskr/dark-factory/test-project"` | OCI repository for the `fake-acp-agent` test project image. Create its project with the adapter command `/opt/harness/bin/fake-acp-agent`, so that no harness image is mounted. |
 | `image.testProject.tag` | `string` | `""` | Tag used for the test project image when `digest` is empty; empty falls back to the chart `appVersion`. |
