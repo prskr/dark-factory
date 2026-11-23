@@ -1,7 +1,7 @@
 name: Renovate
 
 # Self-hosted Renovate on the runner (not the official action's container): the post-upgrade task
-# `bazel mod tidy` (renovate.json) needs Bazel. Lockfiles are updated with the runner's tools
+# `bazel mod tidy` (renovate.json) needs Bazel; deploy/images/update_opencode_checksums.sh needs curl. Lockfiles are updated with the runner's tools
 # (binarySource=global): pnpm, cargo (rustup installs the toolchain of rust-toolchain.toml) and Bazel.
 on:
   schedule:
@@ -58,7 +58,7 @@ jobs:
           RENOVATE_ONBOARDING: "false"
           RENOVATE_REQUIRE_CONFIG: required
           RENOVATE_BINARY_SOURCE: global
-          RENOVATE_ALLOWED_COMMANDS: '["^bazel mod tidy$"]'
+          RENOVATE_ALLOWED_COMMANDS: '["^bazel mod tidy$", "^deploy/images/update_opencode_checksums\\.sh$"]'
           # the bazel-module manager updates MODULE.bazel.lock with `bazel mod deps --lockfile_mode=update`
           RENOVATE_ALLOWED_UNSAFE_EXECUTIONS: '["bazelModDeps"]'
           LOG_LEVEL: info
