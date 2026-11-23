@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use chrono::DateTime;
 use df_db::PgPool;
 use df_db::model_usage::{Inserted, UsageRecord, insert_usage};
 use df_proto::gateway::v1 as pb;
 use df_proto::gateway::v1::gateway_usage_server::GatewayUsage;
+use df_proto::time;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
@@ -82,8 +82,8 @@ fn stored(message: &pb::UsageRecord) -> Option<UsageRecord> {
         request_id: Uuid::parse_str(&message.request_id).ok()?,
         run_id: Uuid::parse_str(&message.run_id).ok()?,
         recorded_at: at
-            .and_then(|at| DateTime::from_timestamp(at.seconds, u32::try_from(at.nanos).ok()?))
-            .unwrap_or_else(chrono::Utc::now),
+            .and_then(time::from_proto)
+            .unwrap_or_else(jiff::Timestamp::now),
         model: Some(message.model.clone()).filter(|model| !model.is_empty()),
         wire_api,
         upstream_status: Some(message.upstream_status)

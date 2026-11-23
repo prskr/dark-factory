@@ -203,11 +203,7 @@ fn page(content: &[u8], offset: usize) -> Result<String, String> {
 fn line(meta: &ArtifactMeta) -> String {
     format!(
         "{} \u{b7} {} \u{b7} {} \u{b7} {} bytes \u{b7} updated {}",
-        meta.name,
-        meta.kind,
-        meta.mime_type,
-        meta.size,
-        meta.updated_at.to_rfc3339()
+        meta.name, meta.kind, meta.mime_type, meta.size, meta.updated_at
     )
 }
 

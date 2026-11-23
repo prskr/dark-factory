@@ -6,13 +6,13 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
 use df_db::task_views::StoredEvent;
 use df_proto::transcript::v1::{
     ArtifactWritten, ContentBlock, FactoryActivity, ForgeActivity, NoticeLevel, Plan,
     PlanEntryStatus, PushVerdict, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
     ToolKind, UserMessage, WebhookReceived, content_block, event, tool_call_content,
 };
+use jiff::Timestamp;
 use maud::{Markup, html};
 
 use crate::components::transcript::ToolStatus;
@@ -32,7 +32,7 @@ pub struct Item {
     /// Who wrote the item (board member or the persona), empty for items without an author.
     pub author: String,
     /// When the event that created the item was recorded.
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
     /// DOM id of the tool call group the item belongs to (design D3). A group is a streak of
     /// consecutive items: its tool calls and the thoughts and notices after the first of them.
     pub group: Option<String>,
@@ -75,7 +75,7 @@ pub enum ItemKind {
     /// The start of a run; precedes the run's first item.
     RunStart {
         number: i64,
-        started_at: DateTime<Utc>,
+        started_at: Timestamp,
     },
 }
 
@@ -161,9 +161,9 @@ pub struct Folder {
     /// Run of the last event folded, 0 before the first.
     run: i64,
     /// A run that started and has no item yet: its divider goes in front of the next item.
-    run_start: Option<(i64, DateTime<Utc>)>,
+    run_start: Option<(i64, Timestamp)>,
     /// Time of the event being folded.
-    now: DateTime<Utc>,
+    now: Timestamp,
     /// Changes of dividers pushed while folding the current event.
     carry: Vec<Change>,
     /// Keep hidden content blocks in user messages (`web.showHiddenBlocks`).
@@ -449,7 +449,7 @@ impl Folder {
     /// The DOM id of the element that a request card raised at `card_at` goes before, `None` if it
     /// goes at the end. A card inside a tool call group goes after the group (design D3), so
     /// the answer is the element after the group, and for the first item of a group the group.
-    pub fn card_anchor(&self, card_at: DateTime<Utc>) -> Option<String> {
+    pub fn card_anchor(&self, card_at: Timestamp) -> Option<String> {
         let index = self
             .items
             .iter()
@@ -698,14 +698,14 @@ fn notice_level(level: i32) -> String {
 
 /// Whether a request card raised at `card_at` goes before an item recorded at `item_at`; at the
 /// same time the card goes first. Page and stream place cards with this one rule.
-pub(crate) fn card_goes_before(card_at: DateTime<Utc>, item_at: DateTime<Utc>) -> bool {
+pub(crate) fn card_goes_before(card_at: Timestamp, item_at: Timestamp) -> bool {
     card_at <= item_at
 }
 
 /// Renders the transcript container with all `items`. `cards` (a time and the markup) are
 /// merged in by time (see [`card_goes_before`]).
 /// A card inside a tool call group follows the group: it is merged in before the item after it.
-pub fn render_transcript(items: &[Item], cards: &[(DateTime<Utc>, Markup)]) -> Markup {
+pub fn render_transcript(items: &[Item], cards: &[(Timestamp, Markup)]) -> Markup {
     let mut cards = cards.iter().peekable();
     html! {
         div id="transcript" class="flex min-w-0 flex-col gap-3" {
@@ -951,7 +951,7 @@ fn diff_text(old: Option<&str>, new: &str) -> String {
 #[cfg(test)]
 impl Item {
     /// A completed agent message, for tests of the layout around items.
-    pub(crate) fn test_agent(id: &str, at: DateTime<Utc>) -> Self {
+    pub(crate) fn test_agent(id: &str, at: Timestamp) -> Self {
         Self {
             dom_id: id.to_string(),
             turn_id: String::new(),

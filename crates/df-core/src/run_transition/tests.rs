@@ -13,20 +13,20 @@ fn snapshot(state: RunState) -> RunSnapshot {
         provisioning_began: false,
         finalize_reason: None,
         undelivered_messages: false,
-        started_at: Utc::now(),
+        started_at: Timestamp::now(),
     }
 }
 
 fn connected(state: RunState) -> RunSnapshot {
     RunSnapshot {
-        connected_at: Some(Utc::now()),
+        connected_at: Some(Timestamp::now()),
         ..snapshot(state)
     }
 }
 
 fn stopped(state: RunState) -> RunSnapshot {
     RunSnapshot {
-        stop_requested_at: Some(Utc::now()),
+        stop_requested_at: Some(Timestamp::now()),
         ..connected(state)
     }
 }
@@ -102,7 +102,7 @@ fn the_first_connect_moves_an_early_run_to_preparing() {
 fn a_connect_of_a_run_stopped_before_it_connected_finalizes_it_for_the_stop() {
     for state in [Pending, Provisioning, Connecting] {
         let run = RunSnapshot {
-            stop_requested_at: Some(Utc::now()),
+            stop_requested_at: Some(Timestamp::now()),
             ..snapshot(state)
         };
         let next = apply(&run, RunEvent::Connected);
@@ -404,12 +404,12 @@ fn cfg() -> RunsConfig {
     }
 }
 
-fn ago(seconds: i64) -> DateTime<Utc> {
-    Utc::now() - TimeDelta::seconds(seconds)
+fn ago(seconds: i64) -> Timestamp {
+    Timestamp::now() - SignedDuration::from_secs(seconds)
 }
 
 fn overdue_end(run: &RunSnapshot) -> Option<(RunOutcome, String)> {
-    match overdue(run, Utc::now(), &cfg())? {
+    match overdue(run, Timestamp::now(), &cfg())? {
         RunEvent::Ended(end) => Some((end.outcome, end.detail)),
         other => panic!("{other:?}"),
     }
@@ -419,7 +419,7 @@ fn overdue_end(run: &RunSnapshot) -> Option<(RunOutcome, String)> {
 fn a_stopped_run_without_a_connection_ends_at_once() {
     for state in [Pending, Provisioning, Connecting] {
         let run = RunSnapshot {
-            stop_requested_at: Some(Utc::now()),
+            stop_requested_at: Some(Timestamp::now()),
             ..snapshot(state)
         };
         assert_eq!(
@@ -510,7 +510,7 @@ fn a_terminal_run_is_never_overdue() {
         stop_requested_at: Some(ago(5000)),
         ..connected(Failed)
     };
-    assert_eq!(overdue(&run, Utc::now(), &cfg()), None);
+    assert_eq!(overdue(&run, Timestamp::now(), &cfg()), None);
 }
 
 #[test]
@@ -520,7 +520,7 @@ fn an_overdue_event_ends_the_run_on_the_snapshot_and_otherwise_changes_nothing()
         ..snapshot(Pending)
     };
     let event = RunEvent::Overdue {
-        now: Utc::now(),
+        now: Timestamp::now(),
         limits: cfg(),
     };
     let next = apply(&late, event.clone());
@@ -543,8 +543,8 @@ fn an_unrepresentable_budget_means_no_deadline() {
         connected_at: Some(ago(100_000)),
         ..snapshot(Running)
     };
-    assert_eq!(overdue(&run, Utc::now(), &cfg), None);
-    assert_eq!(cancel_deadline(Utc::now(), &cfg), None);
+    assert_eq!(overdue(&run, Timestamp::now(), &cfg), None);
+    assert_eq!(cancel_deadline(Timestamp::now(), &cfg), None);
 }
 
 #[test]
@@ -609,7 +609,7 @@ fn the_state_diagram_names_every_state_event_and_finalize_reason() {
         RunEvent::StopRequested(StopScope::ActiveOnly),
         end(&snapshot(Running), RunOutcome::Failed),
         RunEvent::Overdue {
-            now: Utc::now(),
+            now: Timestamp::now(),
             limits: cfg(),
         },
     ];

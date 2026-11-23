@@ -1,11 +1,11 @@
 //! Ending a run on behalf of the channel: the transition itself is `df_db::runs::end_run`; this
 //! module adds the channel configuration and the sandbox teardown (design D2, D4).
 
-use chrono::{DateTime, Utc};
 use df_core::RunId;
 use df_core::run_transition::RunEnd;
 use df_db::run_events::RunEnv;
 use df_db::runs::{self, EndedRun};
+use jiff::Timestamp;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::error::OrchestratorError;
@@ -56,7 +56,7 @@ pub async fn finish_run(
 pub async fn finish_overdue(
     ctx: &OrchestratorContext,
     run_id: RunId,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Option<EndedRun>, OrchestratorError> {
     let ended = runs::end_overdue(
         &ctx.pool,

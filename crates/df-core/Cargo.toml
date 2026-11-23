@@ -14,11 +14,11 @@ test-util = []
 
 [dependencies]
 async-trait.workspace = true
-chrono.workspace = true
 df-artifact-types.workspace = true
 df-sandbox-contract.workspace = true
 futures.workspace = true
 hex.workspace = true
+jiff.workspace = true
 minijinja.workspace = true
 regex.workspace = true
 secrecy.workspace = true
@@ -36,7 +36,3 @@ uuid.workspace = true
 df-core = { path = ".", features = ["test-util"] }
 image.workspace = true
 tempfile.workspace = true
-
-[package.metadata.cargo-machete]
-# Declared ahead of use.
-ignored = ["chrono"]

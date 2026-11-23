@@ -9,13 +9,13 @@ use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use df_core::{
     CAPACITY_DETAIL, ProjectKey, ProviderError, RunId, RunOutcome, RunSandboxSpec, RunState,
     SandboxEvent, TaskVolumeSpec,
 };
 use df_db::Notification;
 use futures::StreamExt;
+use jiff::{SignedDuration, Timestamp};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinSet;
 
@@ -31,7 +31,7 @@ use df_db::runs::{
 };
 
 /// Age of a run without a sandbox after which the tick provisions it again (design D4).
-const REPROVISION_AFTER: chrono::TimeDelta = chrono::TimeDelta::seconds(60);
+const REPROVISION_AFTER: SignedDuration = SignedDuration::from_secs(60);
 /// Runs started per tick; the next tick (or notification) picks up the rest.
 const START_BATCH: i64 = 10;
 /// Time granted to in-flight provisioning when the scheduler stops.
@@ -80,7 +80,7 @@ impl Scheduler {
             tokio::select! {
                 () = &mut shutdown => break,
                 _ = interval.tick() => {
-                    if let Err(e) = self.tick(&mut background, Utc::now()).await {
+                    if let Err(e) = self.tick(&mut background, Timestamp::now()).await {
                         tracing::error!(error = %e, "failed to enforce run timeouts");
                     }
                 }
@@ -89,7 +89,7 @@ impl Scheduler {
                         | Err(RecvError::Lagged(_)) => self.start_in_background(&mut background).await,
                     // A stop of a run without a connection ends it here, not on the tick.
                     Ok(Notification::RunChanged { .. }) => {
-                        if let Err(e) = self.enforce_timeouts(Utc::now()).await {
+                        if let Err(e) = self.enforce_timeouts(Timestamp::now()).await {
                             tracing::error!(error = %e, "failed to end stopped runs");
                         }
                     }
@@ -116,7 +116,7 @@ impl Scheduler {
     async fn tick(
         &self,
         background: &mut JoinSet<()>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Result<(), OrchestratorError> {
         self.reprovision_stale(background, now).await;
         self.start_in_background(background).await;
@@ -126,8 +126,8 @@ impl Scheduler {
     /// Provisions runs again that stayed `pending`/`provisioning` for [`REPROVISION_AFTER`], for
     /// example because the replica that created them stopped before the sandbox existed. Volume
     /// and sandbox creation are idempotent; a run that has a sandbox only costs one existence check.
-    async fn reprovision_stale(&self, background: &mut JoinSet<()>, now: DateTime<Utc>) {
-        let Some(before) = now.checked_sub_signed(REPROVISION_AFTER) else {
+    async fn reprovision_stale(&self, background: &mut JoinSet<()>, now: Timestamp) {
+        let Some(before) = now.checked_sub(REPROVISION_AFTER).ok() else {
             return;
         };
         match list_unprovisioned_runs(&self.ctx.pool, before).await {
@@ -419,7 +419,7 @@ impl Scheduler {
     /// Ends runs a board member stopped (at once without a connection, after the stop timeout
     /// otherwise), fails runs that never connected and runs that outlived budget plus two grace
     /// periods (the first one is for `Cancel`, sent by the session holding the stream).
-    pub async fn enforce_timeouts(&self, now: DateTime<Utc>) -> Result<(), OrchestratorError> {
+    pub async fn enforce_timeouts(&self, now: Timestamp) -> Result<(), OrchestratorError> {
         let mut first_error = None;
         // The query selects a superset of the runs that are overdue; `overdue` decides, on the
         // locked row (`df_core::run_transition::overdue`).

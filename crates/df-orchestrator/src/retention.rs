@@ -6,10 +6,10 @@
 use std::future::Future;
 use std::time::Duration;
 
-use chrono::{DateTime, TimeDelta, Utc};
 use df_core::TaskId;
 use df_db::lifecycle_events::VolumeDestroyedReason;
 use df_db::volumes::{self, DELETE_TIMEOUT};
+use jiff::{SignedDuration, Timestamp};
 use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
 
@@ -39,7 +39,7 @@ impl Retention {
     pub async fn run(&self, is_leader: watch::Receiver<bool>, stop: watch::Receiver<bool>) {
         let stopping = || *stop.borrow();
         let ended = every_period_while_leader(SCAN_INTERVAL, is_leader, stop.clone(), || async {
-            if let Err(e) = self.scan_until(Utc::now(), stopping).await {
+            if let Err(e) = self.scan_until(Timestamp::now(), stopping).await {
                 tracing::error!(error = %e, "volume retention scan failed");
             }
         })
@@ -51,14 +51,14 @@ impl Retention {
 
     /// Deletes the volumes that are due at `now`, each in its own transaction; a failed deletion
     /// is logged and the scan goes on. Returns the number of deleted volumes.
-    pub async fn scan(&self, now: DateTime<Utc>) -> Result<usize, OrchestratorError> {
+    pub async fn scan(&self, now: Timestamp) -> Result<usize, OrchestratorError> {
         self.scan_until(now, || false).await
     }
 
     /// Like [`Self::scan`], but stops before the next volume once `stopping` returns `true`.
     async fn scan_until(
         &self,
-        now: DateTime<Utc>,
+        now: Timestamp,
         stopping: impl Fn() -> bool,
     ) -> Result<usize, OrchestratorError> {
         let cfg = &self.ctx.config.volumes;
@@ -92,7 +92,7 @@ impl Retention {
         &self,
         task_id: TaskId,
         key: &str,
-        cutoffs: (Option<DateTime<Utc>>, Option<DateTime<Utc>>),
+        cutoffs: (Option<Timestamp>, Option<Timestamp>),
     ) -> Result<bool, OrchestratorError> {
         let mut tx = self.ctx.pool.begin().await?;
         let task_key = volumes::lock_task(&mut tx, task_id).await?;
@@ -160,9 +160,9 @@ where
 }
 
 /// `now` minus `seconds`; `None` (never) if that is not representable.
-fn before(now: DateTime<Utc>, seconds: u64) -> Option<DateTime<Utc>> {
-    let delta = TimeDelta::try_seconds(i64::try_from(seconds).ok()?)?;
-    now.checked_sub_signed(delta)
+fn before(now: Timestamp, seconds: u64) -> Option<Timestamp> {
+    let delta = SignedDuration::from_secs(i64::try_from(seconds).ok()?);
+    now.checked_sub(delta).ok()
 }
 
 #[cfg(test)]

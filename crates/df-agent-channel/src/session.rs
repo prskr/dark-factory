@@ -9,7 +9,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use df_core::run_transition::{FinalizeReason, RunCommand, RunEnd, cancel_deadline};
 use df_core::{RunOutcome, RunState};
 use df_db::runs::{
@@ -28,8 +27,10 @@ use df_proto::agent::v1::{
     PushStatus, PushTarget, Release, RunPhase, RunReport, ToolCallRequest, agent_message,
     control_message,
 };
+use df_proto::time::from_proto;
 use df_proto::transcript::v1::{Event, ToolCallStatus, ToolKind, ToolOrigin, event};
 use futures::{FutureExt, Stream, StreamExt};
+use jiff::{SignedDuration, Timestamp};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
@@ -315,20 +316,20 @@ impl Session {
     }
 
     /// When the budget `Cancel` is due; `None` if the configured budget has no deadline.
-    fn budget_deadline(&self) -> Option<DateTime<Utc>> {
+    fn budget_deadline(&self) -> Option<Timestamp> {
         cancel_deadline(self.rc.run.budget_start(), &self.ctx.orch.config.runs)
     }
 
     /// Whether the budget deadline of the run has passed.
     fn budget_spent(&self) -> bool {
-        self.budget_deadline().is_some_and(|at| at <= Utc::now())
+        self.budget_deadline()
+            .is_some_and(|at| at <= Timestamp::now())
     }
 
     /// The timer of the budget `Cancel`; `None` if the configured budget has no deadline.
     fn budget_timer(&self) -> Option<Pin<Box<tokio::time::Sleep>>> {
         let at = self.budget_deadline()?;
-        let wait = (at - Utc::now())
-            .to_std()
+        let wait = Duration::try_from(at - Timestamp::now())
             .unwrap_or_default()
             .min(MAX_TIMER);
         Some(Box::pin(tokio::time::sleep(wait)))
@@ -783,8 +784,7 @@ impl<'l> BatchApply<'l> {
                 if let Some(ended) = end_run_tx(tx, &run_end(rc, &report), &self.config).await? {
                     self.observations.push(Observation::RunEnded {
                         outcome: report.outcome(),
-                        duration: (Utc::now() - rc.run.started_at)
-                            .to_std()
+                        duration: Duration::try_from(Timestamp::now() - rc.run.started_at)
                             .unwrap_or_default(),
                     });
                     self.effects.run_end = Some(ended);
@@ -907,10 +907,9 @@ async fn busy_on_connect(
 }
 
 /// The instant `keep_alive_seconds` after `turn_end`; `None` if that is not representable.
-fn idle_instant(turn_end: DateTime<Utc>, keep_alive_seconds: u64) -> Option<Instant> {
-    let keep_alive = chrono::TimeDelta::try_seconds(i64::try_from(keep_alive_seconds).ok()?)?;
-    let wait = (turn_end.checked_add_signed(keep_alive)? - Utc::now())
-        .to_std()
+fn idle_instant(turn_end: Timestamp, keep_alive_seconds: u64) -> Option<Instant> {
+    let keep_alive = SignedDuration::from_secs(i64::try_from(keep_alive_seconds).ok()?);
+    let wait = Duration::try_from(turn_end.checked_add(keep_alive).ok()? - Timestamp::now())
         .unwrap_or_default()
         .min(MAX_TIMER);
     Some(Instant::now() + wait)
@@ -936,10 +935,7 @@ fn run_end(rc: &RunContext, report: &RunReport) -> RunEnd {
         } else {
             report.detail.clone()
         },
-        retry_after: report
-            .retry_after
-            .as_ref()
-            .and_then(|t| DateTime::from_timestamp(t.seconds, u32::try_from(t.nanos).ok()?)),
+        retry_after: report.retry_after.as_ref().and_then(from_proto),
         harness_session_id: report.harness_session_id.clone(),
         task_branch_sha: workspace.task_branch_sha,
         wip_sha: workspace.wip_sha,

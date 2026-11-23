@@ -1,8 +1,9 @@
 //! Tests of the `pr.sync` handler against the fake forge.
 
-use chrono::TimeDelta;
 use df_core::testing::ForgeCall;
 use df_core::{PullRequestRef, PullRequestState, RepoRef, UpstreamError};
+use jiff::SignedDuration;
+use jiff_sqlx::ToSqlx;
 use uuid::Uuid;
 
 use super::*;
@@ -29,7 +30,7 @@ impl Fixture {
         )
     }
 
-    fn job(&self, open: bool, ready: Option<DateTime<Utc>>) -> PrSyncJob {
+    fn job(&self, open: bool, ready: Option<Timestamp>) -> PrSyncJob {
         PrSyncJob {
             task_id: self.env.task.id,
             run_id: Some(self.run),
@@ -120,14 +121,14 @@ impl Fixture {
         .unwrap()
     }
 
-    async fn queue_message_at(&self, at: DateTime<Utc>) {
+    async fn queue_message_at(&self, at: Timestamp) {
         sqlx::query(
             "INSERT INTO task_messages (id, task_id, author, content, queued_at)
              VALUES ($1, $2, '{}', '[]', $3)",
         )
         .bind(Uuid::now_v7())
         .bind(self.env.task.id.as_uuid())
-        .bind(at)
+        .bind(at.to_sqlx())
         .execute(&self.env.ctx.pool)
         .await
         .unwrap();
@@ -314,7 +315,7 @@ async fn a_cancelled_task_is_not_marked_ready_and_gets_no_comment() {
     f.set_status("cancelled").await;
     f.set_summary(f.run, "All done").await;
 
-    f.run(f.job(false, Some(Utc::now()))).await.unwrap();
+    f.run(f.job(false, Some(Timestamp::now()))).await.unwrap();
 
     assert!(f.ready_marks().is_empty());
     assert!(f.comments().is_empty());
@@ -326,7 +327,7 @@ async fn ready_marks_the_pr_ready_and_posts_the_summary_of_the_run() {
     f.run(f.job(true, None)).await.unwrap();
     f.set_summary(f.run, "All done").await;
 
-    f.run(f.job(false, Some(Utc::now()))).await.unwrap();
+    f.run(f.job(false, Some(Timestamp::now()))).await.unwrap();
 
     assert_eq!(f.ready_marks(), [1]);
     assert_eq!(f.comments(), [(1, "All done".to_string())]);
@@ -336,7 +337,7 @@ async fn ready_marks_the_pr_ready_and_posts_the_summary_of_the_run() {
 async fn open_and_ready_in_one_job_opens_then_marks_ready_with_both_events() {
     let f = Fixture::new().await;
 
-    f.run(f.job(true, Some(Utc::now()))).await.unwrap();
+    f.run(f.job(true, Some(Timestamp::now()))).await.unwrap();
 
     assert_eq!(f.ready_marks(), [1]);
     let events = f.forge_events().await;
@@ -352,8 +353,8 @@ async fn ready_writes_the_event_once_across_two_runs_of_the_job() {
     let f = Fixture::new().await;
     f.run(f.job(true, None)).await.unwrap();
 
-    f.run(f.job(false, Some(Utc::now()))).await.unwrap();
-    f.run(f.job(false, Some(Utc::now()))).await.unwrap();
+    f.run(f.job(false, Some(Timestamp::now()))).await.unwrap();
+    f.run(f.job(false, Some(Timestamp::now()))).await.unwrap();
 
     let ready = f
         .forge_events()
@@ -370,7 +371,7 @@ async fn an_empty_run_summary_posts_no_comment() {
     f.run(f.job(true, None)).await.unwrap();
     f.set_summary(f.run, "").await;
 
-    f.run(f.job(false, Some(Utc::now()))).await.unwrap();
+    f.run(f.job(false, Some(Timestamp::now()))).await.unwrap();
 
     assert_eq!(f.ready_marks(), [1]);
     assert!(f.comments().is_empty());
@@ -390,7 +391,7 @@ async fn the_summary_of_an_earlier_run_is_not_posted() {
 
     let job = PrSyncJob {
         run_id: Some(run2),
-        ..f.job(false, Some(Utc::now()))
+        ..f.job(false, Some(Timestamp::now()))
     };
     f.run(job).await.unwrap();
 
@@ -406,7 +407,7 @@ async fn a_job_without_a_run_marks_ready_without_a_comment() {
 
     let job = PrSyncJob {
         run_id: None,
-        ..f.job(false, Some(Utc::now()))
+        ..f.job(false, Some(Timestamp::now()))
     };
     f.run(job).await.unwrap();
 
@@ -443,7 +444,7 @@ async fn a_forge_failure_on_find_create_ready_or_comment_returns_retry() {
         .forge
         .push_update_pull_request_result(Err(bad_gateway()));
     assert!(matches!(
-        f.run(f.job(false, Some(Utc::now()))).await,
+        f.run(f.job(false, Some(Timestamp::now()))).await,
         Err(JobError::Retry(_))
     ));
     assert!(
@@ -460,11 +461,11 @@ async fn a_forge_failure_on_find_create_ready_or_comment_returns_retry() {
         .forge
         .push_add_issue_comment_result(Err(bad_gateway()));
     assert!(matches!(
-        f.run(f.job(false, Some(Utc::now()))).await,
+        f.run(f.job(false, Some(Timestamp::now()))).await,
         Err(JobError::Retry(_))
     ));
     // A retry succeeds and posts the summary.
-    f.run(f.job(false, Some(Utc::now()))).await.unwrap();
+    f.run(f.job(false, Some(Timestamp::now()))).await.unwrap();
     assert_eq!(f.comments().len(), 2);
 }
 
@@ -489,7 +490,7 @@ async fn a_ready_only_job_waits_for_an_unfinished_open_job_of_the_task() {
     .await
     .unwrap();
 
-    let result = f.run(f.job(false, Some(Utc::now()))).await;
+    let result = f.run(f.job(false, Some(Timestamp::now()))).await;
 
     assert!(matches!(result, Err(JobError::Retry(_))), "{result:?}");
     assert!(f.env.forge.calls().is_empty());
@@ -499,7 +500,7 @@ async fn a_ready_only_job_waits_for_an_unfinished_open_job_of_the_task() {
 async fn a_ready_only_job_without_a_pr_and_without_a_pending_open_job_finishes_quietly() {
     let f = Fixture::new().await;
 
-    f.run(f.job(false, Some(Utc::now()))).await.unwrap();
+    f.run(f.job(false, Some(Timestamp::now()))).await.unwrap();
 
     assert!(f.env.forge.calls().is_empty());
 }
@@ -527,7 +528,7 @@ async fn ready_and_summary_go_to_the_pr_recorded_first() {
     forge.push_find_open_pull_request_result(Ok(None));
     forge.push_create_pull_request_result(Ok(pull_request(8)));
     let gate = forge.hold_find_open_pull_request();
-    let job = f.job(true, Some(Utc::now()));
+    let job = f.job(true, Some(Timestamp::now()));
     let handler = f.handler();
     let running =
         tokio::spawn(async move { handler.handle(&serde_json::to_value(job).unwrap()).await });
@@ -562,8 +563,9 @@ async fn ready_and_summary_go_to_the_pr_recorded_first() {
 async fn a_message_queued_before_the_ready_time_does_not_keep_the_pr_a_draft() {
     let f = Fixture::new().await;
     f.run(f.job(true, None)).await.unwrap();
-    let ready = Utc::now();
-    f.queue_message_at(ready - TimeDelta::minutes(1)).await;
+    let ready = Timestamp::now();
+    f.queue_message_at(ready - SignedDuration::from_mins(1))
+        .await;
 
     f.run(f.job(false, Some(ready))).await.unwrap();
 
@@ -575,8 +577,9 @@ async fn a_message_queued_after_the_ready_time_keeps_the_pr_a_draft_but_posts_th
     let f = Fixture::new().await;
     f.run(f.job(true, None)).await.unwrap();
     f.set_summary(f.run, "All done").await;
-    let ready = Utc::now();
-    f.queue_message_at(ready + TimeDelta::minutes(1)).await;
+    let ready = Timestamp::now();
+    f.queue_message_at(ready + SignedDuration::from_mins(1))
+        .await;
 
     f.run(f.job(false, Some(ready))).await.unwrap();
 
@@ -616,7 +619,7 @@ async fn the_ready_update_waits_for_the_task_lock() {
     let f = Fixture::new().await;
     f.run(f.job(true, None)).await.unwrap();
     let lock = lock_task_pr(&f.env.ctx.pool, f.env.task.id).await.unwrap();
-    let (handler, job) = (f.handler(), f.job(false, Some(Utc::now())));
+    let (handler, job) = (f.handler(), f.job(false, Some(Timestamp::now())));
     let running =
         tokio::spawn(async move { handler.handle(&serde_json::to_value(job).unwrap()).await });
 
@@ -701,7 +704,7 @@ async fn completion_on_an_attached_pr_posts_the_summary_and_changes_nothing_else
     let f = on_existing_branch(Some(attached_pr())).await;
     f.set_summary(f.run, "Rebased").await;
 
-    f.run(f.job(false, Some(Utc::now()))).await.unwrap();
+    f.run(f.job(false, Some(Timestamp::now()))).await.unwrap();
 
     assert!(f.ready_marks().is_empty());
     assert_eq!(f.comments(), [(45, "Rebased".to_string())]);
@@ -719,7 +722,7 @@ async fn marking_an_attached_task_done_does_not_call_the_forge() {
     let f = on_existing_branch(Some(attached_pr())).await;
     let job = PrSyncJob {
         run_id: None,
-        ..f.job(false, Some(Utc::now()))
+        ..f.job(false, Some(Timestamp::now()))
     };
 
     f.run(job).await.unwrap();

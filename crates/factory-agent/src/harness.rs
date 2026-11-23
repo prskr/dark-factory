@@ -331,7 +331,7 @@ impl PromptQueue {
         let prompts = std::mem::take(&mut self.queued);
         let prompt_ids: Vec<String> = prompts.iter().map(|p| p.prompt_id.clone()).collect();
 
-        let now = chrono::Utc::now().into();
+        let now = crate::transcript::now();
         let mut events = Vec::new();
 
         // 1. TurnStarted event

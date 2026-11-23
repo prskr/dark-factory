@@ -5,9 +5,10 @@
 //! Both kinds share the task-wide `id` order. Every write needs a [`RunTaskLock`] and ends with
 //! one `transcript_event` notification carrying the newest id of the transaction.
 
-use chrono::{DateTime, Utc};
 use df_core::{RunId, TaskId};
 use df_proto::transcript::v1::{Event, FactoryActivity, ForgeActivity, event, forge_activity};
+use jiff::Timestamp;
+use jiff_sqlx::ToSqlx;
 use serde_json::Value;
 use sqlx::{PgExecutor, Postgres, Transaction};
 use uuid::Uuid;
@@ -138,7 +139,7 @@ impl<'l> TranscriptWriter<'l> {
             self.lock.run_id.as_uuid(),
             seq,
             event.schema_version,
-            event.occurred_at,
+            event.occurred_at.to_sqlx(),
             event.kind,
             event.payload
         )
@@ -218,7 +219,7 @@ impl<'l> TranscriptWriter<'l> {
 pub async fn last_turn_event(
     executor: impl PgExecutor<'_>,
     run_id: RunId,
-) -> Result<Option<(String, DateTime<Utc>)>, DbError> {
+) -> Result<Option<(String, Timestamp)>, DbError> {
     let kinds = [KIND_TURN_STARTED.to_owned(), KIND_TURN_ENDED.to_owned()];
     Ok(sqlx::query!(
         "SELECT kind, occurred_at FROM transcript_events
@@ -229,7 +230,7 @@ pub async fn last_turn_event(
     )
     .fetch_optional(executor)
     .await?
-    .map(|row| (row.kind, row.occurred_at)))
+    .map(|row| (row.kind, row.occurred_at.into())))
 }
 
 /// Whether the run's last persisted turn event is a `TurnStarted`.
@@ -243,7 +244,7 @@ pub async fn turn_open(executor: impl PgExecutor<'_>, run_id: RunId) -> Result<b
 pub async fn last_turn_end(
     executor: impl PgExecutor<'_>,
     run_id: RunId,
-) -> Result<Option<DateTime<Utc>>, DbError> {
+) -> Result<Option<Timestamp>, DbError> {
     Ok(last_turn_event(executor, run_id)
         .await?
         .and_then(|(kind, at)| (kind == KIND_TURN_ENDED).then_some(at)))

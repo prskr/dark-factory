@@ -7,19 +7,19 @@
 //!
 //! The status diagram and the events are in `crates/df-core/docs/task-transitions.md`.
 
-use chrono::{DateTime, TimeDelta, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde_json::json;
 
 use crate::domain::{CAPACITY_DETAIL, Principal, RunOutcome, TaskKind, TaskStatus, system_reason};
 use crate::ids::RunId;
 
 /// Resume time of a task whose run reported a rate limit without a retry time.
-const UNKNOWN_RETRY_AFTER: TimeDelta = TimeDelta::hours(1);
+const UNKNOWN_RETRY_AFTER: SignedDuration = SignedDuration::from_hours(1);
 /// What the task's own rows show when an event is applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaskSnapshot {
     pub status: TaskStatus,
-    pub resume_at: Option<DateTime<Utc>>,
+    pub resume_at: Option<Timestamp>,
     pub auto_resumes: i32,
     pub active_run: ActiveRun,
     /// The task has had a run. Dependencies gate only the first start.
@@ -97,18 +97,18 @@ pub struct RunEnded {
     pub run_id: RunId,
     pub outcome: RunOutcome,
     pub detail: String,
-    pub retry_after: Option<DateTime<Utc>>,
+    pub retry_after: Option<Timestamp>,
     /// The runtime pushed the task branch.
     pub task_branch_pushed: bool,
     /// When a board member stopped the run, if one did. Messages queued before it wait for the
     /// next message.
-    pub stop_requested_at: Option<DateTime<Utc>>,
+    pub stop_requested_at: Option<Timestamp>,
     /// `runs.maxAutoResumes`.
     pub max_auto_resumes: u32,
     /// `scheduling.resumeBackoffSeconds`: the backoff per resume attempt after an infrastructure
     /// failure, and the wait after a capacity rejection.
-    pub resume_backoff: TimeDelta,
-    pub now: DateTime<Utc>,
+    pub resume_backoff: SignedDuration,
+    pub now: Timestamp,
 }
 
 /// How a child task ended, as its parent hears about it.
@@ -263,7 +263,7 @@ pub enum Effect {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transition {
     pub status: TaskStatus,
-    pub resume_at: Option<DateTime<Utc>>,
+    pub resume_at: Option<Timestamp>,
     pub auto_resumes: i32,
     /// Write the row (and so bump `updated_at`, which orders the scheduler's queue) even when
     /// status, resume time and count stay.
@@ -568,7 +568,7 @@ fn plan_resume(end: &RunEnded, overridden: Option<TaskStatus>, auto_resumes: i32
         };
         return plan(status, None, kept);
     }
-    let later = |delta: TimeDelta| end.now.checked_add_signed(delta).unwrap_or(end.now);
+    let later = |delta: SignedDuration| end.now.checked_add(delta).unwrap_or(end.now);
     if end.outcome == RunOutcome::RateLimited {
         let at = end
             .retry_after

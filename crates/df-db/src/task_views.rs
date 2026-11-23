@@ -1,12 +1,12 @@
 //! Read models of the web UI: task list, task detail, runs with token usage (from the gateway's
 //! usage records) and the transcript.
 
-use chrono::{DateTime, Utc};
 use df_core::{
     DependencyKind, Principal, RunState, StatusSet, TaskId, TaskSort, TaskStatus, TitleSource,
     is_satisfied,
 };
 use df_proto::transcript::v1::Event;
+use jiff::Timestamp;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -48,11 +48,11 @@ pub struct TaskListItem {
     pub status: String,
     pub status_line: String,
     /// When the scheduler may start the task's next run.
-    pub resume_at: Option<DateTime<Utc>>,
+    pub resume_at: Option<Timestamp>,
     /// Progress of the direct subtasks; total 0 for a task without subtasks.
     pub subtasks: SubtaskProgress,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
 }
 
 /// A row of the task list as `query_as!` reads it.
@@ -66,11 +66,11 @@ struct TaskListRow {
     persona_name: String,
     status: String,
     status_line: String,
-    resume_at: Option<DateTime<Utc>>,
+    resume_at: Option<jiff_sqlx::Timestamp>,
     subtasks_done: i64,
     subtasks_total: i64,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+    created_at: Timestamp,
+    updated_at: Timestamp,
 }
 
 impl TryFrom<TaskListRow> for TaskListItem {
@@ -87,7 +87,7 @@ impl TryFrom<TaskListRow> for TaskListItem {
             persona_name: row.persona_name,
             status: row.status,
             status_line: row.status_line,
-            resume_at: row.resume_at,
+            resume_at: row.resume_at.map(Into::into),
             subtasks: SubtaskProgress {
                 done: row.subtasks_done,
                 total: row.subtasks_total,
@@ -151,12 +151,12 @@ pub struct TaskDetail {
     /// The PR was opened outside the factory.
     pub pr_attached: bool,
     /// When a chat was archived.
-    pub archived_at: Option<DateTime<Utc>>,
+    pub archived_at: Option<Timestamp>,
     /// The task has an agent request that is still pending.
     pub has_pending_request: bool,
     /// The branch the task commits to.
     pub branch: String,
-    pub resume_at: Option<DateTime<Utc>>,
+    pub resume_at: Option<Timestamp>,
     /// Consecutive automatic resumes after infrastructure failures.
     pub auto_resumes: i32,
     pub created_by: Principal,
@@ -193,10 +193,10 @@ struct TaskDetailRow {
     pr_url: Option<String>,
     pr_title: Option<String>,
     pr_attached: bool,
-    archived_at: Option<DateTime<Utc>>,
+    archived_at: Option<jiff_sqlx::Timestamp>,
     has_pending_request: bool,
     branch: String,
-    resume_at: Option<DateTime<Utc>>,
+    resume_at: Option<jiff_sqlx::Timestamp>,
     auto_resumes: i32,
     created_by: serde_json::Value,
     creator_task_key: Option<String>,
@@ -232,10 +232,10 @@ impl TryFrom<TaskDetailRow> for TaskDetail {
             pr_url: row.pr_url,
             pr_title: row.pr_title,
             pr_attached: row.pr_attached,
-            archived_at: row.archived_at,
+            archived_at: row.archived_at.map(Into::into),
             has_pending_request: row.has_pending_request,
             branch: row.branch,
-            resume_at: row.resume_at,
+            resume_at: row.resume_at.map(Into::into),
             auto_resumes: row.auto_resumes,
             created_by: serde_json::from_value(row.created_by)?,
             creator_task_key: row.creator_task_key,
@@ -291,9 +291,9 @@ pub struct RunView {
     pub state: RunState,
     pub outcome: Option<String>,
     pub detail: String,
-    pub retry_after: Option<DateTime<Utc>>,
-    pub started_at: DateTime<Utc>,
-    pub ended_at: Option<DateTime<Utc>>,
+    pub retry_after: Option<Timestamp>,
+    pub started_at: Timestamp,
+    pub ended_at: Option<Timestamp>,
     pub usage: Vec<ModelUsage>,
     /// Model requests whose response carried no usage (unknown, not zero).
     pub unknown_usage_requests: i64,
@@ -305,9 +305,9 @@ struct RunRow {
     state: String,
     outcome: Option<String>,
     detail: String,
-    retry_after: Option<DateTime<Utc>>,
-    started_at: DateTime<Utc>,
-    ended_at: Option<DateTime<Utc>>,
+    retry_after: Option<jiff_sqlx::Timestamp>,
+    started_at: Timestamp,
+    ended_at: Option<jiff_sqlx::Timestamp>,
 }
 
 struct RunUsageRow {
@@ -326,10 +326,10 @@ pub struct StoredEvent {
     pub id: i64,
     pub event: Option<Event>,
     /// When the runtime recorded the event.
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     /// Number of the run that produced the event and when that run started.
     pub run_number: i64,
-    pub run_started_at: DateTime<Utc>,
+    pub run_started_at: Timestamp,
 }
 
 /// The tasks matching `filter` in the order of `filter.sort`. Ties are ordered by task ID in the
@@ -541,8 +541,8 @@ struct DependencyRecord {
     title: String,
     kind: String,
     status: String,
-    first_completed_at: Option<DateTime<Utc>>,
-    first_done_at: Option<DateTime<Utc>>,
+    first_completed_at: Option<jiff_sqlx::Timestamp>,
+    first_done_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// The tasks `task_id` waits for and the tasks that wait for it.
@@ -571,7 +571,11 @@ pub async fn list_dependencies(pool: &PgPool, task_id: TaskId) -> Result<Depende
             .map(|r| {
                 let kind: DependencyKind = r.kind.parse()?;
                 Ok(DependencyView {
-                    satisfied: is_satisfied(kind, r.first_completed_at, r.first_done_at),
+                    satisfied: is_satisfied(
+                        kind,
+                        r.first_completed_at.map(Into::into),
+                        r.first_done_at.map(Into::into),
+                    ),
                     key: r.key,
                     title: r.title,
                     kind,
@@ -652,9 +656,9 @@ pub async fn list_runs(pool: &PgPool, task_id: TaskId) -> Result<Vec<RunView>, D
                 state: r.state.parse()?,
                 outcome: r.outcome,
                 detail: r.detail,
-                retry_after: r.retry_after,
+                retry_after: r.retry_after.map(Into::into),
                 started_at: r.started_at,
-                ended_at: r.ended_at,
+                ended_at: r.ended_at.map(Into::into),
             })
         })
         .collect()
@@ -663,9 +667,9 @@ pub async fn list_runs(pool: &PgPool, task_id: TaskId) -> Result<Vec<RunView>, D
 struct TranscriptRow {
     id: i64,
     payload: serde_json::Value,
-    occurred_at: DateTime<Utc>,
+    occurred_at: Timestamp,
     number: i64,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
 }
 
 /// Decodes a stored transcript event. Events stored before the gateway measured usage carry

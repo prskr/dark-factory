@@ -1,8 +1,8 @@
 //! Markup of artifacts: cards, the artifact view with its header and the details tab heading.
 
-use chrono::{DateTime, Utc};
 use df_db::artifacts::ArtifactMeta;
 use df_proto::transcript::v1::{ArtifactKind, ArtifactWritten};
+use jiff::Timestamp;
 use maud::{Markup, html};
 
 use crate::components::{ICON_BUTTON_CLASS, INITIAL_DETAILS_TAB, Icon, icon};
@@ -64,8 +64,8 @@ pub(super) fn size_label(bytes: i64) -> String {
     }
 }
 
-fn time(at: DateTime<Utc>) -> Markup {
-    html! { time datetime=(at.to_rfc3339()) { (at.format("%b %d %H:%M UTC")) } }
+fn time(at: Timestamp) -> Markup {
+    html! { time datetime=(at.to_string()) { (at.strftime("%b %d %H:%M UTC").to_string()) } }
 }
 
 fn dimensions(meta: &ArtifactMeta) -> Option<String> {
@@ -325,5 +325,19 @@ pub(crate) fn artifact_row(id: &str, written: &ArtifactWritten) -> Markup {
                 span class="text-xs text-faint" { "\u{b7} " (label) }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_artifact_time_shows_utc_text_and_an_rfc3339_datetime_attribute() {
+        let at: Timestamp = "2026-10-23T10:42:00Z".parse().unwrap();
+        assert_eq!(
+            time(at).into_string(),
+            "<time datetime=\"2026-10-23T10:42:00Z\">Oct 23 10:42 UTC</time>"
+        );
     }
 }

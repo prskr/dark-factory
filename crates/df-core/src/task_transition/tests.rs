@@ -36,8 +36,8 @@ fn end(outcome: RunOutcome) -> RunEnded {
         task_branch_pushed: false,
         stop_requested_at: None,
         max_auto_resumes: 3,
-        resume_backoff: TimeDelta::minutes(2),
-        now: Utc::now(),
+        resume_backoff: SignedDuration::from_mins(2),
+        now: Timestamp::now(),
     }
 }
 
@@ -101,7 +101,7 @@ fn a_message_goes_to_the_connected_run_and_otherwise_queues_the_task() {
     for status in TaskStatus::ALL {
         let idle = TaskSnapshot {
             active_run: ActiveRun::Connected,
-            resume_at: Some(Utc::now()),
+            resume_at: Some(Timestamp::now()),
             auto_resumes: 2,
             ..snapshot(*status)
         };
@@ -156,7 +156,7 @@ fn withdrawing_the_last_message_of_a_queued_task_returns_it_to_waiting() {
 #[test]
 fn a_started_run_runs_the_task_and_clears_the_resume_time() {
     let task = TaskSnapshot {
-        resume_at: Some(Utc::now()),
+        resume_at: Some(Timestamp::now()),
         auto_resumes: 2,
         ..snapshot(RateLimited)
     };
@@ -252,7 +252,7 @@ fn an_undelivered_message_queues_the_task_unless_the_run_failed_or_was_rate_limi
 fn a_task_reopened_after_a_stop_stays_queued_whatever_the_outcome() {
     let reopened = snapshot(Queued);
     let stopped = RunEnded {
-        stop_requested_at: Some(Utc::now()),
+        stop_requested_at: Some(Timestamp::now()),
         ..end(RunOutcome::Failed)
     };
     assert_eq!(
@@ -265,7 +265,7 @@ fn a_task_reopened_after_a_stop_stays_queued_whatever_the_outcome() {
 
 #[test]
 fn an_infrastructure_failure_below_the_cap_resumes_with_a_growing_backoff() {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let task = TaskSnapshot {
         auto_resumes: 1,
         ..snapshot(Running)
@@ -276,14 +276,14 @@ fn an_infrastructure_failure_below_the_cap_resumes_with_a_growing_backoff() {
     };
     let next = apply(&task, TaskEvent::RunEnded(sandbox_lost));
     assert_eq!(next.status, Queued);
-    assert_eq!(next.resume_at, Some(now + TimeDelta::minutes(4)));
+    assert_eq!(next.resume_at, Some(now + SignedDuration::from_mins(4)));
     assert_eq!(next.auto_resumes, 2);
 }
 
 #[test]
 fn a_configured_resume_backoff_sets_the_resume_time_of_a_resume_and_of_a_capacity_rejection() {
-    let now = Utc::now();
-    let backoff = TimeDelta::seconds(5);
+    let now = Timestamp::now();
+    let backoff = SignedDuration::from_secs(5);
     let lost = RunEnded {
         now,
         resume_backoff: backoff,
@@ -331,7 +331,7 @@ fn an_infrastructure_failure_at_the_cap_fails_the_task_and_keeps_the_count() {
 
 #[test]
 fn a_capacity_rejection_requeues_without_counting_a_resume() {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let task = TaskSnapshot {
         auto_resumes: 5,
         ..snapshot(Running)
@@ -344,12 +344,12 @@ fn a_capacity_rejection_requeues_without_counting_a_resume() {
     };
     let next = apply(&task, TaskEvent::RunEnded(rejected));
     assert_eq!((next.status, next.auto_resumes), (Queued, 5));
-    assert_eq!(next.resume_at, Some(now + TimeDelta::minutes(2)));
+    assert_eq!(next.resume_at, Some(now + SignedDuration::from_mins(2)));
 }
 
 #[test]
 fn a_rate_limit_resumes_at_the_retry_time_or_in_an_hour_and_resets_the_count() {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let task = TaskSnapshot {
         auto_resumes: 2,
         ..snapshot(Running)
@@ -360,10 +360,10 @@ fn a_rate_limit_resumes_at_the_retry_time_or_in_an_hour_and_resets_the_count() {
     };
     let next = apply(&task, TaskEvent::RunEnded(without));
     assert_eq!(next.status, RateLimited);
-    assert_eq!(next.resume_at, Some(now + TimeDelta::hours(1)));
+    assert_eq!(next.resume_at, Some(now + SignedDuration::from_hours(1)));
     assert_eq!(next.auto_resumes, 0);
 
-    let retry = now + TimeDelta::minutes(17);
+    let retry = now + SignedDuration::from_mins(17);
     let with = RunEnded {
         now,
         retry_after: Some(retry),

@@ -14,6 +14,7 @@ pub mod overlay;
 pub mod project_host;
 pub mod shell;
 pub mod table;
+pub mod time;
 pub mod transcript;
 
 pub use actions::{
@@ -44,6 +45,7 @@ pub use table::{
     Cell, actions_cell, data_table, entry_button, entry_link, entry_tr, faint_separator, name_cell,
     separator, td, th, tr, tr_with_id,
 };
+pub use time::short_time;
 pub use transcript::QueuedState;
 
 #[cfg(test)]

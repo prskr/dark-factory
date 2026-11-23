@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use df_core::testing::{FakeSandboxProvider, SandboxCall};
 use df_core::{ProviderError, TaskId};
+use jiff_sqlx::ToSqlx;
 use sqlx::PgPool;
 use tokio::task::JoinSet;
 
@@ -13,8 +14,8 @@ use crate::Scheduler;
 use crate::testing::Env;
 use crate::testing::gated::{Gate, GatedProvider};
 
-fn days_ago(days: i64) -> DateTime<Utc> {
-    Utc::now() - TimeDelta::days(days)
+fn days_ago(days: i64) -> Timestamp {
+    Timestamp::now() - SignedDuration::from_hours(24 * days)
 }
 
 async fn set_status(pool: &PgPool, task_id: TaskId, status: &str) {
@@ -27,22 +28,25 @@ async fn set_status(pool: &PgPool, task_id: TaskId, status: &str) {
 }
 
 /// A `succeeded` run that ended at `ended_at`.
-async fn ended_run(env: &Env, task_id: TaskId, number: i64, ended_at: DateTime<Utc>) {
+async fn ended_run(env: &Env, task_id: TaskId, number: i64, ended_at: Timestamp) {
     let run_id = env.insert_run(task_id, number, "succeeded").await;
     sqlx::query("UPDATE runs SET started_at = $2, ended_at = $2 WHERE id = $1")
         .bind(run_id.as_uuid())
-        .bind(ended_at)
+        .bind(ended_at.to_sqlx())
         .execute(&env.ctx.pool)
         .await
         .unwrap();
 }
 
-async fn volume_deleted_at(pool: &PgPool, task_id: TaskId) -> Option<DateTime<Utc>> {
-    sqlx::query_scalar("SELECT volume_deleted_at FROM tasks WHERE id = $1")
-        .bind(task_id.as_uuid())
-        .fetch_one(pool)
-        .await
-        .unwrap()
+async fn volume_deleted_at(pool: &PgPool, task_id: TaskId) -> Option<Timestamp> {
+    sqlx::query_scalar::<_, Option<jiff_sqlx::Timestamp>>(
+        "SELECT volume_deleted_at FROM tasks WHERE id = $1",
+    )
+    .bind(task_id.as_uuid())
+    .fetch_one(pool)
+    .await
+    .unwrap()
+    .map(Into::into)
 }
 
 async fn run_count(pool: &PgPool) -> i64 {
@@ -81,8 +85,8 @@ async fn closed_tasks_lose_their_volume_after_the_grace_period_once() {
     ended_run(&env, df2, 1, days_ago(8)).await;
     let retention = Retention::new(env.ctx.clone());
 
-    assert_eq!(retention.scan(Utc::now()).await.unwrap(), 2);
-    assert_eq!(retention.scan(Utc::now()).await.unwrap(), 0);
+    assert_eq!(retention.scan(Timestamp::now()).await.unwrap(), 2);
+    assert_eq!(retention.scan(Timestamp::now()).await.unwrap(), 0);
 
     assert_eq!(deleted_volumes(&env.provider), ["task-df-1", "task-df-2"]);
     assert!(volume_deleted_at(&pool, env.task.id).await.is_some());
@@ -101,13 +105,13 @@ async fn an_archived_chat_loses_its_volume_after_the_grace_period_and_an_open_ch
     }
     sqlx::query("UPDATE tasks SET archived_at = $2, archived_by = '{}'::jsonb WHERE id = $1")
         .bind(archived.id.as_uuid())
-        .bind(days_ago(8))
+        .bind(days_ago(8).to_sqlx())
         .execute(&pool)
         .await
         .unwrap();
     let retention = Retention::new(env.ctx.clone());
 
-    assert_eq!(retention.scan(Utc::now()).await.unwrap(), 1);
+    assert_eq!(retention.scan(Timestamp::now()).await.unwrap(), 1);
 
     assert_eq!(deleted_volumes(&env.provider), ["task-df-2-chat"]);
     assert!(volume_deleted_at(&pool, open.id).await.is_none());
@@ -128,7 +132,7 @@ async fn a_chat_archived_recently_keeps_its_volume_whatever_its_last_run_age() {
 
     assert_eq!(
         Retention::new(env.ctx.clone())
-            .scan(Utc::now())
+            .scan(Timestamp::now())
             .await
             .unwrap(),
         0
@@ -141,7 +145,7 @@ async fn merged_task_loses_its_volume_without_waiting_for_the_grace_period() {
     let env = Env::new(pool.clone()).await;
     let df2 = env.second_task().await;
     set_status(&pool, env.task.id, "completed").await;
-    ended_run(&env, env.task.id, 1, Utc::now()).await;
+    ended_run(&env, env.task.id, 1, Timestamp::now()).await;
     sqlx::query("UPDATE tasks SET pr_merged_at = now() WHERE id = $1")
         .bind(env.task.id.as_uuid())
         .execute(&pool)
@@ -157,7 +161,7 @@ async fn merged_task_loses_its_volume_without_waiting_for_the_grace_period() {
 
     assert_eq!(
         Retention::new(env.ctx.clone())
-            .scan(Utc::now())
+            .scan(Timestamp::now())
             .await
             .unwrap(),
         1
@@ -177,7 +181,7 @@ async fn volumes_within_their_retention_are_kept() {
 
     assert_eq!(
         Retention::new(env.ctx.clone())
-            .scan(Utc::now())
+            .scan(Timestamp::now())
             .await
             .unwrap(),
         0
@@ -194,7 +198,7 @@ async fn failed_task_keeps_its_volume_after_the_grace_period_until_it_is_idle() 
 
     assert_eq!(
         Retention::new(env.ctx.clone())
-            .scan(Utc::now())
+            .scan(Timestamp::now())
             .await
             .unwrap(),
         0
@@ -216,7 +220,7 @@ async fn task_without_runs_is_never_a_candidate() {
     });
 
     let scanned = Retention::new(env.ctx.clone())
-        .scan(Utc::now() + TimeDelta::days(1))
+        .scan(Timestamp::now() + SignedDuration::from_hours(24))
         .await
         .unwrap();
 
@@ -233,7 +237,7 @@ async fn idle_task_loses_its_volume_and_the_next_message_runs_on_a_fresh_one() {
 
     assert_eq!(
         Retention::new(env.ctx.clone())
-            .scan(Utc::now())
+            .scan(Timestamp::now())
             .await
             .unwrap(),
         1
@@ -261,14 +265,14 @@ async fn task_with_an_active_run_keeps_its_volume() {
     ended_run(&env, env.task.id, 1, days_ago(40)).await;
     env.insert_run(env.task.id, 2, "running").await;
     sqlx::query("UPDATE runs SET started_at = $1 WHERE number = 2")
-        .bind(days_ago(31))
+        .bind(days_ago(31).to_sqlx())
         .execute(&pool)
         .await
         .unwrap();
 
     assert_eq!(
         Retention::new(env.ctx.clone())
-            .scan(Utc::now())
+            .scan(Timestamp::now())
             .await
             .unwrap(),
         0
@@ -290,7 +294,7 @@ async fn failed_deletion_keeps_the_task_unmarked_and_the_scan_goes_on() {
         .push_delete_volume_result(Err(ProviderError::Backend("storage down".into())));
 
     let deleted = Retention::new(env.ctx.clone())
-        .scan(Utc::now())
+        .scan(Timestamp::now())
         .await
         .unwrap();
 
@@ -334,7 +338,7 @@ async fn run_start_waits_until_the_volume_deletion_has_committed() {
     ended_run(&env, env.task.id, 1, days_ago(31)).await;
     let (entered, release) = GatedProvider::install(&mut env, Gate::DeleteTaskVolume);
     let retention = Retention::new(env.ctx.clone());
-    let scan = tokio::spawn(async move { retention.scan(Utc::now()).await });
+    let scan = tokio::spawn(async move { retention.scan(Timestamp::now()).await });
     entered.notified().await;
 
     let scheduler = Scheduler::new(env.ctx.clone());
@@ -368,7 +372,7 @@ async fn deletion_timeout_rolls_back_and_releases_the_task() {
         ..Retention::new(env.ctx.clone())
     };
 
-    assert_eq!(retention.scan(Utc::now()).await.unwrap(), 0);
+    assert_eq!(retention.scan(Timestamp::now()).await.unwrap(), 0);
 
     assert_eq!(volume_deleted_at(&pool, env.task.id).await, None);
     scheduler_tick(&Scheduler::new(env.ctx.clone())).await;

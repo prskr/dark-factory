@@ -8,10 +8,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use chrono::Utc;
 use df_db::lifecycle_events::{self, DELIVER_KIND, DeliverJob, Target};
 use df_db::outbox::{JobError, OutboxHandler, RetryPolicy};
 use df_db::{DbError, PgPool};
+use jiff::Timestamp;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Meter};
 use reqwest::header::{HeaderMap, HeaderValue, InvalidHeaderValue};
@@ -139,7 +139,7 @@ impl OutboxHandler for DeliverHandler {
         };
 
         let event_id = format!("evt_{}", job.event_id);
-        let timestamp = Utc::now().timestamp();
+        let timestamp = Timestamp::now().as_second();
         let signature = self.key.sign(&event_id, timestamp, &body);
         let headers = headers(&event_id, timestamp, &signature)
             .map_err(|e| JobError::GiveUp(format!("invalid header value: {e}")))?;

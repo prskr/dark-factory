@@ -20,7 +20,6 @@ test-util = [
 
 [dependencies]
 async-trait.workspace = true
-chrono.workspace = true
 df-core.workspace = true
 df-db.workspace = true
 df-orchestrator.workspace = true
@@ -28,6 +27,7 @@ df-proto.workspace = true
 df-sandbox-contract.workspace = true
 df-tls.workspace = true
 futures.workspace = true
+jiff.workspace = true
 jsonschema.workspace = true
 opentelemetry.workspace = true
 regex.workspace = true
@@ -50,6 +50,7 @@ df-core = { workspace = true, features = ["test-util"] }
 df-telemetry = { workspace = true, features = ["test-util"] }
 df-test-postgres.workspace = true
 df-tls = { workspace = true, features = ["test-util"] }
+jiff-sqlx.workspace = true
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["test-util"] }
 tokio-stream = { workspace = true, features = ["net"] }

@@ -3,10 +3,10 @@
 //! Callers validate name, type and size limits with `df_core::artifacts`; this module stores
 //! what they detected and enforces the per-task count.
 
-use chrono::{DateTime, Utc};
 use df_core::artifacts::{ArtifactError, ArtifactKind, Sniffed};
 use df_core::{RunId, TaskId};
 use df_proto::transcript::v1::{self as pb, ArtifactWritten, FactoryActivity, factory_activity};
+use jiff::Timestamp;
 use sqlx::{FromRow, PgPool};
 use thiserror::Error;
 
@@ -25,7 +25,8 @@ pub struct ArtifactMeta {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub sha256: String,
-    pub updated_at: DateTime<Utc>,
+    #[sqlx(try_from = "jiff_sqlx::Timestamp")]
+    pub updated_at: Timestamp,
 }
 
 /// An artifact with its content.

@@ -2,15 +2,16 @@
 //! the composer. Handlers live in the parent module; the live-update regions (`#task-head`,
 //! `#task-details`, `#runs`, `#pending`, `#task-rows`) are re-rendered by `crate::sse`.
 
-use chrono::{DateTime, Utc};
 use df_core::{RunState, StatusSet, TITLE_MAX_CHARS, TaskSort, TaskStatus, TitleSource};
 use df_db::TaskMessageRow;
 use df_db::task_views::{ProjectFilterItem, RunView, TaskDetail, TaskListItem};
+use jiff::Timestamp;
 use maud::{Markup, html};
 
 use super::resume::{ResumeNote, clock_label};
 use crate::components::QueuedState;
 use crate::components::forms::{INPUT_CLASS, MenuItem};
+use crate::components::short_time;
 use crate::components::transcript::queued_message;
 use crate::components::{
     ButtonKind, DialogStyle, EmptyPanel, EmptySize, FormErrors, ICON_BUTTON_CLASS, Icon, Tone,
@@ -200,11 +201,11 @@ pub(crate) fn task_rows(
                             span class="font-mono text-xs text-faint" { (t.key) }
                             @if let Some(status) = status { (status_badge(status)) } @else { (tone_badge(Tone::Queued, &t.status)) }
                             (super::subtasks::chip(t.subtasks))
-                            time datetime=(t.updated_at.to_rfc3339()) class="ml-auto font-mono text-xs text-faint" { (short_time(t.updated_at)) }
+                            time datetime=(t.updated_at.to_string()) class="ml-auto font-mono text-xs text-faint" { (short_time(t.updated_at)) }
                         }
                         div title=(t.title) class={"mt-0.5 truncate text-[15px] font-medium" @if t.title_source == TitleSource::Placeholder { " italic text-muted" }} { (t.title) }
                         @if let Some(at) = resume_at {
-                            div class="mt-0.5 truncate text-xs text-muted" { "Resumes at " (clock_label(at, Utc::now())) }
+                            div class="mt-0.5 truncate text-xs text-muted" { "Resumes at " (clock_label(at, Timestamp::now())) }
                         } @else if !t.status_line.is_empty() { div class="mt-0.5 truncate text-xs text-muted" { (t.status_line) } }
                         div class="mt-1 text-xs text-faint" { (t.project_name) " · " (t.persona_name) }
                     }
@@ -218,8 +219,8 @@ pub(crate) fn task_rows(
 /// The resume time a task row shows: only for a status that waits for it.
 fn shown_resume_time(
     status: Option<TaskStatus>,
-    resume_at: Option<DateTime<Utc>>,
-) -> Option<DateTime<Utc>> {
+    resume_at: Option<Timestamp>,
+) -> Option<Timestamp> {
     resume_at.filter(|_| status.is_some_and(|s| s.waits_for_resume()))
 }
 
@@ -602,7 +603,7 @@ pub(crate) fn details_region(
         Some(at) => (
             Tone::Limited,
             html! {
-                "Resumes at " time datetime=(at.to_rfc3339()) title=(format_time(at)) { (clock_label(at, Utc::now())) }
+                "Resumes at " time datetime=(at.to_string()) title=(format_time(at)) { (clock_label(at, Timestamp::now())) }
                 " · " (resume.reason)
             },
         ),
@@ -887,7 +888,7 @@ fn run_card(task_key: &str, run: &RunView, persona_model: Option<&str>) -> Marku
                 class="font-mono text-sm text-accent-text hover:underline" { "#" (run.number) }
             (tone_badge(Tone::of_run(run.state), run.state.as_str()))
             @if let Some(outcome) = &run.outcome { span class="text-xs text-muted" { (outcome_text(outcome)) } }
-            time datetime=(run.started_at.to_rfc3339()) class="ml-auto font-mono text-xs text-faint" { (short_time(run.started_at)) }
+            time datetime=(run.started_at.to_string()) class="ml-auto font-mono text-xs text-faint" { (short_time(run.started_at)) }
             // A run that is already ending cannot be stopped again.
             @if run.state.can_stop() {
                 button type="button" hx-post={(item_path(task_key)) "/stop"} hx-swap="none"
@@ -1121,10 +1122,6 @@ fn url_encode(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
-fn short_time(time: DateTime<Utc>) -> String {
-    time.format("%b %d %H:%M").to_string()
-}
-
 /// A task status as shown: without underscores.
 pub(crate) fn status_name(status: TaskStatus) -> String {
     status.as_str().replace('_', " ")
@@ -1143,8 +1140,8 @@ fn title_text(title: &str, source: TitleSource) -> Markup {
     }
 }
 
-fn format_time(time: DateTime<Utc>) -> String {
-    time.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+fn format_time(time: Timestamp) -> String {
+    time.strftime("%Y-%m-%d %H:%M:%S UTC").to_string()
 }
 
 fn external_link(url: &str, label: &str, subtitle: Option<&str>, glyph: Icon) -> Markup {

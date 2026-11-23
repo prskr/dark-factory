@@ -21,20 +21,26 @@ use crate::{OrchestratorConfig, OrchestratorContext};
 pub(crate) mod gated;
 
 /// Status, resume time and resume count of a task, as stored.
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct TaskResumeState {
     pub status: String,
-    pub resume_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub resume_at: Option<jiff::Timestamp>,
     pub auto_resumes: i32,
 }
 
 /// Reads the resume state of a task.
 pub async fn task_resume_state(pool: &PgPool, task_id: TaskId) -> TaskResumeState {
-    sqlx::query_as("SELECT status, resume_at, auto_resumes FROM tasks WHERE id = $1")
-        .bind(task_id.as_uuid())
-        .fetch_one(pool)
-        .await
-        .expect("read the resume state of a task")
+    let (status, resume_at, auto_resumes): (String, Option<jiff_sqlx::Timestamp>, i32) =
+        sqlx::query_as("SELECT status, resume_at, auto_resumes FROM tasks WHERE id = $1")
+            .bind(task_id.as_uuid())
+            .fetch_one(pool)
+            .await
+            .expect("read the resume state of a task");
+    TaskResumeState {
+        status,
+        resume_at: resume_at.map(Into::into),
+        auto_resumes,
+    }
 }
 
 /// The recorded lifecycle events (their envelopes) in the order they occurred.

@@ -2,8 +2,8 @@
 //! project settings; every change writes an `event_subscription.*` audit entry with the URL and
 //! the event types in the same transaction.
 
-use chrono::{DateTime, Utc};
 use df_core::EventType;
+use jiff::Timestamp;
 use serde::Serialize;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
@@ -28,8 +28,8 @@ pub struct Subscription {
     pub url: String,
     /// Event types; empty means all.
     pub events: Vec<EventType>,
-    pub created_at: DateTime<Utc>,
-    pub last_attempt_at: Option<DateTime<Utc>>,
+    pub created_at: Timestamp,
+    pub last_attempt_at: Option<Timestamp>,
     /// HTTP status of the last attempt that got a response.
     pub last_status: Option<u16>,
     /// Error of the last attempt that got no response (timeout, refused address).
@@ -164,8 +164,8 @@ struct Row {
     id: Uuid,
     url: String,
     events: Vec<String>,
-    created_at: DateTime<Utc>,
-    last_attempt_at: Option<DateTime<Utc>>,
+    created_at: Timestamp,
+    last_attempt_at: Option<jiff_sqlx::Timestamp>,
     last_status: Option<i16>,
     last_error: Option<String>,
 }
@@ -190,7 +190,7 @@ impl TryFrom<Row> for Subscription {
                 .map(|event| event.parse())
                 .collect::<Result<_, _>>()?,
             created_at: row.created_at,
-            last_attempt_at: row.last_attempt_at,
+            last_attempt_at: row.last_attempt_at.map(Into::into),
             last_status,
             last_error: row.last_error,
         })

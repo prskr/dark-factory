@@ -6,7 +6,7 @@ expression: render_all(&fold(&every_kind()))
 <div id="run-1" role="separator" class="flex items-center gap-3 py-2 text-xs text-faint">
 <span class="h-px flex-1 bg-line">
 </span>
-<span>Run #1 started · <time datetime="2026-10-23T10:00:00+00:00">Oct 23 10:00</time>
+<span>Run #1 started · <time datetime="2026-10-23T10:00:00Z">Oct 23 10:00</time>
 </span>
 <span class="h-px flex-1 bg-line">
 </span>
@@ -18,7 +18,7 @@ expression: render_all(&fold(&every_kind()))
 <p>please fix &lt;b&gt;login&lt;/b&gt;</p>
 </div>
 </div>
-<div class="mt-1 text-xs text-faint text-right">Peter · <time datetime="2026-10-23T10:02:00+00:00">10:02</time>
+<div class="mt-1 text-xs text-faint text-right">Peter · <time datetime="2026-10-23T10:02:00Z">10:02</time>
 </div>
 </div>
 <span class="avatar inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent-text">P</span>
@@ -61,7 +61,7 @@ expression: render_all(&fold(&every_kind()))
 </p>
 </div>
 </div>
-<div class="mt-1 text-xs text-faint">Agent · <time datetime="2026-10-23T10:04:00+00:00">10:04</time>
+<div class="mt-1 text-xs text-faint">Agent · <time datetime="2026-10-23T10:04:00Z">10:04</time>
 </div>
 </div>
 </div>

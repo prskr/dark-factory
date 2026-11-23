@@ -1,13 +1,13 @@
 //! Runtime events on their way into the transcript: canonical JSON payloads and blob extraction
 //! (`specs/transcript-storage/spec.md`).
 
-use chrono::{DateTime, Utc};
 use df_core::PromptId;
-use df_proto::pbjson_types::Timestamp;
+use df_proto::time::from_proto;
 use df_proto::transcript::v1::{
     BlobData, ContentBlock, Event, blob_data, content_block, embedded_resource, event,
     tool_call_content,
 };
+use jiff::Timestamp;
 use serde_json::Value;
 
 use super::{
@@ -24,7 +24,7 @@ pub struct PreparedEvent {
     pub seq: u64,
     pub kind: &'static str,
     pub schema_version: i32,
-    pub occurred_at: DateTime<Utc>,
+    pub occurred_at: Timestamp,
     pub payload: Value,
     /// Set for `UserMessage` events: the queued message this event confirms.
     pub prompt_id: Option<PromptId>,
@@ -53,8 +53,8 @@ pub async fn prepare(
         occurred_at: event
             .occurred_at
             .as_ref()
-            .and_then(timestamp_to_utc)
-            .unwrap_or_else(Utc::now),
+            .and_then(from_proto)
+            .unwrap_or_else(Timestamp::now),
         payload: serde_json::to_value(&event)?,
         prompt_id,
     })
@@ -96,10 +96,6 @@ pub async fn externalize_block(
         }
         _ => Ok(()),
     }
-}
-
-fn timestamp_to_utc(ts: &Timestamp) -> Option<DateTime<Utc>> {
-    DateTime::from_timestamp(ts.seconds, u32::try_from(ts.nanos).ok()?)
 }
 
 const fn kind_name(kind: &event::Kind) -> &'static str {

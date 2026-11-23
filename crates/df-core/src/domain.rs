@@ -3,7 +3,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -368,8 +368,8 @@ impl FromStr for DependencyKind {
 /// once.
 pub const fn is_satisfied(
     kind: DependencyKind,
-    first_completed_at: Option<DateTime<Utc>>,
-    first_done_at: Option<DateTime<Utc>>,
+    first_completed_at: Option<Timestamp>,
+    first_done_at: Option<Timestamp>,
 ) -> bool {
     first_done_at.is_some()
         || matches!(kind, DependencyKind::Completion) && first_completed_at.is_some()
@@ -966,7 +966,7 @@ mod tests {
 
     #[test]
     fn a_dependency_is_satisfied_by_the_event_of_its_kind_or_by_done() {
-        let at = Some(Utc::now());
+        let at = Some(Timestamp::now());
         let cases = [
             // (kind, first completed, first done, satisfied)
             (DependencyKind::Completion, None, None, false),

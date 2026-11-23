@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Response};
 use df_core::TaskId;
 use df_db::chat_views::ChatListItem;
 use df_db::task_views::TaskDetail;
+use jiff::Timestamp;
 use maud::{Markup, html};
 use serde::Deserialize;
 
@@ -177,7 +178,7 @@ async fn body(
                                 @if !chat.last_message.is_empty() { div class="truncate text-xs text-muted" { (chat.last_message) } }
                                 div class="mt-1 flex items-center gap-2 text-xs text-faint" {
                                     span { (chat.artifacts) " artifacts" }
-                                    @if let Some(at) = chat.archived_at { span class="ml-auto" { "archived " time datetime=(at.to_rfc3339()) { (at.format("%b %d")) } } }
+                                    @if let Some(at) = chat.archived_at { (archived_label(at)) }
                                 }
                             }
                         }
@@ -284,4 +285,23 @@ async fn artifacts_content(
             }
         }
     })
+}
+
+/// "archived" and the day a chat was archived.
+fn archived_label(at: Timestamp) -> Markup {
+    html! { span class="ml-auto" { "archived " time datetime=(at.to_string()) { (at.strftime("%b %d").to_string()) } } }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_archived_label_shows_the_day_and_an_rfc3339_datetime() {
+        let at: Timestamp = "2026-10-03T04:05:06Z".parse().unwrap();
+        assert_eq!(
+            archived_label(at).into_string(),
+            "<span class=\"ml-auto\">archived <time datetime=\"2026-10-03T04:05:06Z\">Oct 03</time></span>"
+        );
+    }
 }

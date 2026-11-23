@@ -10,10 +10,10 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use df_core::system_reason::REQUEST_DECIDED;
 use df_core::{Principal, RequestId, RunId, TaskId};
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
+use jiff::Timestamp;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Transaction};
@@ -199,9 +199,9 @@ pub struct RequestRow {
     pub state: RequestState,
     pub decision: Option<Value>,
     pub decided_by: Option<Principal>,
-    pub decided_at: Option<DateTime<Utc>>,
+    pub decided_at: Option<Timestamp>,
     pub close_reason: Option<String>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 impl RequestRow {
@@ -975,9 +975,10 @@ struct RequestRecord {
     state: String,
     decision: Option<Value>,
     decided_by: Option<Value>,
-    decided_at: Option<DateTime<Utc>>,
+    decided_at: Option<jiff_sqlx::Timestamp>,
     close_reason: Option<String>,
-    created_at: DateTime<Utc>,
+    #[sqlx(try_from = "jiff_sqlx::Timestamp")]
+    created_at: Timestamp,
     #[sqlx(default)]
     task_key: Option<String>,
     #[sqlx(default)]
@@ -1009,7 +1010,7 @@ impl TryFrom<RequestRecord> for RequestRow {
             state,
             decision: r.decision,
             decided_by: r.decided_by.map(serde_json::from_value).transpose()?,
-            decided_at: r.decided_at,
+            decided_at: r.decided_at.map(Into::into),
             close_reason: r.close_reason,
             created_at: r.created_at,
         })

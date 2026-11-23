@@ -11,7 +11,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use chrono::{DateTime, TimeDelta, Utc};
+use jiff::{SignedDuration, Timestamp};
 
 use crate::config::RunsConfig;
 use crate::domain::{ParseEnumError, RunOutcome, RunState};
@@ -27,20 +27,20 @@ pub struct RunSnapshot {
     pub run_id: RunId,
     pub state: RunState,
     /// When a board member stopped the run.
-    pub stop_requested_at: Option<DateTime<Utc>>,
+    pub stop_requested_at: Option<Timestamp>,
     /// First `Hello` of the run's runtime.
-    pub connected_at: Option<DateTime<Utc>>,
+    pub connected_at: Option<Timestamp>,
     /// The scheduler began to provision the sandbox.
     pub provisioning_began: bool,
     pub finalize_reason: Option<FinalizeReason>,
     /// A message of the task is undelivered. Read for [`FinalizeReason::Idle`] only.
     pub undelivered_messages: bool,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
 }
 
 impl RunSnapshot {
     /// Start of the wall-clock budget: when the runtime connected, else when the run was created.
-    pub fn budget_start(&self) -> DateTime<Utc> {
+    pub fn budget_start(&self) -> Timestamp {
         self.connected_at.unwrap_or(self.started_at)
     }
 }
@@ -117,7 +117,7 @@ pub struct RunEnd {
     pub run_id: RunId,
     pub outcome: RunOutcome,
     pub detail: String,
-    pub retry_after: Option<DateTime<Utc>>,
+    pub retry_after: Option<Timestamp>,
     pub harness_session_id: String,
     pub task_branch_sha: String,
     pub wip_sha: String,
@@ -165,7 +165,7 @@ pub enum RunEvent {
     Ended(RunEnd),
     /// Becomes `Ended` if [`overdue`] says so on the locked snapshot.
     Overdue {
-        now: DateTime<Utc>,
+        now: Timestamp,
         limits: RunsConfig,
     },
 }
@@ -272,7 +272,7 @@ pub fn run_transition(run: &RunSnapshot, event: RunEvent) -> Result<RunTransitio
 /// The end an overdue run gets at `now`, if any: a stopped run that has no connection to send
 /// `Cancel` to, a stop that was not obeyed within [`STOP_TIMEOUT_SECONDS`], a sandbox that did not
 /// connect, a run that outlived budget plus two grace periods (the first one is for `Cancel`).
-pub fn overdue(run: &RunSnapshot, now: DateTime<Utc>, cfg: &RunsConfig) -> Option<RunEvent> {
+pub fn overdue(run: &RunSnapshot, now: Timestamp, cfg: &RunsConfig) -> Option<RunEvent> {
     if run.state.is_terminal() {
         return None;
     }
@@ -309,7 +309,7 @@ pub fn overdue(run: &RunSnapshot, now: DateTime<Utc>, cfg: &RunsConfig) -> Optio
 
 /// When the session should send `Cancel`: wall-clock budget plus one grace period after the
 /// runtime connected. `None` if the configured budget is too large to represent (no limit).
-pub fn cancel_deadline(budget_start: DateTime<Utc>, cfg: &RunsConfig) -> Option<DateTime<Utc>> {
+pub fn cancel_deadline(budget_start: Timestamp, cfg: &RunsConfig) -> Option<Timestamp> {
     after(
         budget_start,
         cfg.max_wall_clock_seconds
@@ -319,16 +319,16 @@ pub fn cancel_deadline(budget_start: DateTime<Utc>, cfg: &RunsConfig) -> Option<
 
 /// `start` plus `seconds`; `None` if that is not representable, which configuration treats as
 /// "never".
-fn after(start: DateTime<Utc>, seconds: u64) -> Option<DateTime<Utc>> {
-    let delta = TimeDelta::try_seconds(i64::try_from(seconds).ok()?)?;
-    start.checked_add_signed(delta)
+fn after(start: Timestamp, seconds: u64) -> Option<Timestamp> {
+    let delta = SignedDuration::from_secs(i64::try_from(seconds).ok()?);
+    start.checked_add(delta).ok()
 }
 
-fn is_before(deadline: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+fn is_before(deadline: Option<Timestamp>, now: Timestamp) -> bool {
     deadline.is_some_and(|d| d < now)
 }
 
-fn hard_stop(start: DateTime<Utc>, cfg: &RunsConfig) -> Option<DateTime<Utc>> {
+fn hard_stop(start: Timestamp, cfg: &RunsConfig) -> Option<Timestamp> {
     after(
         start,
         cfg.max_wall_clock_seconds

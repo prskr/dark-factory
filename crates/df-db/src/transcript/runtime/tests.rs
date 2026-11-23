@@ -11,7 +11,7 @@ use crate::blobs::sha256_hex;
 fn image_event(bytes: &'static [u8]) -> Event {
     Event {
         schema_version: 1,
-        occurred_at: Some(Timestamp {
+        occurred_at: Some(df_proto::pbjson_types::Timestamp {
             seconds: 1_760_000_000,
             nanos: 0,
         }),

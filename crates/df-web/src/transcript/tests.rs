@@ -1,4 +1,4 @@
-use chrono::TimeZone;
+use jiff::SignedDuration;
 use serde_json::{Value, json};
 
 use super::*;
@@ -18,8 +18,8 @@ fn stored(id: i64, turn: &str, kind: Value) -> StoredEvent {
     )
 }
 
-fn at(minute: u32) -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 10, 23, 10, minute, 0).unwrap()
+fn at(minute: u32) -> Timestamp {
+    format!("2026-10-23T10:{minute:02}:00Z").parse().unwrap()
 }
 
 fn stored_in_run(id: i64, run: i64, event: Option<df_proto::transcript::v1::Event>) -> StoredEvent {
@@ -1005,7 +1005,7 @@ fn a_card_raised_inside_a_streak_follows_the_group() {
     events.push(chunk(10, "t1", "m1", "after"));
     let folder = fold(&events);
     // Raised between the 4th and 5th call (events 4 and 5 are minutes 4 and 5).
-    let card = (at(4) + chrono::Duration::seconds(30), card_markup("card-1"));
+    let card = (at(4) + SignedDuration::from_secs(30), card_markup("card-1"));
 
     let html = render_transcript(folder.items(), std::slice::from_ref(&card)).into_string();
 
@@ -1040,7 +1040,7 @@ fn the_live_anchor_of_a_card_is_the_element_after_the_group_it_falls_into() {
     let mut events: Vec<StoredEvent> = (1..=3).map(|id| tool_call(id, COMPLETED)).collect();
     events.push(chunk(4, "t1", "m1", "after"));
     let folder = fold(&events);
-    let inside = at(2) + chrono::Duration::seconds(30);
+    let inside = at(2) + SignedDuration::from_secs(30);
 
     assert_eq!(folder.card_anchor(inside).as_deref(), Some("msg-r1-m1"));
     // Before the first member the card goes before the group, not into it.
@@ -1050,7 +1050,7 @@ fn the_live_anchor_of_a_card_is_the_element_after_the_group_it_falls_into() {
     // A card inside a group that ends the transcript also goes to the end.
     let open = fold(&[tool_call(1, COMPLETED), tool_call(2, COMPLETED)]);
     assert_eq!(
-        open.card_anchor(at(1) + chrono::Duration::seconds(30)),
+        open.card_anchor(at(1) + SignedDuration::from_secs(30)),
         None
     );
 }

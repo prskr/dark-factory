@@ -39,7 +39,7 @@ fn record(run_id: Uuid) -> UsageRecord {
     UsageRecord {
         request_id: Uuid::now_v7(),
         run_id,
-        recorded_at: Utc::now(),
+        recorded_at: Timestamp::now(),
         model: Some("claude-sonnet-5-5".into()),
         wire_api: WireApi::AnthropicMessages,
         upstream_status: Some(200),

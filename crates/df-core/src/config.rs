@@ -7,8 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::TimeDelta;
 use df_sandbox_contract::LandlockMode;
+use jiff::SignedDuration;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -823,10 +823,10 @@ impl SchedulingConfig {
 
     /// Clamped to the limit that `validate` enforces, so a value that skipped validation (the
     /// fields are public) cannot overflow.
-    pub fn resume_backoff(&self) -> TimeDelta {
+    pub fn resume_backoff(&self) -> SignedDuration {
         let seconds = self.resume_backoff_seconds.min(MAX_RESUME_BACKOFF_SECONDS);
         // Cannot fail for the clamped value; the fallback is the longest wait, never "at once".
-        TimeDelta::try_seconds(i64::try_from(seconds).unwrap_or(i64::MAX)).unwrap_or(TimeDelta::MAX)
+        SignedDuration::from_secs(i64::try_from(seconds).unwrap_or(i64::MAX))
     }
 
     pub fn forge_retry_base(&self) -> Duration {

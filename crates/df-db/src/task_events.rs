@@ -5,7 +5,8 @@
 //! the effects, all in the caller's transaction. The rules live in `df-core`; this module only
 //! reads, writes and locks.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
+use jiff_sqlx::ToSqlx;
 use std::collections::VecDeque;
 
 use df_core::run_transition::{FinalizeReason, RunEvent};
@@ -293,7 +294,7 @@ async fn load_child_ended(
     let (detail, summary) =
         last_run.map_or_else(Default::default, |run| (run.detail, run.completion_summary));
     // Tasks whose dependency on the child is still unsatisfied.
-    let (completed_at, done_at): (Option<DateTime<Utc>>, Option<DateTime<Utc>>) =
+    let (completed_at, done_at): (Option<jiff_sqlx::Timestamp>, Option<jiff_sqlx::Timestamp>) =
         sqlx::query_as("SELECT first_completed_at, first_done_at FROM tasks WHERE id = $1")
             .bind(child.as_uuid())
             .fetch_one(&mut **tx)
@@ -308,7 +309,7 @@ async fn load_child_ended(
     .await?;
     let mut waiting_dependents = Vec::new();
     for (key, kind) in dependents {
-        if !dependency_satisfied(&kind, completed_at, done_at)? {
+        if !dependency_satisfied(&kind, completed_at.map(Into::into), done_at.map(Into::into))? {
             waiting_dependents.push(key);
         }
     }
@@ -336,8 +337,8 @@ async fn load_child_ended(
 /// Whether a dependency of the stored `kind` is satisfied by a target with these first-times.
 fn dependency_satisfied(
     kind: &str,
-    first_completed_at: Option<DateTime<Utc>>,
-    first_done_at: Option<DateTime<Utc>>,
+    first_completed_at: Option<Timestamp>,
+    first_done_at: Option<Timestamp>,
 ) -> Result<bool, DbError> {
     Ok(is_satisfied(
         kind.parse()?,
@@ -358,15 +359,15 @@ fn notification(notice: Notice, task_id: TaskId) -> Notification {
 #[derive(sqlx::FromRow)]
 struct DependencyTimes {
     kind: String,
-    first_completed_at: Option<DateTime<Utc>>,
-    first_done_at: Option<DateTime<Utc>>,
+    first_completed_at: Option<jiff_sqlx::Timestamp>,
+    first_done_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// What the snapshot reads from the task row.
 #[derive(sqlx::FromRow)]
 struct TaskRowFacts {
     status: String,
-    resume_at: Option<DateTime<Utc>>,
+    resume_at: Option<jiff_sqlx::Timestamp>,
     auto_resumes: i32,
     has_pr: bool,
     merged: bool,
@@ -381,7 +382,7 @@ struct TaskRowFacts {
 async fn load_snapshot(
     tx: &mut Transaction<'_, Postgres>,
     task_id: TaskId,
-    after: Option<DateTime<Utc>>,
+    after: Option<Timestamp>,
 ) -> Result<TaskSnapshot, DbError> {
     let row: Option<TaskRowFacts> = sqlx::query_as(
         "SELECT status, resume_at, auto_resumes, pr_number IS NOT NULL AS has_pr,
@@ -438,7 +439,11 @@ async fn load_snapshot(
     .await?;
     let mut unsatisfied_dependencies = 0_u32;
     for d in dependencies {
-        if !dependency_satisfied(&d.kind, d.first_completed_at, d.first_done_at)? {
+        if !dependency_satisfied(
+            &d.kind,
+            d.first_completed_at.map(Into::into),
+            d.first_done_at.map(Into::into),
+        )? {
             unsatisfied_dependencies += 1;
         }
     }
@@ -449,7 +454,7 @@ async fn load_snapshot(
                AND ($2::timestamptz IS NULL OR queued_at > $2))",
     )
     .bind(task_id.as_uuid())
-    .bind(after)
+    .bind(after.map(ToSqlx::to_sqlx))
     .fetch_one(&mut **tx)
     .await?;
     Ok(TaskSnapshot {
@@ -457,7 +462,7 @@ async fn load_snapshot(
         archived,
         pending_requests: has_pending_request(tx, task_id).await?,
         status: status.parse()?,
-        resume_at,
+        resume_at: resume_at.map(Into::into),
         auto_resumes,
         active_run: match active_run.as_str() {
             "connected" => ActiveRun::Connected,
@@ -504,7 +509,7 @@ async fn write_status(
     )
     .bind(task_id.as_uuid())
     .bind(next.status.as_str())
-    .bind(next.resume_at)
+    .bind(next.resume_at.map(ToSqlx::to_sqlx))
     .bind(next.auto_resumes)
     .execute(&mut **tx)
     .await?;

@@ -54,6 +54,8 @@ The database stores only `timestamptz` (no `date`, `time` or `interval` columns)
 
 `Timestamp` is always UTC, like `DateTime<Utc>`, so no timezone handling enters the code. `jiff` is added with `default-features = false` and features `std`, `serde`. Our crates use no named timezone; `iter3-routines` adds `tzdb-bundle-always` where it needs one (the static musl images have no `/usr/share/zoneinfo`).
 
+As built: `jiff` 1.0 names its zoned type `ZonedDateTime`, so the last row and the test row read `Timestamp::now().to_zoned_datetime(TimeZone::UTC)` (then `.year()`, `.month()`, `.date()`) and `civil::date(…).at(…).to_zoned_datetime(TimeZone::UTC)?.timestamp()`; `to_zoned` does not exist. `Timestamp::checked_add`/`checked_sub` return `Result`, so `chrono`'s `Option` chains end in `.ok()`. `SignedDuration` has `as_secs`/`as_mins` instead of `num_seconds`/`num_minutes`.
+
 Alternative: `time` 0.3, which `sqlx` supports natively and which is already in the graph (`tower-sessions`, `rcgen`). Rejected: `time` has no IANA timezone support, so routines would still need a second library; `jiff` covers both and is what `croner` supports.
 
 ### D2. Database: `jiff-sqlx` and a `sqlx.toml` type override
@@ -80,6 +82,10 @@ Other crates need `jiff-sqlx` too, but only as a dev-dependency for the test cod
 
 Bazel: `df-db` already passes a `.env` to the macros through `compile_data` next to the manifest (`sqlx_dotenv`); `sqlx.toml` is read from the same directory and is added the same way. A throwaway spike checks this before the migration (task 2.2).
 
+As built (`df-db`): nullable timestamps cannot go through `.into()` (`Option<jiff::Timestamp>: From<Option<jiff_sqlx::Timestamp>>` does not exist and the orphan rule forbids it), so the private record types (`RunRecord`, `ChatRecord`, `Row`, `TaskListRow`, ...) keep `Option<jiff_sqlx::Timestamp>` for nullable columns and the `TryFrom` converts with `.map(Into::into)`, while NOT NULL fields of `query_as!` targets are plain `jiff::Timestamp`. `FromRow` structs use `#[sqlx(try_from = "jiff_sqlx::Timestamp")]` for NOT NULL fields (`ArtifactMeta`, `RequestRecord`); `try_from` has no `Option` form, so their nullable fields stay wrapped as well. `sqlx.toml` and `compile_data` were not changed beyond D2; `.sqlx/` has no diff. The test-util module `df-orchestrator/src/testing.rs` converts in its helper (`TaskResumeState.resume_at` is a `jiff::Timestamp`). The `df-web` OIDC test provider builds its ID token claims from JSON, because `IdTokenClaims::new` takes `chrono` times and `df-web` must not depend on `chrono`.
+
+As built (spike, task 2.2): a throwaway crate with its own `sqlx.toml`, one `query!` reading `blobs.created_at` and one `query_scalar!` binding a `jiff_sqlx::Timestamp`, using the query texts of `.sqlx/` (no database needed), compiled with `SQLX_OFFLINE=true` under cargo and under `bazel build` with `sqlx.toml` in `compile_data`. Both picked up the override (a `jiff_sqlx::Timestamp` result and bind type-checked while the `sqlx` feature `chrono` was still on, so the override takes precedence over the default mapping); `sqlx-toml` is active in the crate_universe build. The fallback is not needed.
+
 Fallback, if `sqlx.toml` does not work under Bazel: column overrides for outputs (`created_at AS "created_at: jiff_sqlx::Timestamp"`) and `expr as _` for bind parameters, in every query. The query texts change, so `.sqlx/` is regenerated.
 
 ### D3. Protobuf timestamps: functions in `df-proto`
@@ -104,6 +110,10 @@ Changed, both forms valid RFC 3339:
 - `serde` JSON of domain types and `next_since` of `read_pull_request_feedback`: `chrono` prints 0, 3, 6 or 9 fractional digits, `jiff` the fewest needed. Both read any RFC 3339 value with offset, so stored JSON written by `chrono` stays readable, and `next_since` is only parsed back by the tool.
 
 The pin tests for the changed texts are updated in the same task as the swap; the review sees the expected `+00:00` → `Z` diff.
+
+As built: `RunReport.retry_after` (factory-agent) now carries sub-second precision, where it used to be whole seconds; the control plane reads it through `from_proto` into `timestamptz` and the visible resume text is unchanged.
+
+As built: the two insta snapshots of `df-web` (`renders_every_event_kind`, `tool_call_before_its_update_renders_the_collapsed_summary`) changed only in `datetime` attributes (`+00:00` → `Z`); the `next_since` pin for a `since` of `…10:15:00.900Z` now reads `…10:15:00.9Z`. The pin tests of group 1 cover the lifecycle event timestamp, the artifact metadata line, the helper functions of the views that were private (`short_time`, shared in `components::time` for the chat list, task list, task run header and request cards; `format_time`, `time`, `time_label`, `run_divider`), the archive label (`%b %d`, helper `archived_label` in `chat_pages/archive.rs`, the only site of that pattern) and the last delivery of `project_subscriptions.rs` (`%b %d %H:%M UTC`), and the existing `next_since` tests. The `datetime` attribute is pinned at the sites with a test (transcript divider, artifact time, archive label, last delivery, the task resume time); the other sites build it with the same `.to_string()`. `egress/log/rows.rs` (`time_label`) now shows an empty label instead of a time for a proto timestamp with negative nanos (malformed input; `from_proto` returns `None`, `chrono` code used `unwrap_or(0)`).
 
 `jiff` parsing accepts more than RFC 3339 (RFC 9557 annotations, lowercase `t`/`z`). The `since` argument keeps its scenario "no parsable timestamp"; a stricter check is not needed because the value is only a lower bound.
 

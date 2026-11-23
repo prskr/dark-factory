@@ -16,11 +16,16 @@ use df_proto::transcript::v1::{
     TurnEnded, content_block::Kind as ContentBlockKind, event::Kind as EventKind,
 };
 
+/// The current time as the `occurred_at` of an event.
+pub fn now() -> df_proto::pbjson_types::Timestamp {
+    df_proto::time::to_proto(jiff::Timestamp::now())
+}
+
 /// Builds a transcript event carrying `notice`.
 pub fn notice_event(notice: df_proto::transcript::v1::Notice) -> Event {
     Event {
         schema_version: 1,
-        occurred_at: Some(chrono::Utc::now().into()),
+        occurred_at: Some(now()),
         turn_id: String::new(),
         kind: Some(EventKind::Notice(notice)),
     }
@@ -126,7 +131,7 @@ impl TranscriptTranslator {
 
         Event {
             schema_version: 1,
-            occurred_at: Some(chrono::Utc::now().into()),
+            occurred_at: Some(now()),
             turn_id: self.turn_id.clone(),
             kind: Some(EventKind::AgentMessageChunk(AgentMessageChunk {
                 message_id,
@@ -150,7 +155,7 @@ impl TranscriptTranslator {
 
         Event {
             schema_version: 1,
-            occurred_at: Some(chrono::Utc::now().into()),
+            occurred_at: Some(now()),
             turn_id: self.turn_id.clone(),
             kind: Some(EventKind::AgentThoughtChunk(AgentThoughtChunk {
                 message_id,
@@ -208,7 +213,7 @@ impl TranscriptTranslator {
 
         Event {
             schema_version: 1,
-            occurred_at: Some(chrono::Utc::now().into()),
+            occurred_at: Some(now()),
             turn_id: self.turn_id.clone(),
             kind: Some(EventKind::ToolCall(ToolCall {
                 tool_call_id: call.tool_call_id.to_string(),
@@ -273,7 +278,7 @@ impl TranscriptTranslator {
 
         Event {
             schema_version: 1,
-            occurred_at: Some(chrono::Utc::now().into()),
+            occurred_at: Some(now()),
             turn_id: self.turn_id.clone(),
             kind: Some(EventKind::ToolCallUpdate(ToolCallUpdate {
                 tool_call_id: update.tool_call_id.to_string(),
@@ -319,7 +324,7 @@ impl TranscriptTranslator {
 
         Event {
             schema_version: 1,
-            occurred_at: Some(chrono::Utc::now().into()),
+            occurred_at: Some(now()),
             turn_id: self.turn_id.clone(),
             kind: Some(EventKind::Plan(Plan { entries })),
         }
@@ -336,7 +341,7 @@ impl TranscriptTranslator {
 
         Event {
             schema_version: 1,
-            occurred_at: Some(chrono::Utc::now().into()),
+            occurred_at: Some(now()),
             turn_id: self.turn_id.clone(),
             kind: Some(EventKind::TurnEnded(TurnEnded {
                 stop_reason: stop_reason as i32,

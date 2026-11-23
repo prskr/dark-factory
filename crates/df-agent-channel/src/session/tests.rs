@@ -346,14 +346,14 @@ async fn the_preparing_and_finalizing_phases_leave_a_running_run_unchanged() {
 }
 
 /// Persists a `TurnEnded` of the run that occurred at `at`.
-async fn persist_turn_end(env: &Env, run_id: df_core::RunId, at: DateTime<Utc>) {
+async fn persist_turn_end(env: &Env, run_id: df_core::RunId, at: Timestamp) {
     sqlx::query(
         "INSERT INTO transcript_events (task_id, run_id, seq, occurred_at, kind, payload)
              VALUES ($1, $2, 1, $3, 'turn_ended', '{}')",
     )
     .bind(env.task.id.as_uuid())
     .bind(run_id.as_uuid())
-    .bind(at)
+    .bind(jiff_sqlx::Timestamp::from(at))
     .execute(&env.ctx.pool)
     .await
     .unwrap();
@@ -376,7 +376,7 @@ async fn serve_until(
     env: &Env,
     run_id: df_core::RunId,
     wanted: impl Fn(&control_message::Body) -> bool,
-) -> (DateTime<Utc>, RunState) {
+) -> (Timestamp, RunState) {
     let row = get_run(&env.ctx.pool, run_id).await.unwrap().unwrap();
     let (to_session, inbound) = mpsc::channel(8);
     let (tx, mut rx) = mpsc::channel(64);
@@ -395,7 +395,7 @@ async fn serve_until(
     let found = tokio::time::timeout(Duration::from_secs(30), async {
         while let Some(Ok(control)) = rx.recv().await {
             if control.body.as_ref().is_some_and(&wanted) {
-                return Some(Utc::now());
+                return Some(Timestamp::now());
             }
         }
         None
@@ -414,8 +414,8 @@ async fn serve_until(
 /// the keep-alive), so these tests wait in real time; the keep-alive is at most 1 s.
 async fn wait_for_release(
     keep_alive: u64,
-    turn_end: impl FnOnce() -> DateTime<Utc>,
-) -> (DateTime<Utc>, RunState) {
+    turn_end: impl FnOnce() -> Timestamp,
+) -> (Timestamp, RunState) {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let mut env = Env::new(pool.clone()).await;
     with_keep_alive(&mut env, keep_alive);
@@ -465,7 +465,7 @@ async fn a_budget_cancel_is_never_followed_by_a_release() {
         ..Default::default()
     });
     let run_id = run_of_running_task(&env, "awaiting_input").await;
-    persist_turn_end(&env, run_id, Utc::now()).await;
+    persist_turn_end(&env, run_id, Timestamp::now()).await;
     let (mut session, mut rx) = session_for(&env, run_id).await;
 
     // The budget timer moves the run to `finalizing`; its stored reason is the budget.
@@ -525,24 +525,25 @@ async fn the_budget_cancel_finalizes_the_run_first_and_no_prompt_follows() {
 
 #[tokio::test]
 async fn the_idle_run_is_released_one_keep_alive_after_its_turn_end() {
-    let turn_end = Utc::now();
+    let turn_end = Timestamp::now();
     let (released_at, state) = wait_for_release(1, || turn_end).await;
-    assert!(released_at - turn_end >= chrono::Duration::seconds(1));
+    assert!(released_at - turn_end >= SignedDuration::from_secs(1));
     // `finalizing` is set before `Release` is sent.
     assert_eq!(state, RunState::Finalizing);
 }
 
 #[tokio::test]
 async fn a_keep_alive_of_zero_releases_right_after_the_turn() {
-    let turn_end = Utc::now();
+    let turn_end = Timestamp::now();
     let (released_at, state) = wait_for_release(0, || turn_end).await;
-    assert!(released_at - turn_end < chrono::Duration::seconds(30));
+    assert!(released_at - turn_end < SignedDuration::from_secs(30));
     assert_eq!(state, RunState::Finalizing);
 }
 
 #[tokio::test]
 async fn a_new_session_after_the_deadline_releases_after_the_handshake() {
-    let (_, state) = wait_for_release(600, || Utc::now() - chrono::Duration::seconds(3600)).await;
+    let (_, state) =
+        wait_for_release(600, || Timestamp::now() - SignedDuration::from_secs(3600)).await;
     assert_eq!(state, RunState::Finalizing);
 }
 
@@ -552,7 +553,7 @@ async fn a_run_with_a_message_in_flight_is_not_released() {
     let mut env = Env::new(pool.clone()).await;
     with_keep_alive(&mut env, 0);
     let run_id = run_of_running_task(&env, "awaiting_input").await;
-    persist_turn_end(&env, run_id, Utc::now()).await;
+    persist_turn_end(&env, run_id, Timestamp::now()).await;
     let (mut session, mut rx) = session_for(&env, run_id).await;
 
     // A prompt was forwarded and its turn has not been confirmed yet.

@@ -240,7 +240,7 @@ pub(crate) fn transcript_scroll(transcript: Markup) -> Markup {
 /// The request cards of a task with the time they were raised, for the timeline.
 pub(crate) fn timeline_cards(
     requests: &[crate::requests::CardData],
-) -> Vec<(chrono::DateTime<chrono::Utc>, Markup)> {
+) -> Vec<(jiff::Timestamp, Markup)> {
     requests
         .iter()
         .map(|card| {

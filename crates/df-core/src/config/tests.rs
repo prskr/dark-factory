@@ -745,7 +745,10 @@ fn scheduling_defaults_are_the_waits_of_the_control_plane() {
     let cfg = InstanceConfig::from_yaml_str(MINIMAL_DB).unwrap();
 
     assert_eq!(cfg.scheduling.tick(), Duration::from_secs(5));
-    assert_eq!(cfg.scheduling.resume_backoff(), TimeDelta::minutes(2));
+    assert_eq!(
+        cfg.scheduling.resume_backoff(),
+        SignedDuration::from_mins(2)
+    );
     assert_eq!(cfg.scheduling.forge_retry_base(), Duration::from_secs(30));
     assert_eq!(cfg.scheduling, SchedulingConfig::default());
 }
@@ -759,7 +762,10 @@ fn scheduling_values_can_be_overridden() {
     let cfg = InstanceConfig::from_yaml_str(&yaml).unwrap();
 
     assert_eq!(cfg.scheduling.tick(), Duration::from_millis(500));
-    assert_eq!(cfg.scheduling.resume_backoff(), TimeDelta::seconds(5));
+    assert_eq!(
+        cfg.scheduling.resume_backoff(),
+        SignedDuration::from_secs(5)
+    );
     assert_eq!(cfg.scheduling.forge_retry_base(), Duration::from_secs(2));
 }
 
@@ -799,7 +805,7 @@ fn an_unvalidated_huge_resume_backoff_is_clamped_instead_of_panicking() {
 
     assert_eq!(
         scheduling.resume_backoff(),
-        TimeDelta::seconds(i64::try_from(MAX_RESUME_BACKOFF_SECONDS).unwrap())
+        SignedDuration::from_secs(i64::try_from(MAX_RESUME_BACKOFF_SECONDS).unwrap())
     );
 }
 
