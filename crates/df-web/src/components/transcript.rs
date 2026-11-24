@@ -7,6 +7,7 @@ use maud::{Markup, html};
 
 use super::actions::ICON_BUTTON_CLASS;
 use super::icons::{Icon, icon};
+use super::persona_avatar::{AvatarSize, PersonaLabel, persona_avatar};
 use super::shell::{avatar, initials};
 use crate::markdown;
 
@@ -57,14 +58,19 @@ pub fn user_message(
 /// (`body`) when done.
 pub fn agent_message(
     id: &str,
-    author: &str,
+    author: &PersonaLabel,
     at: Timestamp,
     body: Markup,
     markdown: bool,
 ) -> Markup {
+    let name = if author.display_name.is_empty() {
+        "Agent"
+    } else {
+        &author.display_name
+    };
     html! {
         div id=(id) data-author="agent" class="flex items-end gap-2" {
-            (avatar(&initials(author)))
+            (persona_avatar(author.id, name, AvatarSize::Transcript))
             div class="min-w-0 max-w-[85%] md:max-w-[75%]" {
                 div class="break-words rounded-2xl rounded-bl-md bg-bubble-agent px-3 py-2 text-on-bubble-agent" {
                     @if markdown {
@@ -73,7 +79,12 @@ pub fn agent_message(
                         div class="whitespace-pre-wrap" { (body) }
                     }
                 }
-                (meta(author, at, ""))
+                div class="mt-1 text-xs text-faint" {
+                    (name)
+                    @if !author.handle.is_empty() { " " span class="text-faint" { "@" (author.handle) } }
+                    " · "
+                    time datetime=(at.to_string()) { (clock(at)) }
+                }
             }
         }
     }
@@ -572,7 +583,7 @@ mod tests {
     #[test]
     fn agent_message_is_a_left_bubble_and_markdown_sits_in_md_body() {
         let streaming =
-            agent_message("msg-1", "Linus", at(), html! { "partial" }, false).into_string();
+            agent_message("msg-1", &"Linus".into(), at(), html! { "partial" }, false).into_string();
         assert!(
             streaming.contains("data-author=\"agent\"") && streaming.contains("bg-bubble-agent"),
             "{streaming}"
@@ -581,8 +592,8 @@ mod tests {
         assert!(
             streaming.find("class=\"avatar").unwrap() < streaming.find("bg-bubble-agent").unwrap()
         );
-        let done =
-            agent_message("msg-1", "Linus", at(), html! { p { "done" } }, true).into_string();
+        let done = agent_message("msg-1", &"Linus".into(), at(), html! { p { "done" } }, true)
+            .into_string();
         assert!(done.contains("md-body") && done.contains("Linus · <time"));
     }
 

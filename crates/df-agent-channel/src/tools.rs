@@ -186,7 +186,7 @@ async fn try_execute(
     tool_calls::store_result(&mut *tx, call_uuid, &serde_json::to_value(&stored)?).await?;
     let actor = Principal::agent(
         rc.persona.id,
-        rc.persona.name.clone(),
+        rc.persona.display_name.clone(),
         Some(rc.run.id),
         rc.task.id,
     );
@@ -496,7 +496,7 @@ async fn complete_task(
         "task-completed",
         &Principal::agent(
             rc.persona.id,
-            rc.persona.name.clone(),
+            rc.persona.display_name.clone(),
             Some(rc.run.id),
             task_id,
         ),
@@ -533,7 +533,7 @@ async fn ask_question(
         .unwrap_or(false);
     let actor = Principal::agent(
         rc.persona.id,
-        rc.persona.name.clone(),
+        rc.persona.display_name.clone(),
         Some(rc.run.id),
         task_id,
     );
@@ -597,7 +597,7 @@ async fn request_approval(
         .unwrap_or(false);
     let actor = Principal::agent(
         rc.persona.id,
-        rc.persona.name.clone(),
+        rc.persona.display_name.clone(),
         Some(rc.run.id),
         task_id,
     );

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason\n        FROM runs WHERE state <> ALL($1) ORDER BY started_at\n        ",
+  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason,\n               commit_name, commit_email\n        FROM runs WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -145,11 +145,33 @@
             "name": "finalize_reason"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "commit_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "commit_name"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "commit_email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "commit_email"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "TextArray"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -165,8 +187,10 @@
       false,
       true,
       true,
-      true
+      true,
+      false,
+      false
     ]
   },
-  "hash": "9e6e9987b7f5d78e1388221bd7ede98a96988259ab496a60e3377ae4fc8917ca"
+  "hash": "8a60bb29b8f048a4584c5b0c08ddae1a43ab5f599d29e20bd939c17a2ea68af3"
 }

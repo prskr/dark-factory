@@ -139,7 +139,7 @@ pub(super) async fn record_merge(
     let status = lock_task_status(&mut tx, merged.task).await?;
     let not_done = status.filter(|s| TaskStatus::CLOSED.contains(s));
     if not_done.is_none() {
-        complete_on_merge_as_tx(&mut tx, merged.task, &rc.persona.name, &actor).await?;
+        complete_on_merge_as_tx(&mut tx, merged.task, &rc.persona.display_name, &actor).await?;
     }
     let job = PrSyncJob {
         task_id: rc.task.id,

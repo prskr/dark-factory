@@ -536,6 +536,52 @@ fn findings_without_a_path_name_their_commit() {
     assert!(!outcome.approval_requested);
 }
 
+/// Pushes one commit authored and committed by `email` over the Git route of persona `linus`.
+fn push_as_persona_linus(email: &str) -> ChecksOutcome {
+    let route = GitRoute {
+        commit_name: "Linus".to_owned(),
+        commit_email: "linus@example.org".to_owned(),
+        ..route()
+    };
+    let objects = FakeObjects::default().with(
+        &tip(1),
+        PushView {
+            commits: vec![commit_as(email, 1, 50, &[])],
+            blobs: Vec::new(),
+        },
+    );
+    let commands = [command(TASK, tip(1))];
+    let push = CheckedPush {
+        route: &route,
+        policy: Some(&default_policy()),
+        exceptions: &[],
+        commands: &commands,
+        interrupt: &NOT_INTERRUPTED,
+    };
+    checks().check(&push, &objects)
+}
+
+#[test]
+fn a_commit_as_another_persona_is_rejected_with_the_identity_check() {
+    let outcome = push_as_persona_linus("ada@example.org");
+
+    assert_eq!(
+        reason_texts(&outcome),
+        [Some(format!(
+            "df:identity (commit {} author ada@example.org, committer ada@example.org)",
+            id(1)
+        ))]
+    );
+}
+
+#[test]
+fn a_commit_as_the_runs_persona_passes_the_identity_check() {
+    let outcome = push_as_persona_linus("linus@example.org");
+
+    assert_eq!(reason_texts(&outcome), [None]);
+    assert!(outcome.findings.is_empty());
+}
+
 #[test]
 fn control_characters_in_a_reason_become_spaces() {
     let policy = PushPolicy {

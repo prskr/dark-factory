@@ -98,7 +98,11 @@ async fn a_persona_is_created_with_a_model_of_its_provider() -> anyhow::Result<(
                 .first()
                 .click(None)
                 .await?;
-            page.locator("#name").fill(&name, None).await?;
+            page.locator("#display_name").fill(&name, None).await?;
+            page.locator("#handle").fill(&name, None).await?;
+            page.locator("#commit_email")
+                .fill(&format!("{name}@example.org"), None)
+                .await?;
             page.locator("#system_prompt")
                 .fill("Check the model select.", None)
                 .await?;
@@ -118,7 +122,8 @@ async fn a_persona_is_created_with_a_model_of_its_provider() -> anyhow::Result<(
                 .await?;
             button(page, "Create persona").click(None).await?;
 
-            expect(page.get_by_text(&name, false))
+            // `.first()`: the card shows the name, the handle and the email.
+            expect(page.get_by_text(&name, false).first())
                 .to_be_visible()
                 .await?;
             Ok(())

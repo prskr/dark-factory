@@ -158,6 +158,9 @@ message Workspace {
   string task_branch = 3;
   // e.g. "factory/wip/DF-1".
   string wip_branch = 4;
+  // The run's persona identity, author and committer of every commit of the
+  // run (the harness's and the WIP snapshots). Required: the runtime fails a
+  // run whose Assign has none or an empty name or email.
   CommitIdentity commit_identity = 5;
   // Commit hooks for the harness's own commits, from instance and project
   // scope, in execution order (instance first). The runtime generates a hook
@@ -215,6 +218,7 @@ message GitConfigEntry {
   string value = 2;
 }
 
+// Name and email of the run's persona, frozen when the run is created.
 message CommitIdentity {
   string name = 1;
   string email = 2;

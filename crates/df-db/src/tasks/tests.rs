@@ -56,9 +56,24 @@ pub(crate) async fn seed_project_and_persona(
             ", 'test-model', (SELECT id FROM credential_refs WHERE name = 'old')",
         )
     };
+    // The migration tests seed a schema from before the persona identity.
+    let has_identity: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'personas' AND column_name = 'handle')",
+    )
+    .fetch_one(pool)
+    .await?;
+    let (name_columns, name_values) = if has_identity {
+        (
+            "display_name, handle, commit_email",
+            "$2, replace(lower($2), ' ', '-'), replace(lower($2), ' ', '-') || '@example.org'",
+        )
+    } else {
+        ("name", "$2")
+    };
     sqlx::query(sqlx::AssertSqlSafe(format!(
-        "INSERT INTO personas (id, name, system_prompt, harness{provider_column}) \
-         VALUES ($1, $2, $3, 'claude-code'{provider_value})"
+        "INSERT INTO personas (id, {name_columns}, system_prompt, harness{provider_column}) \
+         VALUES ($1, {name_values}, $3, 'claude-code'{provider_value})"
     )))
     .bind(persona_id.as_uuid())
     .bind(persona_name)

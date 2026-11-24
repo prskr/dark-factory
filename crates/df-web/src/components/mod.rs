@@ -11,6 +11,7 @@ pub mod host_icon;
 pub mod icons;
 pub mod lists;
 pub mod overlay;
+pub mod persona_avatar;
 pub mod project_host;
 pub mod shell;
 pub mod table;
@@ -36,6 +37,7 @@ pub use overlay::{
     DialogStyle, INITIAL_DETAILS_TAB, details_panel, details_panel_with_heading, dialog,
     dialog_close, dialog_with,
 };
+pub use persona_avatar::{AvatarSize, PersonaLabel, persona_avatar, persona_avatar_preview};
 pub use project_host::{HostRole, ProjectHosts, issue_role, project_forge_kind, role_icon};
 pub use shell::{
     CreateAction, avatar, bottom_bar, floating_create, initials, page_header,
@@ -58,7 +60,15 @@ mod tests {
     const MIN_TEXT_CONTRAST: f64 = 4.5;
     /// Foreground and background tokens of the text pairs in `docs/design-system.md`,
     /// "Contrast ratios".
-    const TEXT_PAIRS: [(&str, &str); 30] = [
+    const TEXT_PAIRS: [(&str, &str); 38] = [
+        ("avatar-1-fg", "avatar-1-bg"),
+        ("avatar-2-fg", "avatar-2-bg"),
+        ("avatar-3-fg", "avatar-3-bg"),
+        ("avatar-4-fg", "avatar-4-bg"),
+        ("avatar-5-fg", "avatar-5-bg"),
+        ("avatar-6-fg", "avatar-6-bg"),
+        ("avatar-7-fg", "avatar-7-bg"),
+        ("avatar-8-fg", "avatar-8-bg"),
         ("ink", "app"),
         ("ink", "panel"),
         ("ink", "raised"),

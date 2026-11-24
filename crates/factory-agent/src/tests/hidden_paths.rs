@@ -85,6 +85,7 @@ impl Fixture {
             task_branch: "factory/task/DF-1".to_owned(),
             wip_branch: "factory/wip/DF-1".to_owned(),
             hidden_paths: hidden.iter().map(|glob| (*glob).to_owned()).collect(),
+            commit_identity: super::identity(),
             ..Workspace::default()
         }
     }

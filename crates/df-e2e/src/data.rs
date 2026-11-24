@@ -152,8 +152,15 @@ pub const SECRET_LINE: u32 = 2;
 /// The workflow `push-protected.yaml` adds.
 pub const PROTECTED_PATH: &str = ".forgejo/workflows/ci.yml";
 
-/// Persona that works on all projects.
+/// Display name of the persona that works on all projects.
 pub const PERSONA_NAME: &str = "e2e";
+
+/// Its handle.
+pub const PERSONA_HANDLE: &str = "e2e";
+
+/// Its commit email: the author and committer of every commit the agent makes. Commits the suite
+/// creates on the forge for an agent to rebase use it too, or the Git proxy rejects the rewrite.
+pub const PERSONA_EMAIL: &str = "e2e@example.org";
 
 /// The model of the fake provider that the persona selects.
 pub const PERSONA_MODEL: &str = "claude-sonnet-5-5";

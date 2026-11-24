@@ -542,6 +542,13 @@ fn code_themes_default_and_can_be_set_individually() {
 }
 
 #[test]
+fn the_instance_commit_identity_setting_is_removed() {
+    let yaml = "database:\n  host: pg\n  database: d\n  user: u\n  passwordFile: /p\n\
+                agent:\n  commitIdentity:\n    name: Bot\n    email: bot@example.org\n";
+    assert!(InstanceConfig::from_yaml_str(yaml).is_err());
+}
+
+#[test]
 fn run_orchestration_sections_have_defaults_and_can_be_overridden() {
     let minimal = r"
 database:
@@ -552,7 +559,6 @@ database:
 ";
     let cfg = InstanceConfig::from_yaml_str(minimal).unwrap();
     assert!(cfg.agent.tls.is_none());
-    assert_eq!(cfg.agent.commit_identity.name, "Dark Factory");
     assert_eq!(cfg.agent.git_username, "dark-factory");
     assert_eq!(cfg.runs.max_wall_clock_seconds, 7200);
     assert_eq!(cfg.runs.connect_timeout_seconds, 600);

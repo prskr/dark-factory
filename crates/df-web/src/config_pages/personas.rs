@@ -1,5 +1,6 @@
-//! Persona pages (`specs/configuration-management/spec.md`): name, system prompt, harness, model
-//! provider and the model of that provider, both compatible with the harness.
+//! Persona pages (`specs/configuration-management/spec.md`): identity (display name, handle,
+//! commit email, avatar), system prompt, harness, model provider and the model of that provider,
+//! both compatible with the harness.
 
 use axum::extract::{Form, Path, State};
 use axum::http::HeaderMap;
@@ -9,8 +10,9 @@ use axum::{Extension, Router};
 use df_core::PERSONA_DESCRIPTION_MAX_CHARS;
 use df_core::harness;
 use df_core::harness::PROFILES;
+use df_core::persona::{parse_display_name, parse_email, parse_handle};
 use df_db::DbError;
-use df_db::catalog::{Actor, PersonaInput, PersonaRecord};
+use df_db::catalog::{Actor, PersonaField, PersonaInput, PersonaRecord};
 use df_db::model_providers::ModelProviderRecord;
 use maud::{Markup, html};
 use serde::Deserialize;
@@ -24,8 +26,8 @@ use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::components::forms::{INPUT_CLASS, field, select_field_with_hint};
 use crate::components::{
-    FormErrors, avatar, empty_panel, form_error, harness_label, initials, text_field,
-    textarea_field,
+    AvatarSize, FormErrors, empty_panel, form_error, harness_label, persona_avatar,
+    persona_avatar_preview, text_field, textarea_field,
 };
 use crate::layout::{Nav, Shell};
 use crate::responses::{internal_error, invalid, not_found};
@@ -42,7 +44,9 @@ pub(super) fn routes() -> Router<WebState> {
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 pub(crate) struct PersonaForm {
-    name: String,
+    display_name: String,
+    handle: String,
+    commit_email: String,
     description: String,
     system_prompt: String,
     harness: String,
@@ -93,7 +97,21 @@ fn validate_persona(
     providers: &[ModelProviderRecord],
 ) -> Result<PersonaInput, FormErrors> {
     let mut errors = FormErrors::default();
-    let name = required(&mut errors, "name", &form.name, "Name");
+    let display_name = identity_part(
+        &mut errors,
+        "display_name",
+        "Display name",
+        &form.display_name,
+        parse_display_name,
+    );
+    let handle = identity_part(&mut errors, "handle", "Handle", &form.handle, parse_handle);
+    let commit_email = identity_part(
+        &mut errors,
+        "commit_email",
+        "Commit email",
+        &form.commit_email,
+        parse_email,
+    );
     let description = form.description.trim().to_string();
     if description.chars().count() > PERSONA_DESCRIPTION_MAX_CHARS {
         errors.add(
@@ -137,13 +155,36 @@ fn validate_persona(
         }
     }
     errors.into_result(PersonaInput {
-        name,
+        handle,
+        display_name,
+        commit_email,
         description,
         system_prompt,
         harness: harness_name.to_string(),
         model: model.to_string(),
         model_provider_id: provider.map_or(Uuid::nil(), |provider| provider.id),
     })
+}
+
+/// One part of the identity: `parse` it, or put its error (or "is required") at the field.
+fn identity_part(
+    errors: &mut FormErrors,
+    field: &'static str,
+    label: &str,
+    value: &str,
+    parse: fn(&str) -> Result<String, df_core::IdentityError>,
+) -> String {
+    if value.trim().is_empty() {
+        errors.add(field, format!("{label} is required."));
+        return String::new();
+    }
+    match parse(value.trim()) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            errors.add(field, error.to_string());
+            value.trim().to_string()
+        }
+    }
 }
 
 /// The model options for the persona form: the models of `provider` the harness can use, with
@@ -173,7 +214,9 @@ fn model_options(
 
 fn persona_values(p: &PersonaRecord) -> PersonaForm {
     PersonaForm {
-        name: p.name.clone(),
+        display_name: p.display_name.clone(),
+        handle: p.handle.clone(),
+        commit_email: p.commit_email.clone(),
         description: p.description.clone(),
         system_prompt: p.system_prompt.clone(),
         harness: p.harness.clone(),
@@ -222,11 +265,12 @@ fn persona_form(
     let provider = values.provider(providers);
     let models = model_options(provider, harness_name);
     html! {
-        form id="form" class="space-y-4" hx-post=(target.action()) hx-target="#form" hx-swap="outerHTML" {
+        form id="form" class="space-y-4" hx-post=(target.action()) hx-target="#form" hx-swap="outerHTML"
+            x-data={"personaAvatar(" (serde_json::json!(values.display_name)) ")"} "x-on:input"="track($event)" {
             (target.id_field())
             (form_error(errors))
             (form_grid(html! {
-                (full_row(text_field("Name", "name", &values.name, errors, None)))
+                (full_row(identity_fields(target.id, values, errors)))
                 (full_row(description_field(&values.description, errors)))
                 (full_row(textarea_field("System prompt", "system_prompt", &values.system_prompt, 8, errors)))
                 (refreshing_select("Harness", "harness", &harnesses, harness_name, None, errors))
@@ -238,6 +282,50 @@ fn persona_form(
             (form_footer(submit))
         }
     }
+}
+
+/// The avatar preview left of display name and handle, and the commit email below. The preview
+/// is neutral until the persona is saved.
+fn identity_fields(id: Option<Uuid>, values: &PersonaForm, errors: &FormErrors) -> Markup {
+    html! {
+        div class="space-y-4" {
+            div class="flex items-start gap-4" {
+                // 24 px: the label above the inputs, so the avatar sits beside the first input.
+                div class="pt-6" { (persona_avatar_preview(id, &values.display_name, AvatarSize::Form)) }
+                div class="grid min-w-0 flex-1 gap-4 sm:grid-cols-2" {
+                    (text_field("Display name", "display_name", &values.display_name, errors, None))
+                    (handle_field(&values.handle, errors))
+                }
+            }
+            (text_field(
+                "Commit email",
+                "commit_email",
+                &values.commit_email,
+                errors,
+                Some("Author and committer of this persona's commits. Edits apply to runs started after saving."),
+            ))
+        }
+    }
+}
+
+/// The handle input with the `@` in front of it.
+fn handle_field(value: &str, errors: &FormErrors) -> Markup {
+    let class = format!("{INPUT_CLASS} pl-7 font-mono");
+    field(
+        "Handle",
+        "handle",
+        errors,
+        None,
+        html! {
+            div class="relative" {
+                span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" aria-hidden="true" { "@" }
+                input id="handle" name="handle" type="text" value=(value) class=(class)
+                    autocapitalize="none" autocomplete="off" spellcheck="false"
+                    aria-invalid=[errors.get("handle").map(|_| "true")]
+                    aria-describedby=[errors.get("handle").map(|_| "handle-error")];
+            }
+        },
+    )
 }
 
 /// The description textarea with its `n / 500` counter, which follows what is typed.
@@ -282,14 +370,17 @@ fn personas_region(personas: &[PersonaRecord], providers: &[ModelProviderRecord]
                     @for p in personas {
                         @let provider = providers.iter().find(|provider| provider.id == p.model_provider_id)
                             .map(|provider| provider.input.name.as_str());
-                        li class="flex flex-col gap-3 rounded-xl border border-line bg-panel p-4" {
+                        li class="flex min-w-0 flex-col gap-3 rounded-xl border border-line bg-panel p-4" {
                             div class="flex items-start gap-3" {
-                                (avatar(&initials(&p.name)))
+                                (persona_avatar(Some(p.id), &p.display_name, AvatarSize::Card))
                                 div class="min-w-0 flex-1" {
-                                    h2 class="truncate font-semibold" { (p.name) }
+                                    h2 class="truncate font-semibold" {
+                                        (p.display_name) " " span class="font-normal text-muted" { "@" (p.handle) }
+                                    }
+                                    p class="truncate text-xs text-muted" { (p.commit_email) }
                                     p class="text-xs text-muted" { (harness_label(&p.harness)) " · " (p.model) }
                                 }
-                                (edit_button(&format!("/personas/{}/edit", p.id), &format!("Edit persona {}", p.name)))
+                                (edit_button(&format!("/personas/{}/edit", p.id), &format!("Edit persona {}", p.display_name)))
                             }
                             p class="line-clamp-3 whitespace-pre-wrap break-words text-sm text-muted" {
                                 @if p.description.is_empty() { (p.system_prompt) } @else { (p.description) }
@@ -448,14 +539,31 @@ async fn save_persona(
     ))
 }
 
-/// The form errors of a failed save: a model conflict belongs to the model field, any other
-/// conflict (a duplicate name) to the name; other errors are an error page.
+/// The form errors of a failed save: a model conflict belongs to the model field, a taken handle
+/// or email to its field (naming the persona that holds it), any other conflict (a concurrent
+/// save) to the handle; other errors are an error page.
 pub(super) fn save_error(error: DbError) -> Result<FormErrors, Box<Response>> {
     let mut errors = FormErrors::default();
     match error {
         DbError::ModelConflict(message) => errors.add("model", message),
+        DbError::PersonaFieldTaken { field, holder } => {
+            let name = match field {
+                PersonaField::Handle => "handle",
+                PersonaField::CommitEmail => "commit_email",
+            };
+            errors.add(name, format!("Already used by @{holder}."));
+        }
+        // The form checks every part first; this is the same rule failing in the database layer.
+        DbError::InvalidPersonaIdentity(error) => {
+            let name = match error {
+                df_core::IdentityError::Handle => "handle",
+                df_core::IdentityError::DisplayName => "display_name",
+                df_core::IdentityError::Email => "commit_email",
+            };
+            errors.add(name, error.to_string());
+        }
         other => {
-            if let Some(response) = conflict(&mut errors, "name", other) {
+            if let Some(response) = conflict(&mut errors, "handle", other) {
                 return Err(Box::new(response));
             }
         }

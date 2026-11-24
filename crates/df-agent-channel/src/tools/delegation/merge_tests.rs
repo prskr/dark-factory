@@ -39,7 +39,7 @@ async fn iteration(env: &Env, rc: &RunContext) -> TaskId {
         rc,
         call(
             "create_task",
-            json!({"persona": "Linus", "title": "Iteration", "prompt": "Do it.", "base_task": "DF-1"}),
+            json!({"persona": "linus", "title": "Iteration", "prompt": "Do it.", "base_task": "DF-1"}),
         ),
     )
     .await;

@@ -74,7 +74,7 @@ pub(super) async fn create_issue(
 ) -> Result<Outcome, ChannelError> {
     let actor = Principal::agent(
         rc.persona.id,
-        rc.persona.name.clone(),
+        rc.persona.display_name.clone(),
         Some(rc.run.id),
         rc.task.id,
     );

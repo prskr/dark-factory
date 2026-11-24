@@ -32,6 +32,17 @@ pub enum DbError {
     /// provider or harness.
     #[error("conflict: {0}")]
     ModelConflict(String),
+    /// Another persona, `@holder`, already uses the handle or commit email (`field`) of a saved
+    /// persona.
+    #[error("conflict: @{holder} already uses this {field}")]
+    PersonaFieldTaken {
+        field: crate::catalog::PersonaField,
+        holder: String,
+    },
+    /// The handle, display name or commit email of a saved persona breaks the rules of
+    /// `df_core::PersonaIdentity`.
+    #[error("invalid persona identity: {0}")]
+    InvalidPersonaIdentity(df_core::IdentityError),
     /// A dependency of a new task names a task that is not in the project, or names one twice.
     #[error("invalid dependency `{0}`")]
     InvalidDependency(String),

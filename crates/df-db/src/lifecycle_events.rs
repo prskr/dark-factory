@@ -166,7 +166,7 @@ pub struct Subject {
     pub task_id: Uuid,
     pub task_key: String,
     pub persona_id: Uuid,
-    pub persona_name: String,
+    pub persona_display_name: String,
     /// `(id, number)` of the run; `None` for events without a run.
     pub run: Option<(Uuid, i64)>,
 }
@@ -252,7 +252,7 @@ pub fn envelope(id: Uuid, occurred_at: Timestamp, subject: &Subject, event: &Eve
     );
     data.insert(
         "persona".into(),
-        json!({ "id": subject.persona_id, "name": subject.persona_name }),
+        json!({ "id": subject.persona_id, "name": subject.persona_display_name }),
     );
     if let Some((run_id, number)) = subject.run {
         data.insert("run".into(), json!({ "id": run_id, "number": number }));
@@ -353,7 +353,7 @@ async fn load_subject(
         r#"
         SELECT p.id AS project_id, p.key AS project_key, p.repo_url,
                t.id AS task_id, t.key AS task_key,
-               pe.id AS persona_id, pe.name AS persona_name,
+               pe.id AS persona_id, pe.display_name AS persona_display_name,
                r.id AS "run_id?", r.number AS "run_number?",
                now() AS "occurred_at!"
         FROM tasks t
@@ -384,7 +384,7 @@ async fn load_subject(
         task_id: row.task_id,
         task_key: row.task_key,
         persona_id: row.persona_id,
-        persona_name: row.persona_name,
+        persona_display_name: row.persona_display_name,
         run,
     };
     Ok((subject, row.occurred_at.into()))

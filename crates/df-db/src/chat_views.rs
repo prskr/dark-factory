@@ -30,7 +30,7 @@ pub struct ChatListItem {
     pub title_source: TitleSource,
     pub status: TaskStatus,
     pub persona_id: Uuid,
-    pub persona_name: String,
+    pub persona_display_name: String,
     /// The latest transcript event or message, or the creation.
     pub last_activity_at: Timestamp,
     /// The latest message of the board member or the agent, as plain text.
@@ -47,7 +47,7 @@ struct ChatRecord {
     title_source: String,
     status: String,
     persona_id: Uuid,
-    persona_name: String,
+    persona_display_name: String,
     last_activity_at: Timestamp,
     last_message: String,
     needs_you: bool,
@@ -65,7 +65,7 @@ impl TryFrom<ChatRecord> for ChatListItem {
             title_source: row.title_source.parse()?,
             status: row.status.parse()?,
             persona_id: row.persona_id,
-            persona_name: row.persona_name,
+            persona_display_name: row.persona_display_name,
             last_activity_at: row.last_activity_at,
             last_message: row.last_message,
             needs_you: row.needs_you,
@@ -129,7 +129,7 @@ pub async fn list_chats(
         ChatRecord,
         r#"
         SELECT t.key, t.title, t.title_source, t.status, ps.id AS persona_id,
-               ps.name AS persona_name,
+               ps.display_name AS persona_display_name,
                task_last_activity(t.id, t.created_at) AS "last_activity_at!",
                COALESCE((
                    SELECT CASE e.kind
@@ -158,7 +158,7 @@ pub async fn list_chats(
         JOIN personas ps ON ps.id = t.persona_id
         WHERE t.kind = 'chat' AND p.key = $1 AND (t.archived_at IS NOT NULL) = $2
           AND ($6::text IS NULL
-               OR t.title ILIKE $6 OR ps.name ILIKE $6
+               OR t.title ILIKE $6 OR ps.display_name ILIKE $6 OR ps.handle ILIKE $6
                -- Agent text arrives in chunks: search the joined text, not one chunk.
                OR (SELECT string_agg(
                           COALESCE(s.payload #>> '{agentMessageChunk,content,text,text}', ''),

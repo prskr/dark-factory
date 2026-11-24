@@ -28,11 +28,11 @@ pub(super) async fn create_task(
     rc: &RunContext,
     args: &Value,
 ) -> Result<Outcome, ChannelError> {
-    let persona_name = text_arg(args, "persona").unwrap_or_default();
-    let persona = catalog::persona_id_by_name(&ctx.pool, &persona_name).await?;
+    let handle = text_arg(args, "persona").unwrap_or_default();
+    let persona = catalog::persona_id_by_handle(&ctx.pool, &handle).await?;
     let Some(persona) = persona else {
         return Ok(Outcome::error(format!(
-            "unknown persona `{persona_name}`; choose one from list_personas"
+            "unknown persona `{handle}`; personas are addressed by handle, choose one from list_personas"
         )));
     };
     let Some(title) = text_arg(args, "title").as_deref().and_then(sanitize_title) else {
@@ -190,23 +190,30 @@ async fn resolve_branch(
         .map_err(|problem| problem.to_string())
 }
 
-/// Every persona with its description, ordered by name.
+/// Every persona with its handle, display name and description, ordered by handle.
 pub(super) async fn list_personas(ctx: &ChannelContext) -> Result<Outcome, ChannelError> {
     let rows = catalog::list_personas(&ctx.pool).await?;
     let text = rows
         .iter()
         .map(|persona| {
+            let head = format!("- {} ({})", persona.handle, persona.display_name);
             if persona.description.is_empty() {
-                format!("- {}", persona.name)
+                head
             } else {
-                format!("- {}: {}", persona.name, persona.description)
+                format!("{head}: {}", persona.description)
             }
         })
         .collect::<Vec<_>>()
         .join("\n");
     let personas: Vec<Value> = rows
         .iter()
-        .map(|persona| json!({ "name": persona.name, "description": persona.description }))
+        .map(|persona| {
+            json!({
+                "handle": persona.handle,
+                "display_name": persona.display_name,
+                "description": persona.description,
+            })
+        })
         .collect();
     let mut outcome = Outcome::ok(text);
     outcome.structured = Some(json!({ "personas": personas }));
@@ -257,7 +264,7 @@ pub(super) async fn send_message(
 fn agent(rc: &RunContext) -> Principal {
     Principal::agent(
         rc.persona.id,
-        rc.persona.name.clone(),
+        rc.persona.display_name.clone(),
         Some(rc.run.id),
         rc.task.id,
     )

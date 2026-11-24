@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason\n        FROM runs\n        WHERE state = ANY($1) AND started_at < $2 AND stop_requested_at IS NULL\n        ORDER BY started_at\n        ",
+  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason,\n               commit_name, commit_email\n        FROM runs WHERE state <> ALL($1) ORDER BY started_at\n        ",
   "describe": {
     "columns": [
       {
@@ -145,12 +145,33 @@
             "name": "finalize_reason"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "commit_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "commit_name"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "commit_email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "commit_email"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "TextArray",
-        "Timestamptz"
+        "TextArray"
       ]
     },
     "nullable": [
@@ -166,8 +187,10 @@
       false,
       true,
       true,
-      true
+      true,
+      false,
+      false
     ]
   },
-  "hash": "b1b6da776ebe27a8ed10b7c14c551db6ec5cef6a339f70342d561d6d3f2c6a7b"
+  "hash": "0ad87ec24d6033c6d756a8a8f1661630088f939593cb1d7467fb8206b6254e84"
 }

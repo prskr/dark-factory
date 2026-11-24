@@ -87,6 +87,7 @@ impl Scenario {
         Workspace {
             base_branch: "main".into(),
             read_only: true,
+            commit_identity: super::identity(),
             ..Default::default()
         }
     }

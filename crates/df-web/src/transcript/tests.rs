@@ -424,6 +424,31 @@ fn agent_items_carry_the_persona_name_and_the_time_of_their_first_event() {
 }
 
 #[test]
+fn an_agent_message_shows_the_persona_as_display_name_handle_and_avatar() {
+    let id = uuid::Uuid::from_u128(0x0192_a000_0000_7000_8000_0000_0000_0007);
+    let mut folder = Folder::new(PersonaLabel {
+        id: Some(id),
+        display_name: "Code Reviewer".to_owned(),
+        handle: "reviewer".to_owned(),
+    });
+    folder.apply(&chunk(7, "t", "m1", "Hi"));
+
+    let html = render_item(&folder.items()[1]).into_string();
+
+    assert!(
+        html.contains("Code Reviewer <span class=\"text-faint\">@reviewer</span> · <time"),
+        "{html}"
+    );
+    assert!(
+        html.contains("aria-label=\"Code Reviewer\"")
+            && html.contains(">CR<")
+            && html.contains("size-8")
+            && html.contains(&crate::components::persona_avatar::color_class(id)),
+        "{html}"
+    );
+}
+
+#[test]
 fn tool_calls_sit_between_agent_messages_as_agent_items() {
     let mut folder = Folder::new("Linus");
     for event in every_kind().iter().take(7) {

@@ -25,6 +25,7 @@ use serde::Deserialize;
 
 use crate::WebState;
 use crate::auth::CurrentUser;
+use crate::components::PersonaLabel;
 use crate::components::{
     ButtonKind, EmptyPanel, EmptySize, FormErrors, Icon, action_class, icon, logo,
 };
@@ -204,7 +205,7 @@ fn selected_columns(s: &Selected) -> Markup {
             div class="flex min-h-0 flex-1" {
                 div class="flex min-w-0 flex-1 flex-col" {
                     (transcript_scroll(render_transcript(s.folder.items(), &timeline_cards(&s.requests))))
-                    (message_area(key, &s.detail.persona_name, s.detail.status, &s.runs, &s.pending, s.show_hidden))
+                    (message_area(key, &s.detail.persona_display_name, s.detail.status, &s.runs, &s.pending, s.show_hidden))
                 }
                 (crate::artifacts::split_pane())
             }
@@ -260,13 +261,23 @@ async fn task_list(
     workspace(&state, &user, &query.filters(), None).await
 }
 
+/// The persona of `task` as the author of its agent messages, as it is now: a renamed persona
+/// also renames its old transcripts.
+pub(crate) fn persona_label(task: &TaskDetail) -> PersonaLabel {
+    PersonaLabel {
+        id: Some(task.persona_id),
+        display_name: task.persona_display_name.clone(),
+        handle: task.persona_handle.clone(),
+    }
+}
+
 /// The transcript of a task or chat as the page shows it: every stored event folded.
 pub(crate) async fn load_folder(
     state: &WebState,
     id: TaskId,
-    persona_name: &str,
+    persona: PersonaLabel,
 ) -> Result<Folder, df_db::DbError> {
-    let mut folder = Folder::new(persona_name).with_hidden_blocks(state.show_hidden_blocks);
+    let mut folder = Folder::new(persona).with_hidden_blocks(state.show_hidden_blocks);
     loop {
         let rows =
             df_db::task_views::transcript_after(&state.pool, id, folder.last_id(), PAGE_BATCH)
@@ -293,7 +304,7 @@ async fn task_detail(
         Err(response) => return *response,
     };
     let id = TaskId::from_uuid(task.id);
-    let folder = match load_folder(&state, id, &task.persona_name).await {
+    let folder = match load_folder(&state, id, persona_label(&task)).await {
         Ok(folder) => folder,
         Err(e) => return internal_error(&e),
     };
@@ -342,7 +353,7 @@ async fn choices(state: &WebState) -> Result<(Choices, Vec<(String, String)>), d
                 .collect(),
             personas: personas
                 .into_iter()
-                .map(|p| (p.id.to_string(), p.name))
+                .map(|p| (p.id.to_string(), p.display_name))
                 .collect(),
         },
         keys,
@@ -914,7 +925,7 @@ async fn stack(
         .map_err(|e| Box::new(internal_error(&e)))?;
     Ok(pending_region(
         &task.key,
-        &task.persona_name,
+        &task.persona_display_name,
         task.status.as_str(),
         &pending,
         state.show_hidden_blocks,

@@ -317,7 +317,7 @@ Trust policy for configuration found in the repository:
   - remote URL from `Assign`: the gateway's Git proxy URL `https://<gitHost>:<gitPort>/git/<task key>.git` (§11)
   - `credential.helper` set to empty, which resets helpers from every other config scope; the sandbox holds no forge credential
   - `[http "<proxy URL prefix>"] sslCAInfo` pointing at the CA that signs the gateway certificate, scoped to the proxy so other HTTPS remotes keep the system trust store
-  - commit identity of the agent's bot account
+  - commit identity of the run's persona (`Assign.workspace.commit_identity`: display name and commit email; no built-in fallback, an `Assign` without one fails the run)
 
 #### Configurable entries (instance and project scope)
 - Admins can add Git config entries at instance and project scope — e.g. `rebase.autoStash`, `rebase.updateRefs`, `pull.rebase`, `merge.conflictStyle`, `rerere.enabled`, `diff.algorithm`. Multi-valued keys are allowed.
@@ -401,7 +401,7 @@ Status: **implemented** (iteration 2, `openspec/changes/iter2-push-checks`; sett
   | Check | Reason | Mode |
   |---|---|---|
   | Secret scan: every added blob, binary ones included, against the vendored rule set (`crates/df-gateway/rules/secrets.yml`, no live validation) | `df:secret-scan` | project setting (default `approval`) |
-  | Commit identity: author and committer email equal the instance's commit identity | `df:identity` | always `reject` |
+  | Commit identity: author and committer email equal the commit email of the run's persona (`GitRoute.commit_email`, frozen on the run when it is created, [ADR-0062](../docs/adr/0062-persona-identity.md)); commits of another persona, a human or a bot, also when rewritten by a rebase, are rejected | `df:identity` | always `reject` |
   | Protected paths: added, changed, deleted or renamed paths matching a glob (default `.forgejo/workflows/**`, `.github/workflows/**`, `.gitea/workflows/**`, `CODEOWNERS`) | `df:protected-path` | project setting (default `approval`); `.dark-factory/**` always `reject` |
   | Blob size (default 5 MiB) | `df:blob-too-large` | project setting (default `approval`) |
   | Linear history (off by default): no merge commits | `df:merge-commit` | always `reject` |

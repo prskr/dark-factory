@@ -82,7 +82,7 @@ You are in a chat with a board member, who reads your replies as they come. \
 The checkout of the repository is read-only and reset to the base branch at the start of every run: \
 anything you change in it is gone with the run, and pushes are rejected. \
 Work that needs a branch or a pull request goes into tasks: create them with `create_task` for a persona \
-from `list_personas`, and follow up with `send_message`. \
+(its handle, from `list_personas`), and follow up with `send_message`. \
 Results that should outlive the chat belong in artifacts or tasks. \
 Set a short topic for the chat with `set_task_title` in your first reply. \
 A chat is never completed: there is no `complete_task`, you just answer and wait for the next message.";
@@ -149,7 +149,9 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
         .ok_or_else(|| OrchestratorError::InvalidData(format!("unknown harness {harness_name}")))?;
     let (provider, model) = persona_model(ctx, rc).await?;
     harness::check_compatible(harness_name, model.wire_api, provider.input.scheme).map_err(
-        |error| OrchestratorError::InvalidData(format!("persona {}: {error}", rc.persona.name)),
+        |error| {
+            OrchestratorError::InvalidData(format!("persona {}: {error}", rc.persona.display_name))
+        },
     )?;
     let command = rc.project.adapter_command(defaults);
     let mut env: std::collections::HashMap<String, String> = config
@@ -188,8 +190,8 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
             wip_branch: rc.wip_branch().unwrap_or_default(),
             read_only: rc.is_chat(),
             commit_identity: Some(CommitIdentity {
-                name: config.agent.commit_identity.name.clone(),
-                email: config.agent.commit_identity.email.clone(),
+                name: rc.run.commit_identity.name.clone(),
+                email: rc.run.commit_identity.email.clone(),
             }),
             git_hooks: Vec::new(),
             git_config: Vec::new(),
@@ -296,13 +298,13 @@ async fn persona_model(
             .ok_or_else(|| {
                 OrchestratorError::InvalidData(format!(
                     "model provider of persona {} is missing",
-                    rc.persona.name
+                    rc.persona.display_name
                 ))
             })?;
     let model = provider.model(&rc.persona.model).cloned().ok_or_else(|| {
         OrchestratorError::InvalidData(format!(
             "model {} of persona {} is not a model of provider {}",
-            rc.persona.model, rc.persona.name, provider.input.name
+            rc.persona.model, rc.persona.display_name, provider.input.name
         ))
     })?;
     Ok((provider, model))

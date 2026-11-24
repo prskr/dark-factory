@@ -77,7 +77,11 @@ pub struct ProjectRecord {
 /// Fields of a persona.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PersonaInput {
-    pub name: String,
+    /// Unique, lowercase `[a-z0-9-]`; how tools address the persona.
+    pub handle: String,
+    pub display_name: String,
+    /// Author and committer of the persona's commits; unique, lowercase.
+    pub commit_email: String,
     /// Role and strengths, at most [`df_core::PERSONA_DESCRIPTION_MAX_CHARS`] characters; agents read it
     /// through `list_personas`.
     pub description: String,
@@ -87,11 +91,29 @@ pub struct PersonaInput {
     pub model_provider_id: Uuid,
 }
 
+/// The unique parts of a persona identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersonaField {
+    Handle,
+    CommitEmail,
+}
+
+impl std::fmt::Display for PersonaField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Handle => "handle",
+            Self::CommitEmail => "commit email",
+        })
+    }
+}
+
 /// A stored persona.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PersonaRecord {
     pub id: Uuid,
-    pub name: String,
+    pub handle: String,
+    pub display_name: String,
+    pub commit_email: String,
     pub description: String,
     pub system_prompt: String,
     pub harness: String,
@@ -251,8 +273,9 @@ pub async fn get_project(
 pub async fn list_personas(pool: &PgPool) -> Result<Vec<PersonaRecord>, DbError> {
     Ok(sqlx::query_as!(
         PersonaRecord,
-        "SELECT id, name, description, system_prompt, harness, model, model_provider_id
-         FROM personas ORDER BY name"
+        "SELECT id, handle, display_name, commit_email, description, system_prompt, harness, model,
+                model_provider_id
+         FROM personas ORDER BY handle"
     )
     .fetch_all(pool)
     .await?)
@@ -264,7 +287,8 @@ pub async fn get_persona(
 ) -> Result<Option<PersonaRecord>, DbError> {
     Ok(sqlx::query_as!(
         PersonaRecord,
-        "SELECT id, name, description, system_prompt, harness, model, model_provider_id
+        "SELECT id, handle, display_name, commit_email, description, system_prompt, harness, model,
+                model_provider_id
          FROM personas WHERE id = $1",
         id
     )
@@ -272,13 +296,13 @@ pub async fn get_persona(
     .await?)
 }
 
-/// The id of the persona named `name`.
-pub async fn persona_id_by_name(
+/// The id of the persona with `handle`.
+pub async fn persona_id_by_handle(
     executor: impl PgExecutor<'_>,
-    name: &str,
+    handle: &str,
 ) -> Result<Option<Uuid>, DbError> {
     Ok(
-        sqlx::query_scalar!("SELECT id FROM personas WHERE name = $1", name)
+        sqlx::query_scalar!("SELECT id FROM personas WHERE handle = $1", handle)
             .fetch_optional(executor)
             .await?,
     )
@@ -504,19 +528,15 @@ pub async fn save_persona(
     id: Option<Uuid>,
     input: &PersonaInput,
 ) -> Result<PersonaRecord, DbError> {
-    if input.description.chars().count() > df_core::PERSONA_DESCRIPTION_MAX_CHARS {
-        return Err(DbError::InvalidData(format!(
-            "the description is longer than {} characters",
-            df_core::PERSONA_DESCRIPTION_MAX_CHARS
-        )));
-    }
+    let input = &validated(input)?;
     check_persona_model(pool, input).await?;
     let mut tx = pool.begin().await?;
     let before: Option<PersonaRecord> = match id {
         Some(id) => Some(
             sqlx::query_as!(
                 PersonaRecord,
-                "SELECT id, name, description, system_prompt, harness, model, model_provider_id
+                "SELECT id, handle, display_name, commit_email, description, system_prompt,
+                        harness, model, model_provider_id
                  FROM personas WHERE id = $1 FOR UPDATE",
                 id
             )
@@ -526,21 +546,25 @@ pub async fn save_persona(
         ),
         None => None,
     };
+    check_persona_identity_free(&mut tx, before.as_ref().map(|b| b.id), input).await?;
     let record_id = match &before {
         Some(b) => {
             sqlx::query_scalar!(
                 r#"
-                UPDATE personas SET name = $2, system_prompt = $3, harness = $4, model = $5,
-                    model_provider_id = $6, description = $7, updated_at = now()
+                UPDATE personas SET handle = $8, display_name = $2, commit_email = $9,
+                    system_prompt = $3, harness = $4, model = $5, model_provider_id = $6,
+                    description = $7, updated_at = now()
                 WHERE id = $1 RETURNING id
                 "#,
                 b.id,
-                input.name,
+                input.display_name,
                 input.system_prompt,
                 input.harness,
                 input.model,
                 input.model_provider_id,
-                input.description
+                input.description,
+                input.handle,
+                input.commit_email
             )
             .fetch_one(&mut *tx)
             .await
@@ -548,29 +572,39 @@ pub async fn save_persona(
         None => {
             sqlx::query_scalar!(
                 r#"
-                INSERT INTO personas (id, name, system_prompt, harness, model, model_provider_id,
-                    description)
-                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+                INSERT INTO personas (id, display_name, system_prompt, harness, model,
+                    model_provider_id, description, handle, commit_email)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id
                 "#,
                 Uuid::now_v7(),
-                input.name,
+                input.display_name,
                 input.system_prompt,
                 input.harness,
                 input.model,
                 input.model_provider_id,
-                input.description
+                input.description,
+                input.handle,
+                input.commit_email
             )
             .fetch_one(&mut *tx)
             .await
         }
     }
-    .map_err(|e| conflict_or(e, "a persona with this name already exists"))?;
+    // The check above names the holder; this catches a concurrent save.
+    .map_err(|e| {
+        conflict_or(
+            e,
+            "a persona with this handle or commit email already exists",
+        )
+    })?;
     let record = get_persona(&mut *tx, record_id)
         .await?
         .ok_or_else(|| DbError::NotFound(format!("persona `{record_id}`")))?;
 
     let before_input = before.map(|b| PersonaInput {
-        name: b.name,
+        handle: b.handle,
+        display_name: b.display_name,
+        commit_email: b.commit_email,
         description: b.description,
         system_prompt: b.system_prompt,
         harness: b.harness,
@@ -581,7 +615,7 @@ pub async fn save_persona(
         &mut tx,
         actor,
         "persona",
-        &record.name,
+        &record.handle,
         record.id,
         before_input.as_ref(),
         input,
@@ -589,6 +623,59 @@ pub async fn save_persona(
     .await?;
     tx.commit().await?;
     Ok(record)
+}
+
+/// Validates `input` through `PersonaIdentity::new` and the description limit; returns it with the
+/// normalized identity (trimmed name, lower-case email).
+fn validated(input: &PersonaInput) -> Result<PersonaInput, DbError> {
+    if input.description.chars().count() > df_core::PERSONA_DESCRIPTION_MAX_CHARS {
+        return Err(DbError::InvalidData(format!(
+            "the description is longer than {} characters",
+            df_core::PERSONA_DESCRIPTION_MAX_CHARS
+        )));
+    }
+    let identity =
+        df_core::PersonaIdentity::new(&input.handle, &input.display_name, &input.commit_email)
+            .map_err(DbError::InvalidPersonaIdentity)?;
+    Ok(PersonaInput {
+        handle: identity.handle,
+        display_name: identity.display_name,
+        commit_email: identity.commit_email,
+        ..input.clone()
+    })
+}
+
+/// Fails with the holder's handle when another persona uses the handle or the commit email.
+async fn check_persona_identity_free(
+    tx: &mut Transaction<'_, Postgres>,
+    own_id: Option<Uuid>,
+    input: &PersonaInput,
+) -> Result<(), DbError> {
+    let taken = sqlx::query!(
+        r#"
+        SELECT handle, (handle = $2) AS "same_handle!"
+        FROM personas
+        WHERE (handle = $2 OR commit_email = $3) AND id IS DISTINCT FROM $1
+        ORDER BY (handle = $2) DESC
+        LIMIT 1
+        "#,
+        own_id,
+        input.handle,
+        input.commit_email
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    match taken {
+        Some(row) => Err(DbError::PersonaFieldTaken {
+            field: if row.same_handle {
+                PersonaField::Handle
+            } else {
+                PersonaField::CommitEmail
+            },
+            holder: row.handle,
+        }),
+        None => Ok(()),
+    }
 }
 
 /// The persona's model must be a model of its provider that the harness can use.
@@ -660,433 +747,7 @@ pub(crate) async fn audit<T: Serialize>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use df_core::UserId;
+mod identity_migration_tests;
 
-    fn actor() -> (Principal, Vec<String>) {
-        (
-            Principal::human(UserId::new(), "Peter"),
-            vec!["board-member".to_string()],
-        )
-    }
-
-    fn project(key: &str, credential: Option<Uuid>) -> ProjectInput {
-        ProjectInput {
-            key: key.into(),
-            name: "Dark Factory".into(),
-            repo_url: "https://git.example.org/o/r.git".into(),
-            issue_tracker_url: None,
-            image: "img:latest".into(),
-            base_branch: "main".into(),
-            adapter_command: Vec::new(),
-            forge_credential_id: credential,
-            webhook_wake: WebhookWake::Members,
-            branch_rewrite_policy: RewritePolicy::default(),
-            agent_branch_globs: df_core::default_agent_branch_globs(),
-            subtask_merge: SubtaskMerge::default(),
-        }
-    }
-
-    fn persona(prompt: &str, provider: Uuid) -> PersonaInput {
-        PersonaInput {
-            name: "Linus".into(),
-            description: String::new(),
-            system_prompt: prompt.into(),
-            harness: "claude-code".into(),
-            model: "test-model".into(),
-            model_provider_id: provider,
-        }
-    }
-
-    async fn audit_details(pool: &PgPool, action: &str) -> Vec<serde_json::Value> {
-        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = $1 ORDER BY id")
-            .bind(action)
-            .fetch_all(pool)
-            .await
-            .unwrap()
-    }
-
-    #[tokio::test]
-    async fn credential_refs_and_personas_are_audited_with_before_and_after() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let provider = crate::model_providers::tests::seed_provider(&pool).await;
-        let (principal, roles) = actor();
-        let actor = Actor {
-            principal: &principal,
-            roles: &roles,
-        };
-
-        let cred = save_credential_ref(
-            &pool,
-            actor,
-            None,
-            &CredentialRefInput {
-                name: "claude-subscription".into(),
-                secret_name: "claude".into(),
-                secret_key: "token".into(),
-            },
-        )
-        .await
-        .unwrap();
-        assert!(list_credential_refs(&pool).await.unwrap().contains(&cred));
-        let created = audit_details(&pool, "credential_ref.create").await;
-        assert_eq!(created[0]["after"]["secret_name"], "claude");
-        assert!(created[0]["before"].is_null());
-
-        let p = save_persona(&pool, actor, None, &persona("old", provider))
-            .await
-            .unwrap();
-        save_persona(&pool, actor, Some(p.id), &persona("new", provider))
-            .await
-            .unwrap();
-        let updated = audit_details(&pool, "persona.update").await;
-        assert_eq!(updated[0]["before"]["system_prompt"], "old");
-        assert_eq!(updated[0]["after"]["system_prompt"], "new");
-        assert_eq!(
-            get_persona(&pool, p.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .system_prompt,
-            "new"
-        );
-
-        let duplicate = save_persona(&pool, actor, None, &persona("x", provider)).await;
-        assert!(matches!(duplicate, Err(DbError::Conflict(_))));
-    }
-
-    #[tokio::test]
-    async fn a_persona_model_the_provider_lacks_is_a_model_conflict() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let provider = crate::model_providers::tests::seed_provider(&pool).await;
-        let (principal, roles) = actor();
-        let actor = Actor {
-            principal: &principal,
-            roles: &roles,
-        };
-        let mut input = persona("x", provider);
-        input.model = "no-such-model".into();
-
-        let saved = save_persona(&pool, actor, None, &input).await;
-
-        assert!(matches!(saved, Err(DbError::ModelConflict(_))), "{saved:?}");
-    }
-
-    #[tokio::test]
-    async fn the_branch_rewrite_policy_defaults_to_with_lease_and_changes_are_audited() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (principal, roles) = actor();
-        let actor = Actor {
-            principal: &principal,
-            roles: &roles,
-        };
-        let p = save_project(&pool, actor, None, &project("DF", None))
-            .await
-            .unwrap();
-        assert_eq!(p.branch_rewrite_policy, RewritePolicy::WithLease);
-
-        let mut input = project("DF", None);
-        input.branch_rewrite_policy = RewritePolicy::Never;
-        save_project(&pool, actor, Some(p.id), &input)
-            .await
-            .unwrap();
-
-        let stored = get_project_by_key(&pool, "DF").await.unwrap().unwrap();
-        assert_eq!(stored.branch_rewrite_policy, RewritePolicy::Never);
-        let updated = audit_details(&pool, "project.update").await;
-        assert_eq!(updated[0]["before"]["branch_rewrite_policy"], "with-lease");
-        assert_eq!(updated[0]["after"]["branch_rewrite_policy"], "never");
-    }
-
-    #[tokio::test]
-    async fn subtask_merge_defaults_to_human_and_changes_are_audited() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (principal, roles) = actor();
-        let actor = Actor {
-            principal: &principal,
-            roles: &roles,
-        };
-        let p = save_project(&pool, actor, None, &project("DF", None))
-            .await
-            .unwrap();
-        assert_eq!(p.subtask_merge, SubtaskMerge::Human);
-
-        let mut input = project("DF", None);
-        input.subtask_merge = SubtaskMerge::ParentAgent;
-        save_project(&pool, actor, Some(p.id), &input)
-            .await
-            .unwrap();
-
-        let stored = get_project_by_key(&pool, "DF").await.unwrap().unwrap();
-        assert_eq!(stored.subtask_merge, SubtaskMerge::ParentAgent);
-        let updated = audit_details(&pool, "project.update").await;
-        assert_eq!(updated[0]["before"]["subtask_merge"], "human");
-        assert_eq!(updated[0]["after"]["subtask_merge"], "parent-agent");
-    }
-
-    #[tokio::test]
-    async fn a_project_inserted_without_agent_branches_gets_the_dependency_bot_globs() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        sqlx::query(
-            "INSERT INTO projects (id, key, name, repo_url, image) \
-             VALUES ($1, 'OLD', 'Old', 'https://example.test/r.git', 'img')",
-        )
-        .bind(Uuid::now_v7())
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let project = get_project_by_key(&pool, "OLD").await.unwrap().unwrap();
-
-        assert_eq!(project.agent_branch_globs, ["renovate/**", "dependabot/**"]);
-    }
-
-    #[tokio::test]
-    async fn agent_branch_globs_default_are_validated_and_changes_are_audited() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (principal, roles) = actor();
-        let actor = Actor {
-            principal: &principal,
-            roles: &roles,
-        };
-        let p = save_project(&pool, actor, None, &project("DF", None))
-            .await
-            .unwrap();
-        assert_eq!(p.agent_branch_globs, ["renovate/**", "dependabot/**"]);
-
-        let mut invalid = project("DF", None);
-        invalid.agent_branch_globs = vec!["renovate/[".into()];
-        let rejected = save_project(&pool, actor, Some(p.id), &invalid).await;
-        assert!(
-            matches!(rejected, Err(DbError::InvalidData(_))),
-            "{rejected:?}"
-        );
-        assert_eq!(
-            get_project_by_key(&pool, "DF")
-                .await
-                .unwrap()
-                .unwrap()
-                .agent_branch_globs,
-            ["renovate/**", "dependabot/**"]
-        );
-
-        let mut input = project("DF", None);
-        input.agent_branch_globs = vec!["renovate/**".into(), "agent/**".into()];
-        save_project(&pool, actor, Some(p.id), &input)
-            .await
-            .unwrap();
-        let updated = audit_details(&pool, "project.update").await;
-        assert_eq!(
-            updated[0]["before"]["agent_branch_globs"],
-            serde_json::json!(["renovate/**", "dependabot/**"])
-        );
-        assert_eq!(
-            updated[0]["after"]["agent_branch_globs"],
-            serde_json::json!(["renovate/**", "agent/**"])
-        );
-    }
-
-    #[tokio::test]
-    async fn project_adapter_command_round_trips() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (principal, roles) = actor();
-        let actor = Actor {
-            principal: &principal,
-            roles: &roles,
-        };
-
-        let p = save_project(&pool, actor, None, &project("DF", None))
-            .await
-            .unwrap();
-        assert!(p.adapter_command.is_empty());
-
-        let mut input = project("DF", None);
-        input.adapter_command = vec!["/opt/harness/bin/fake-acp-agent".into(), "--x".into()];
-        let p = save_project(&pool, actor, Some(p.id), &input)
-            .await
-            .unwrap();
-        let stored = get_project_by_key(&pool, "DF").await.unwrap().unwrap();
-        assert_eq!(stored.adapter_command, input.adapter_command);
-        assert_eq!(p.adapter_command, input.adapter_command);
-
-        input.adapter_command.clear();
-        save_project(&pool, actor, Some(p.id), &input)
-            .await
-            .unwrap();
-        let stored = get_project_by_key(&pool, "DF").await.unwrap().unwrap();
-        assert!(stored.adapter_command.is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_changed_push_policy_is_stored_audited_and_announced_with_the_project() {
-        use std::time::Duration;
-
-        use crate::notify::{Notification, Notifier};
-        use crate::push_checks::{CheckMode, PushPolicy, push_policies, push_policy};
-
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (principal, roles) = actor();
-        let actor = Actor {
-            principal: &principal,
-            roles: &roles,
-        };
-        let p = save_project(&pool, actor, None, &project("DF", None))
-            .await
-            .unwrap();
-        let notifier = Notifier::start(&pool).await.unwrap();
-        let mut notifications = notifier.subscribe();
-
-        let default = PushPolicy::default();
-        update_project_with_push_policy(&pool, actor, p.id, &project("DF", None), &default)
-            .await
-            .unwrap();
-        assert!(push_policies(&pool, &[p.id]).await.unwrap().is_empty());
-        assert_eq!(push_policy(&pool, p.id).await.unwrap(), default);
-
-        let mut policy = PushPolicy::default();
-        policy.protected_globs.push("deploy/**".into());
-        policy.secret_mode = CheckMode::Reject;
-        let mut renamed = project("DF", None);
-        renamed.name = "Factory".into();
-        update_project_with_push_policy(&pool, actor, p.id, &renamed, &policy)
-            .await
-            .unwrap();
-        assert_eq!(push_policy(&pool, p.id).await.unwrap(), policy);
-        assert_eq!(
-            get_project_by_key(&pool, "DF").await.unwrap().unwrap().name,
-            "Factory"
-        );
-        let created = audit_details(&pool, "push_policy.create").await;
-        assert_eq!(created.len(), 1);
-        assert!(created[0]["before"].is_null());
-        assert_eq!(created[0]["after"]["protected_globs"][4], "deploy/**");
-        assert_eq!(created[0]["after"]["secret_mode"], "reject");
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while notifications.recv().await.unwrap() != Notification::EgressPolicy {}
-        })
-        .await
-        .unwrap();
-
-        update_project_with_push_policy(&pool, actor, p.id, &renamed, &policy)
-            .await
-            .unwrap();
-        assert!(audit_details(&pool, "push_policy.update").await.is_empty());
-        let mut linear = policy.clone();
-        linear.linear_history = true;
-        update_project_with_push_policy(&pool, actor, p.id, &renamed, &linear)
-            .await
-            .unwrap();
-        let updated = audit_details(&pool, "push_policy.update").await;
-        assert_eq!(updated.len(), 1);
-        assert_eq!(updated[0]["before"]["linear_history"], false);
-        assert_eq!(updated[0]["after"]["linear_history"], true);
-
-        let rekeyed =
-            update_project_with_push_policy(&pool, actor, p.id, &project("DFX", None), &default)
-                .await;
-        assert!(matches!(rekeyed, Err(DbError::Conflict(_))), "{rekeyed:?}");
-        assert_eq!(push_policy(&pool, p.id).await.unwrap(), linear);
-    }
-
-    #[tokio::test]
-    async fn hidden_globs_round_trip_with_an_audit_entry_and_reject_alternation() {
-        use crate::push_checks::{PushPolicy, push_policy};
-
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (principal, roles) = actor();
-        let actor = Actor {
-            principal: &principal,
-            roles: &roles,
-        };
-        let p = save_project(&pool, actor, None, &project("DF", None))
-            .await
-            .unwrap();
-
-        let policy = PushPolicy {
-            hidden_globs: vec!["talos/**".into(), "configs/*".into()],
-            ..PushPolicy::default()
-        };
-        update_project_with_push_policy(&pool, actor, p.id, &project("DF", None), &policy)
-            .await
-            .unwrap();
-        assert_eq!(push_policy(&pool, p.id).await.unwrap(), policy);
-        let created = audit_details(&pool, "push_policy.create").await;
-        assert!(created[0]["before"].is_null());
-        assert_eq!(created[0]["after"]["hidden_globs"][0], "talos/**");
-
-        let mut changed = policy.clone();
-        changed.hidden_globs = vec!["secret/**".into()];
-        update_project_with_push_policy(&pool, actor, p.id, &project("DF", None), &changed)
-            .await
-            .unwrap();
-        let updated = audit_details(&pool, "push_policy.update").await;
-        assert_eq!(updated[0]["before"]["hidden_globs"][0], "talos/**");
-        assert_eq!(updated[0]["after"]["hidden_globs"][0], "secret/**");
-
-        let mut invalid = changed.clone();
-        invalid.hidden_globs = vec!["{a,b}/**".into()];
-        let saved =
-            update_project_with_push_policy(&pool, actor, p.id, &project("DF", None), &invalid)
-                .await;
-        assert!(matches!(saved, Err(DbError::InvalidData(_))), "{saved:?}");
-        assert_eq!(push_policy(&pool, p.id).await.unwrap(), changed);
-    }
-
-    #[tokio::test]
-    async fn project_key_is_immutable_after_creation() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let provider = crate::model_providers::tests::seed_provider(&pool).await;
-        let (principal, roles) = actor();
-        let actor = Actor {
-            principal: &principal,
-            roles: &roles,
-        };
-
-        let p = save_project(&pool, actor, None, &project("DF", None))
-            .await
-            .unwrap();
-        assert!(!p.has_tasks);
-        // The key never changes after creation, with or without tasks.
-        let renamed = save_project(&pool, actor, Some(p.id), &project("DFX", None)).await;
-        assert!(matches!(renamed, Err(DbError::Conflict(_))), "{renamed:?}");
-        assert!(get_project_by_key(&pool, "DFX").await.unwrap().is_none());
-        assert_eq!(
-            get_project_by_key(&pool, "DF").await.unwrap().unwrap().id,
-            p.id
-        );
-
-        let persona = save_persona(&pool, actor, None, &persona("p", provider))
-            .await
-            .unwrap();
-        crate::create_task(
-            &pool,
-            crate::NewTask {
-                project_id: df_core::ProjectId::from_uuid(p.id),
-                persona_id: df_core::PersonaId::from_uuid(persona.id),
-                title: Some("t".into()),
-                description: String::new(),
-                issue_number: None,
-                created_by: Principal::system("test"),
-                parent_id: None,
-                depends_on: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
-
-        let rejected = save_project(&pool, actor, Some(p.id), &project("OTHER", None)).await;
-        assert!(
-            matches!(rejected, Err(DbError::Conflict(_))),
-            "{rejected:?}"
-        );
-        let same_key = save_project(&pool, actor, Some(p.id), &project("DF", None))
-            .await
-            .unwrap();
-        assert!(same_key.has_tasks);
-        assert_eq!(
-            get_project_by_key(&pool, "DF").await.unwrap().unwrap().id,
-            p.id
-        );
-    }
-}
+#[cfg(test)]
+mod tests;

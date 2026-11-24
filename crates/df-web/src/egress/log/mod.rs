@@ -57,7 +57,7 @@ pub(super) async fn page(
         .inspect_err(|error| tracing::warn!(%error, "listing personas for the traffic filter"))
         .unwrap_or_default()
         .into_iter()
-        .map(|p| (p.id.to_string(), p.name))
+        .map(|p| (p.id.to_string(), p.display_name))
         .collect::<Vec<_>>();
     // The same backlog as the stream's first message; the stream replaces it once connected.
     let mut viewer = Viewer::new(filter.clone(), super::context(&state).await);

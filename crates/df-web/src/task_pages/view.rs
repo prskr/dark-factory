@@ -9,6 +9,7 @@ use jiff::Timestamp;
 use maud::{Markup, html};
 
 use super::resume::{ResumeNote, clock_label};
+use crate::components::AvatarSize;
 use crate::components::QueuedState;
 use crate::components::forms::{INPUT_CLASS, MenuItem};
 use crate::components::short_time;
@@ -16,7 +17,7 @@ use crate::components::transcript::queued_message;
 use crate::components::{
     ButtonKind, DialogStyle, EmptyPanel, EmptySize, FormErrors, ICON_BUTTON_CLASS, Icon, Tone,
     action_class, attached_badge, chip, definition_list, details_panel_with_heading, dialog_close,
-    dialog_with, field_error, filter_chip, form_error, harness_label, icon, icon_menu,
+    dialog_with, field_error, filter_chip, form_error, icon, icon_menu, persona_avatar,
     phone_profile_menu, search_menu, section, status_badge, tone_badge,
 };
 use crate::components::{ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
@@ -201,13 +202,16 @@ pub(crate) fn task_rows(
                             span class="font-mono text-xs text-faint" { (t.key) }
                             @if let Some(status) = status { (status_badge(status)) } @else { (tone_badge(Tone::Queued, &t.status)) }
                             (super::subtasks::chip(t.subtasks))
-                            time datetime=(t.updated_at.to_string()) class="ml-auto font-mono text-xs text-faint" { (short_time(t.updated_at)) }
+                            div class="ml-auto flex items-center gap-1.5" {
+                                (persona_avatar(Some(t.persona_id), &t.persona_display_name, AvatarSize::Row))
+                                time datetime=(t.updated_at.to_string()) class="font-mono text-xs text-faint" { (short_time(t.updated_at)) }
+                            }
                         }
                         div title=(t.title) class={"mt-0.5 truncate text-[15px] font-medium" @if t.title_source == TitleSource::Placeholder { " italic text-muted" }} { (t.title) }
                         @if let Some(at) = resume_at {
                             div class="mt-0.5 truncate text-xs text-muted" { "Resumes at " (clock_label(at, Timestamp::now())) }
                         } @else if !t.status_line.is_empty() { div class="mt-0.5 truncate text-xs text-muted" { (t.status_line) } }
-                        div class="mt-1 text-xs text-faint" { (t.project_name) " · " (t.persona_name) }
+                        div class="mt-1 text-xs text-faint" { (t.project_name) " · " (t.persona_display_name) }
                     }
                 }
             }
@@ -618,10 +622,7 @@ pub(crate) fn details_region(
             "Project",
             html! { a href={"/projects/" (task.project_key)} class="text-accent-text underline" { (task.project_name) " " (chip(&task.project_key)) } },
         ),
-        (
-            "Persona",
-            html! { a href="/personas" class="text-accent-text underline" { (task.persona_name) " " span class="font-normal text-muted" { "· " (harness_label(&task.persona_harness)) } } },
-        ),
+        ("Persona", persona_value(task)),
         (
             "Branch",
             html! { span class="font-mono text-xs" { (branch) } },
@@ -684,12 +685,23 @@ pub(crate) fn details_region(
     }
 }
 
+/// The persona of the task in the details: avatar, display name and `@handle`, linked to the
+/// persona list.
+fn persona_value(task: &TaskDetail) -> Markup {
+    html! {
+        a href="/personas" class="inline-flex items-center gap-2 text-accent-text underline" {
+            (persona_avatar(Some(task.persona_id), &task.persona_display_name, AvatarSize::Row))
+            span { (task.persona_display_name) " " span class="font-normal text-muted" { "@" (task.persona_handle) } }
+        }
+    }
+}
+
 /// The parent of the task: its key and title linked to its page. A chat parent reads
 /// `<key> · <persona> · <topic>` and links to the chat page.
 fn parent_link(task: &TaskDetail) -> Option<Markup> {
     let (key, title) = task.parent_key.as_ref().zip(task.parent_title.as_ref())?;
     let persona = task
-        .parent_persona_name
+        .parent_persona_display_name
         .as_ref()
         .filter(|_| df_core::is_chat_key(key));
     Some(if let Some(persona) = persona {

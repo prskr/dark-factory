@@ -11,13 +11,15 @@ async fn pool() -> PgPool {
     df_test_postgres::migrated_pool(&df_db::MIGRATOR).await
 }
 
-async fn add_persona(pool: &PgPool, name: &str, description: &str) {
+/// Adds a persona that uses the model of `linus`; the email is `<handle>@example.org`.
+async fn add_persona(pool: &PgPool, handle: &str, display_name: &str, description: &str) {
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, model, model_provider_id, description)
-         SELECT $1, $2, 'p', model, model_provider_id, $3 FROM personas WHERE name = 'Linus'",
+        "INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id, description)
+         SELECT $1, $2, $3, $3 || '@example.org', 'p', model, model_provider_id, $4 FROM personas WHERE handle = 'linus'",
     )
     .bind(uuid::Uuid::now_v7())
-    .bind(name)
+    .bind(display_name)
+    .bind(handle)
     .bind(description)
     .execute(pool)
     .await
@@ -26,7 +28,7 @@ async fn add_persona(pool: &PgPool, name: &str, description: &str) {
 
 fn review_args(depends_on: serde_json::Value) -> serde_json::Value {
     json!({
-        "persona": "Reviewer",
+        "persona": "reviewer",
         "title": "Review DF-2",
         "prompt": "Review the pull request of DF-2.",
         "depends_on": depends_on,
@@ -37,13 +39,13 @@ fn review_args(depends_on: serde_json::Value) -> serde_json::Value {
 async fn create_task_makes_a_child_that_waits_for_its_dependency() {
     let (env, rc) = setup(pool().await).await;
     let pool = &env.ctx.pool;
-    add_persona(pool, "Reviewer", "").await;
+    add_persona(pool, "reviewer", "Reviewer", "").await;
     let implementation = execute(
         &env.ctx,
         &rc,
         call(
             "create_task",
-            json!({"persona": "Linus", "title": "Implement", "prompt": "Do it."}),
+            json!({"persona": "linus", "title": "Implement", "prompt": "Do it."}),
         ),
     )
     .await;
@@ -97,18 +99,18 @@ async fn create_task_makes_a_child_that_waits_for_its_dependency() {
 #[tokio::test]
 async fn create_task_refuses_unknown_personas_empty_input_and_invalid_dependencies() {
     let (env, rc) = setup(pool().await).await;
-    add_persona(&env.ctx.pool, "Reviewer", "").await;
+    add_persona(&env.ctx.pool, "reviewer", "Reviewer", "").await;
     let cases = [
         (
-            json!({"persona": "Nobody", "title": "T", "prompt": "P"}),
-            "Nobody",
+            json!({"persona": "nobody", "title": "T", "prompt": "P"}),
+            "nobody",
         ),
         (
-            json!({"persona": "Linus", "title": "  ", "prompt": "P"}),
+            json!({"persona": "linus", "title": "  ", "prompt": "P"}),
             "title",
         ),
         (
-            json!({"persona": "Linus", "title": "T", "prompt": "  "}),
+            json!({"persona": "linus", "title": "T", "prompt": "  "}),
             "prompt",
         ),
         (
@@ -140,7 +142,7 @@ async fn a_retried_create_task_returns_the_same_key_and_creates_one_task() {
     let (env, rc) = setup(pool().await).await;
     let request = call(
         "create_task",
-        json!({"persona": "Linus", "title": "Once", "prompt": "Do it."}),
+        json!({"persona": "linus", "title": "Once", "prompt": "Do it."}),
     );
     let first = execute(&env.ctx, &rc, request.clone()).await;
     let again = execute(&env.ctx, &rc, request).await;
@@ -153,10 +155,38 @@ async fn a_retried_create_task_returns_the_same_key_and_creates_one_task() {
 }
 
 #[tokio::test]
-async fn list_personas_returns_names_with_descriptions_ordered_by_name() {
+async fn a_display_name_instead_of_the_handle_is_an_error_that_says_to_use_the_handle() {
     let (env, rc) = setup(pool().await).await;
-    add_persona(&env.ctx.pool, "Reviewer", "").await;
-    sqlx::query("UPDATE personas SET description = 'Rust implementation' WHERE name = 'Linus'")
+    add_persona(&env.ctx.pool, "reviewer", "Code Reviewer", "").await;
+
+    let result = execute(
+        &env.ctx,
+        &rc,
+        call(
+            "create_task",
+            json!({"persona": "Code Reviewer", "title": "T", "prompt": "P"}),
+        ),
+    )
+    .await;
+
+    assert!(result.is_error);
+    let text = message(&result);
+    assert!(
+        text.contains("Code Reviewer") && text.contains("addressed by handle"),
+        "{text}"
+    );
+    let tasks: i64 = sqlx::query_scalar("SELECT count(*) FROM tasks")
+        .fetch_one(&env.ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(tasks, 1, "no task was created");
+}
+
+#[tokio::test]
+async fn list_personas_returns_handles_display_names_and_descriptions_ordered_by_handle() {
+    let (env, rc) = setup(pool().await).await;
+    add_persona(&env.ctx.pool, "reviewer", "Reviewer", "").await;
+    sqlx::query("UPDATE personas SET description = 'Rust implementation' WHERE handle = 'linus'")
         .execute(&env.ctx.pool)
         .await
         .unwrap();
@@ -169,11 +199,14 @@ async fn list_personas_returns_names_with_descriptions_ordered_by_name() {
     assert_eq!(
         structured,
         json!({"personas": [
-            {"name": "Linus", "description": "Rust implementation"},
-            {"name": "Reviewer", "description": ""}
+            {"handle": "linus", "display_name": "Linus", "description": "Rust implementation"},
+            {"handle": "reviewer", "display_name": "Reviewer", "description": ""}
         ]})
     );
-    assert_eq!(message(&result), "- Linus: Rust implementation\n- Reviewer");
+    assert_eq!(
+        message(&result),
+        "- linus (Linus): Rust implementation\n- reviewer (Reviewer)"
+    );
 }
 
 async fn child_of(
@@ -278,7 +311,7 @@ async fn open_pr(
 }
 
 fn on_branch(branch: &str) -> serde_json::Value {
-    json!({"persona": "Linus", "title": "Rebase", "prompt": "Rebase it.", "branch": branch})
+    json!({"persona": "linus", "title": "Rebase", "prompt": "Rebase it.", "branch": branch})
 }
 
 async fn task_count(env: &crate::testing::Env) -> i64 {

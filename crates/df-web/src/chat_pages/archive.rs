@@ -170,8 +170,8 @@ async fn body(
                                 aria-current=[(current == Some(chat.key.as_str())).then_some("true")]
                                 class="block border-b border-line px-4 py-3 hover:bg-sunk aria-[current=true]:bg-accent-soft" {
                                 div class="flex items-center gap-2" {
-                                    (avatar(&initials(&chat.persona_name)))
-                                    span class="min-w-0 truncate text-sm font-medium" { (chat.persona_name) }
+                                    (avatar(&initials(&chat.persona_display_name)))
+                                    span class="min-w-0 truncate text-sm font-medium" { (chat.persona_display_name) }
                                     span class="ml-auto shrink-0 font-mono text-xs text-faint" { (chat.key) }
                                 }
                                 div class="mt-1 truncate text-[15px] font-medium" { (chat.title) }
@@ -206,9 +206,10 @@ async fn chat_pane(
     let tab = Tab::parse(query.tab.as_deref());
     let content = match tab {
         Tab::Transcript => {
-            let folder = crate::task_pages::load_folder(state, id, &chat.persona_name)
-                .await
-                .map_err(|e| Box::new(internal_error(&e)))?;
+            let folder =
+                crate::task_pages::load_folder(state, id, crate::task_pages::persona_label(chat))
+                    .await
+                    .map_err(|e| Box::new(internal_error(&e)))?;
             // Read-only: the transcript without its message box.
             html! { div class="min-h-0 flex-1 overflow-y-auto p-4" { (render_transcript(folder.items(), &[])) } }
         }
@@ -229,7 +230,7 @@ async fn chat_pane(
                 button type="button" aria-label="Back to the archived chats" "x-on:click"="chat = false" class={(ICON_BUTTON_CLASS) " md:hidden"} { (icon(Icon::ChevronLeft)) }
                 div class="min-w-0 flex-1" {
                     div class="truncate font-semibold" { (chat.title) }
-                    div class="truncate text-xs text-muted" { (chat.persona_name) " · " span class="font-mono" { (chat.key) } }
+                    div class="truncate text-xs text-muted" { (chat.persona_display_name) " · " span class="font-mono" { (chat.key) } }
                 }
                 button type="button" hx-post={"/chats/" (chat.key) "/unarchive"} hx-swap="none"
                     class=(action_class(ButtonKind::Secondary)) { (icon(Icon::Archive)) "Unarchive" }

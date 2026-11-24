@@ -1,6 +1,6 @@
 # ADR-0062: Persona identity with a shared forge bot account
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-19
 - **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0010](0010-credentials-in-the-sandbox.md)
 

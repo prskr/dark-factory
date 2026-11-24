@@ -31,7 +31,7 @@ fn issue(number: u64, pull_request: bool) -> Issue {
 }
 
 fn args(issue: Option<u64>) -> serde_json::Value {
-    let mut args = json!({"persona": "Linus", "title": "Fix it", "prompt": "Do it."});
+    let mut args = json!({"persona": "linus", "title": "Fix it", "prompt": "Do it."});
     if let Some(issue) = issue {
         args["issue"] = json!(issue);
     }

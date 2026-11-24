@@ -25,8 +25,6 @@ use super::inference_routes;
 pub struct GitSettings {
     /// User name sent with the forge token (`agent.gitUsername`).
     pub username: String,
-    pub commit_name: String,
-    pub commit_email: String,
     /// Routes for `http://` repositories too (`network.allowPlainHttp`).
     pub allow_plain_http: bool,
 }
@@ -35,8 +33,6 @@ impl GitSettings {
     pub fn from_config(agent: &AgentConfig, network: &NetworkConfig) -> Self {
         Self {
             username: agent.git_username.clone(),
-            commit_name: agent.commit_identity.name.clone(),
-            commit_email: agent.commit_identity.email.clone(),
             allow_plain_http: network.allow_plain_http,
         }
     }
@@ -202,8 +198,8 @@ fn git_route(run: &ActiveRun, git: &GitSettings) -> Option<GitRoute> {
             .as_ref()
             .map(|reference| reference.id.to_string())
             .unwrap_or_default(),
-        commit_name: git.commit_name.clone(),
-        commit_email: git.commit_email.clone(),
+        commit_name: run.commit_identity.name.clone(),
+        commit_email: run.commit_identity.email.clone(),
         rewrite_policy: match run.rewrite_policy {
             RewritePolicy::Never => pb::RewritePolicy::Never,
             RewritePolicy::WithLease => pb::RewritePolicy::WithLease,
@@ -278,6 +274,10 @@ mod tests {
             base_branch: "main".into(),
             task_branch: format!("factory/task/{key}-1"),
             rewrite_policy: RewritePolicy::WithLease,
+            commit_identity: df_core::CommitIdentity {
+                name: "Linus".into(),
+                email: "linus@example.org".into(),
+            },
             forge_credential: None,
         }
     }
@@ -285,8 +285,6 @@ mod tests {
     fn settings() -> GitSettings {
         GitSettings {
             username: "dark-factory".into(),
-            commit_name: "Dark Factory".into(),
-            commit_email: "factory@example.test".into(),
             allow_plain_http: false,
         }
     }
@@ -372,7 +370,7 @@ mod tests {
         assert_eq!(route.credential_ref, "");
         assert_eq!(
             (route.commit_name.as_str(), route.commit_email.as_str()),
-            ("Dark Factory", "factory@example.test")
+            ("Linus", "linus@example.org")
         );
     }
 

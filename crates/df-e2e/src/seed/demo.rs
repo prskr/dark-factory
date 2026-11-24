@@ -141,8 +141,11 @@ async fn ensure_personas(
 ) -> Result<HashMap<&'static str, Uuid>> {
     let mut personas = HashMap::new();
     for persona in PERSONAS {
+        let handle = persona.name.to_lowercase();
         let wanted = PersonaInput {
-            name: persona.name.into(),
+            commit_email: format!("{handle}@example.org"),
+            handle,
+            display_name: persona.name.into(),
             description: persona.description.into(),
             system_prompt: persona.system_prompt.into(),
             harness: persona.harness.into(),

@@ -15,7 +15,7 @@ async fn pool() -> PgPool {
 }
 
 fn create(base_task: Option<&str>) -> serde_json::Value {
-    let mut args = json!({"persona": "Linus", "title": "Work", "prompt": "Do it."});
+    let mut args = json!({"persona": "linus", "title": "Work", "prompt": "Do it."});
     if let Some(base) = base_task {
         args["base_task"] = json!(base);
     }

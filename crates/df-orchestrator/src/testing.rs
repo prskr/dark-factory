@@ -125,8 +125,8 @@ impl Fixture {
         .expect("seed model provider API and model");
         let persona_id = PersonaId::new();
         sqlx::query(
-            "INSERT INTO personas (id, name, system_prompt, model, model_provider_id)
-             VALUES ($1, 'Linus', 'You are Linus.', 'claude-sonnet-5-5', $2)",
+            "INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id)
+             VALUES ($1, 'Linus', 'linus', 'linus@example.org', 'You are Linus.', 'claude-sonnet-5-5', $2)",
         )
         .bind(persona_id.as_uuid())
         .bind(model_provider)

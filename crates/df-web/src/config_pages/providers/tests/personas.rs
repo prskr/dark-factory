@@ -51,7 +51,9 @@ async fn persona_with_an_incompatible_provider_is_rejected_on_the_server() {
     app.post("/model-providers", &openai, &cookie).await;
     let provider = stored(&app, "OpenAI only").await.to_string();
     let persona = form(&[
-        ("name", "Ada"),
+        ("display_name", "Ada"),
+        ("handle", "ada"),
+        ("commit_email", "ada@example.org"),
         ("system_prompt", "x"),
         ("model", "gpt-6-luna"),
         ("model_provider_id", &provider),
@@ -78,7 +80,9 @@ async fn a_persona_is_created_with_a_compatible_provider() {
     let cookie = app.login().await;
     let provider = seed_provider(&app.pool).await.to_string();
     let persona = form(&[
-        ("name", "Linus"),
+        ("display_name", "Linus"),
+        ("handle", "linus"),
+        ("commit_email", "linus@example.org"),
         ("system_prompt", "Be Linus."),
         ("model", "claude-sonnet-5-5"),
         ("model_provider_id", &provider),
@@ -88,7 +92,7 @@ async fn a_persona_is_created_with_a_compatible_provider() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let stored: uuid::Uuid =
-        sqlx::query_scalar("SELECT model_provider_id FROM personas WHERE name = 'Linus'")
+        sqlx::query_scalar("SELECT model_provider_id FROM personas WHERE handle = 'linus'")
             .fetch_one(&app.pool)
             .await
             .unwrap();

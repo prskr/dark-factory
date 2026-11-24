@@ -42,7 +42,7 @@ async fn a_chat_run_that_delegates_creates_a_task_with_the_chat_as_its_parent() 
         &rc,
         call(
             "create_task",
-            json!({"persona": "Linus", "title": "Implement", "prompt": "Do it."}),
+            json!({"persona": "linus", "title": "Implement", "prompt": "Do it."}),
         ),
     )
     .await;

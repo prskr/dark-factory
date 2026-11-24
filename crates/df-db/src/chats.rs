@@ -82,7 +82,7 @@ pub async fn create_chat_tx(
     let persona = crate::catalog::get_persona(&mut **tx, input.persona_id.as_uuid())
         .await?
         .ok_or_else(|| DbError::NotFound(format!("persona {}", input.persona_id)))?
-        .name;
+        .display_name;
     let entry = NewAuditEntry::new(
         input.author,
         Vec::new(),

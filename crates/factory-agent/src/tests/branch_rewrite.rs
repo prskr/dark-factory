@@ -89,6 +89,7 @@ impl Fixture {
             wip_branch: "factory/wip/DF-1".into(),
             rewrite_policy: policy.into(),
             existing_branch: existing,
+            commit_identity: super::identity(),
             ..Default::default()
         }
     }

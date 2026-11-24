@@ -44,7 +44,10 @@ pub struct TaskListItem {
     pub title_source: TitleSource,
     pub project_key: String,
     pub project_name: String,
-    pub persona_name: String,
+    pub persona_id: Uuid,
+    pub persona_handle: String,
+    /// The persona's display name.
+    pub persona_display_name: String,
     pub status: String,
     pub status_line: String,
     /// When the scheduler may start the task's next run.
@@ -63,7 +66,9 @@ struct TaskListRow {
     title_source: String,
     project_key: String,
     project_name: String,
-    persona_name: String,
+    persona_id: Uuid,
+    persona_handle: String,
+    persona_display_name: String,
     status: String,
     status_line: String,
     resume_at: Option<jiff_sqlx::Timestamp>,
@@ -84,7 +89,9 @@ impl TryFrom<TaskListRow> for TaskListItem {
             title_source: row.title_source.parse()?,
             project_key: row.project_key,
             project_name: row.project_name,
-            persona_name: row.persona_name,
+            persona_id: row.persona_id,
+            persona_handle: row.persona_handle,
+            persona_display_name: row.persona_display_name,
             status: row.status,
             status_line: row.status_line,
             resume_at: row.resume_at.map(Into::into),
@@ -136,7 +143,10 @@ pub struct TaskDetail {
     pub project_name: String,
     pub repo_url: String,
     pub issue_tracker_url: Option<String>,
-    pub persona_name: String,
+    pub persona_id: Uuid,
+    pub persona_handle: String,
+    /// The persona's display name.
+    pub persona_display_name: String,
     /// Harness of the persona, for example `claude-code`.
     pub persona_harness: String,
     /// Model of the persona; `None` means the instance default.
@@ -165,7 +175,7 @@ pub struct TaskDetail {
     pub parent_key: Option<String>,
     pub parent_title: Option<String>,
     /// The persona of the parent, which a chat parent shows next to its key.
-    pub parent_persona_name: Option<String>,
+    pub parent_persona_display_name: Option<String>,
     /// The task whose branch this one builds on.
     pub base_task_key: Option<String>,
     pub base_task_title: Option<String>,
@@ -182,7 +192,9 @@ struct TaskDetailRow {
     project_name: String,
     repo_url: String,
     issue_tracker_url: Option<String>,
-    persona_name: String,
+    persona_id: Uuid,
+    persona_handle: String,
+    persona_display_name: String,
     persona_harness: String,
     persona_model: Option<String>,
     persona_description: String,
@@ -202,7 +214,7 @@ struct TaskDetailRow {
     creator_task_key: Option<String>,
     parent_key: Option<String>,
     parent_title: Option<String>,
-    parent_persona_name: Option<String>,
+    parent_persona_display_name: Option<String>,
     base_task_key: Option<String>,
     base_task_title: Option<String>,
 }
@@ -221,7 +233,9 @@ impl TryFrom<TaskDetailRow> for TaskDetail {
             project_name: row.project_name,
             repo_url: row.repo_url,
             issue_tracker_url: row.issue_tracker_url,
-            persona_name: row.persona_name,
+            persona_id: row.persona_id,
+            persona_handle: row.persona_handle,
+            persona_display_name: row.persona_display_name,
             persona_harness: row.persona_harness,
             persona_model: row.persona_model,
             persona_description: row.persona_description,
@@ -241,7 +255,7 @@ impl TryFrom<TaskDetailRow> for TaskDetail {
             creator_task_key: row.creator_task_key,
             parent_key: row.parent_key,
             parent_title: row.parent_title,
-            parent_persona_name: row.parent_persona_name,
+            parent_persona_display_name: row.parent_persona_display_name,
             base_task_key: row.base_task_key,
             base_task_title: row.base_task_title,
         })
@@ -343,7 +357,8 @@ pub async fn list_task_items(
         TaskListRow,
         r#"
         SELECT t.id, t.key, t.title, t.title_source, p.key AS project_key,
-               p.name AS project_name, ps.name AS persona_name,
+               p.name AS project_name, ps.id AS persona_id, ps.handle AS persona_handle,
+               ps.display_name AS persona_display_name,
                t.status, t.status_line, t.resume_at,
                COALESCE(sub.done, 0) AS "subtasks_done!", COALESCE(sub.total, 0) AS "subtasks_total!",
                t.created_at, t.updated_at
@@ -417,7 +432,8 @@ pub async fn get_task_detail_by_key(
         TaskDetailRow,
         r#"
         SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
-            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
+            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.id AS persona_id,
+            ps.handle AS persona_handle, ps.display_name AS persona_display_name,
             ps.harness AS persona_harness, ps.model AS persona_model,
             ps.description AS persona_description, t.issue_number, t.status,
             t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.archived_at,
@@ -426,7 +442,7 @@ pub async fn get_task_detail_by_key(
             t.branch,
             t.resume_at, t.auto_resumes, t.created_by, creator.key AS "creator_task_key?",
             parent.key AS "parent_key?", parent.title AS "parent_title?",
-            parent_persona.name AS "parent_persona_name?",
+            parent_persona.display_name AS "parent_persona_display_name?",
             base.key AS "base_task_key?", base.title AS "base_task_title?"
         FROM tasks t
         JOIN projects p ON p.id = t.project_id
@@ -452,7 +468,8 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
         TaskDetailRow,
         r#"
         SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,
-            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.name AS persona_name,
+            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.id AS persona_id,
+            ps.handle AS persona_handle, ps.display_name AS persona_display_name,
             ps.harness AS persona_harness, ps.model AS persona_model,
             ps.description AS persona_description, t.issue_number, t.status,
             t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.archived_at,
@@ -461,7 +478,7 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
             t.branch,
             t.resume_at, t.auto_resumes, t.created_by, creator.key AS "creator_task_key?",
             parent.key AS "parent_key?", parent.title AS "parent_title?",
-            parent_persona.name AS "parent_persona_name?",
+            parent_persona.display_name AS "parent_persona_display_name?",
             base.key AS "base_task_key?", base.title AS "base_task_title?"
         FROM tasks t
         JOIN projects p ON p.id = t.project_id
@@ -766,7 +783,7 @@ mod tests {
         .await
         .unwrap();
         crate::model_providers::tests::seed_provider(pool).await;
-        sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'Linus', 'p', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
+        sqlx::query("INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id) VALUES ($1, 'Linus', 'linus', 'linus@example.org', 'p', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
             .bind(persona)
             .execute(pool)
             .await

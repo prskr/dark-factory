@@ -179,8 +179,8 @@ impl Forgejo {
         Ok(())
     }
 
-    /// Commits a new file `path` with `content` to `branch`, as the commit identity of the
-    /// instance: the Git proxy rejects the push of a commit by anyone else (`df:identity`), so a
+    /// Commits a new file `path` with `content` to `branch`, as the identity of the suite's
+    /// persona: the Git proxy rejects the push of a commit by anyone else (`df:identity`), so a
     /// branch that agents rebase must hold such commits.
     pub async fn create_file(
         &self,
@@ -189,8 +189,10 @@ impl Forgejo {
         content: &str,
         message: &str,
     ) -> Result<()> {
-        let identity = df_core::config::CommitIdentityConfig::default();
-        let person = serde_json::json!({ "name": identity.name, "email": identity.email });
+        let person = serde_json::json!({
+            "name": data::PERSONA_NAME,
+            "email": data::PERSONA_EMAIL,
+        });
         self.post(
             &format!("contents/{path}"),
             &serde_json::json!({

@@ -248,7 +248,7 @@ async fn test_scenario_prepare_first_run() {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-1".to_string(),
         wip_branch: "factory/wip/DF-1".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
@@ -281,6 +281,41 @@ async fn test_scenario_prepare_first_run() {
     let config =
         std::fs::read_to_string(local_dir.join(".git").join("config")).expect("read config");
     assert!(config.contains("partialclonefilter = blob:none"));
+}
+
+#[tokio::test]
+async fn an_assign_without_a_usable_commit_identity_fails_before_the_workspace_is_prepared() {
+    use crate::workspace::prepare_workspace;
+    use df_proto::agent::v1::{CommitIdentity, Workspace};
+
+    let identity = |name: &str, email: &str| {
+        Some(CommitIdentity {
+            name: name.into(),
+            email: email.into(),
+        })
+    };
+    for commit_identity in [None, identity("", "a@example.org"), identity("Ada", " ")] {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let local_dir = temp_dir.path().join("data").join("repo");
+        let hooks = temp_dir.path().join("hooks-empty");
+        let git = Git::new(&local_dir).with_hooks_empty_dir(&hooks);
+        let workspace = Workspace {
+            repo_url: "file:///does/not/exist".to_string(),
+            base_branch: "main".to_string(),
+            task_branch: "factory/task/DF-1".to_string(),
+            commit_identity: commit_identity.clone(),
+            ..Default::default()
+        };
+
+        let result = prepare_workspace(&git, &local_dir, &workspace, &hooks, None).await;
+
+        let error = result.expect_err("a run without an identity must not start");
+        assert!(
+            error.to_string().contains("commit identity"),
+            "{commit_identity:?}: {error}"
+        );
+        assert!(!local_dir.exists(), "nothing was cloned");
+    }
 }
 
 #[tokio::test]
@@ -416,7 +451,7 @@ async fn test_scenario_prepare_volume_lost_restore_wip() {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-1".to_string(),
         wip_branch: "factory/wip/DF-1".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
@@ -525,7 +560,7 @@ async fn test_scenario_prepare_unpushed_commits_and_fast_forward() {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-1".to_string(),
         wip_branch: "factory/wip/DF-1".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
@@ -716,7 +751,7 @@ async fn test_scenario_prepare_diverged() {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-1".to_string(),
         wip_branch: "factory/wip/DF-1".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
@@ -810,7 +845,7 @@ async fn test_prepare_recreates_missing_task_branch() {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-13".to_string(),
         wip_branch: "factory/wip/DF-13".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),

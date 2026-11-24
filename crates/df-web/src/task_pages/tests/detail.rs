@@ -703,11 +703,12 @@ async fn the_details_overview_has_the_sections_of_the_mockup_in_order() {
     // No pull request or issue yet: the section stays and says so.
     let links = &full[at(">Links</h2>")..at("<dl ")];
     assert!(links.contains("No pull request or issue yet."), "{links}");
-    // The persona shows its harness, muted; the branch is mono.
+    // The persona shows avatar, display name and muted handle, no harness; the branch is mono.
     let dl = &full[at("<dl ")..at(">Description<")];
     assert!(
-        dl.contains("Linus")
-            && dl.contains("<span class=\"font-normal text-muted\">· Claude Code</span>"),
+        dl.contains("Linus <span class=\"font-normal text-muted\">@linus</span>")
+            && dl.contains("aria-label=\"Linus\"")
+            && !dl.contains("Claude Code"),
         "{dl}"
     );
     assert!(dl.contains("font-mono text-xs"), "{dl}");

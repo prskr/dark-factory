@@ -592,6 +592,40 @@ async fn test_assign_without_workspace_fails_the_run() {
 }
 
 #[tokio::test]
+async fn an_assign_without_a_commit_identity_fails_the_run_naming_the_missing_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = df_proto::agent::v1::Workspace {
+        repo_url: "file:///does/not/exist".to_string(),
+        base_branch: "main".to_string(),
+        task_branch: "factory/task/DF-1".to_string(),
+        commit_identity: None,
+        ..Default::default()
+    };
+
+    let result = run_with_workspace(&temp, Some(workspace)).await;
+
+    assert_eq!(result.outcome, df_proto::agent::v1::RunOutcome::Failed);
+    // The detail is the one the final `RunReport` carries to the control plane.
+    assert_eq!(
+        result.run_report.outcome,
+        df_proto::agent::v1::RunOutcome::Failed as i32
+    );
+    assert!(
+        result
+            .run_report
+            .detail
+            .starts_with("Workspace preparation failed")
+            && result.run_report.detail.contains("no commit identity"),
+        "got: {}",
+        result.run_report.detail
+    );
+    assert!(
+        !temp.path().join("data").join("repo").exists(),
+        "nothing was cloned"
+    );
+}
+
+#[tokio::test]
 async fn test_unreachable_repository_fails_the_run_in_workspace_preparation() {
     let temp = tempfile::tempdir().unwrap();
     let missing = temp.path().join("no-such-remote.git");
@@ -600,7 +634,7 @@ async fn test_unreachable_repository_fails_the_run_in_workspace_preparation() {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-1".to_string(),
         wip_branch: "factory/wip/DF-1".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),

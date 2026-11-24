@@ -64,8 +64,8 @@ pub(crate) async fn task_events(
         Err(response) => return *response,
     };
     let start = last_event_id(&headers).or(query.after).unwrap_or(0).max(0);
-    let folder =
-        Folder::new(task.persona_name.clone()).with_hidden_blocks(state.show_hidden_blocks);
+    let folder = Folder::new(crate::task_pages::persona_label(&task))
+        .with_hidden_blocks(state.show_hidden_blocks);
     let task_id = TaskId::from_uuid(task.id);
     let stream = DetailStream {
         task_id,
@@ -293,7 +293,7 @@ impl DetailStream {
         let runs = runs_region(&task.key, &data.runs, task.persona_model.as_deref());
         let pending = pending_region(
             &task.key,
-            &task.persona_name,
+            &task.persona_display_name,
             task.status.as_str(),
             &data.pending,
             self.state.show_hidden_blocks,

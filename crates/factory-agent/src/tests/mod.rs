@@ -34,6 +34,18 @@ mod workspace_base;
 mod workspace_finalize;
 mod workspace_read_only;
 
+/// The persona identity of a test run: the control plane never sends an `Assign` without one.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the value of `Workspace::commit_identity`, which every test struct literal sets"
+)]
+fn identity() -> Option<df_proto::agent::v1::CommitIdentity> {
+    Some(df_proto::agent::v1::CommitIdentity {
+        name: "Linus".into(),
+        email: "linus@example.org".into(),
+    })
+}
+
 /// A `Release`, as the control plane sends it once the idle deadline passed. The runtime keeps
 /// an early one, so tests queue it up front to end the idle wait after the last turn.
 fn release_message() -> ControlMessage {
@@ -337,7 +349,7 @@ impl RunScenario {
                 base_branch: "main".to_string(),
                 task_branch: "factory/task/DF-1".to_string(),
                 wip_branch: "factory/wip/DF-1".to_string(),
-                commit_identity: None,
+                commit_identity: identity(),
                 git_hooks: Vec::new(),
                 git_config: Vec::new(),
                 hidden_paths: Vec::new(),

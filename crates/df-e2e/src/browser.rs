@@ -368,7 +368,21 @@ impl Session {
         description: &str,
         issue: Option<u64>,
     ) -> Result<String> {
-        self.compose_task(env, project_key, description, issue, None)
+        self.compose_task(env, project_key, description, issue, None, None)
+            .await
+    }
+
+    /// [`Session::create_task`] with the persona that the composer lists as `persona` (its
+    /// display name) instead of the first one.
+    pub async fn create_task_for_persona(
+        &self,
+        env: &E2eEnv,
+        project_key: &str,
+        description: &str,
+        issue: Option<u64>,
+        persona: &str,
+    ) -> Result<String> {
+        self.compose_task(env, project_key, description, issue, None, Some(persona))
             .await
     }
 
@@ -380,7 +394,7 @@ impl Session {
         description: &str,
         branch: &str,
     ) -> Result<String> {
-        self.compose_task(env, project_key, description, None, Some(branch))
+        self.compose_task(env, project_key, description, None, Some(branch), None)
             .await
     }
 
@@ -391,6 +405,7 @@ impl Session {
         description: &str,
         issue: Option<u64>,
         branch: Option<&str>,
+        persona: Option<&str>,
     ) -> Result<String> {
         // Every submission passes here: the suffix makes the description unique to the test, which
         // ties a task to its creation (the fake agent scripts match markers with `contains`).
@@ -410,6 +425,17 @@ impl Session {
             .click(None)
             .await
             .context("open the composer")?;
+        if let Some(persona) = persona {
+            self.page
+                .locator("select[name='persona']")
+                .first()
+                .select_option(
+                    playwright_rs::protocol::SelectOption::Label(persona.to_owned()),
+                    None,
+                )
+                .await
+                .with_context(|| format!("choose the persona {persona}"))?;
+        }
         if issue.is_some() || branch.is_some() {
             button(&self.page, "Task options")
                 .click(None)

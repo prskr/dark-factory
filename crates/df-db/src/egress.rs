@@ -132,6 +132,8 @@ pub struct ActiveRun {
     /// The task's stored branch, without `refs/heads/`.
     pub task_branch: String,
     pub rewrite_policy: RewritePolicy,
+    /// The persona identity the run commits with, frozen at the run's start.
+    pub commit_identity: df_core::CommitIdentity,
     /// The project's forge credential, if it has one.
     pub forge_credential: Option<CredentialRef>,
 }
@@ -225,7 +227,7 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
         r#"SELECT r.id AS run_id, r.pod_ip AS "pod_ip!", t.id AS task_id, t.key AS task_key, r.number AS run_number, p.id AS project_id,
                   p.key AS project_key, t.persona_id, p.repo_url,
                   eb.branch AS "base_branch!", t.branch AS task_branch,
-                  p.branch_rewrite_policy,
+                  p.branch_rewrite_policy, r.commit_name, r.commit_email,
                   c.id AS "credential_id?", c.name AS "credential_name?",
                   c.secret_name AS "secret_name?", c.secret_key AS "secret_key?"
            FROM runs r
@@ -285,6 +287,10 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
                 base_branch: row.base_branch,
                 task_branch: row.task_branch,
                 rewrite_policy: row.branch_rewrite_policy.parse()?,
+                commit_identity: df_core::CommitIdentity {
+                    name: row.commit_name,
+                    email: row.commit_email,
+                },
             })
         })
         .collect()
@@ -889,7 +895,7 @@ mod tests {
         let project = insert_project(&pool, "DF").await;
         let persona = Uuid::now_v7();
         crate::model_providers::tests::seed_provider(&pool).await;
-        sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
+        sqlx::query("INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'p', 'p@example.org', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
             .bind(persona)
             .execute(&pool)
             .await
@@ -1077,7 +1083,7 @@ mod tests {
         let project = insert_project(&pool, "DF").await;
         let persona = Uuid::now_v7();
         crate::model_providers::tests::seed_provider(&pool).await;
-        sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
+        sqlx::query("INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'p', 'p@example.org', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
             .bind(persona)
             .execute(&pool)
             .await
@@ -1150,7 +1156,7 @@ mod tests {
             .unwrap();
         let persona = Uuid::now_v7();
         crate::model_providers::tests::seed_provider(&pool).await;
-        sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
+        sqlx::query("INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'p', 'p@example.org', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
             .bind(persona)
             .execute(&pool)
             .await
@@ -1194,7 +1200,7 @@ mod tests {
         let project = insert_project(&pool, "DF").await;
         let persona = Uuid::now_v7();
         crate::model_providers::tests::seed_provider(&pool).await;
-        sqlx::query("INSERT INTO personas (id, name, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
+        sqlx::query("INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id) VALUES ($1, 'p', 'p', 'p@example.org', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
             .bind(persona)
             .execute(&pool)
             .await
