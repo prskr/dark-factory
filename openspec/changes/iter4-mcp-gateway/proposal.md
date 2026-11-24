@@ -9,10 +9,10 @@ Iteration 4 plans this as two changes, `iter4-mcp-catalog` (control plane) and t
 ## What Changes
 
 - **MCP servers (control plane).** Board members register an upstream MCP server per instance: name (the tool prefix), Streamable HTTP URL, credential reference (Secret name and key, as for model providers) and credential scheme (`bearer` or `header` with name and prefix). Changes are audited. The credential never leaves the control plane and the gateway.
-- **Pinned tool list.** On "Fetch tools" the control plane calls the upstream's `tools/list` and shows every tool with its description, input schema and annotations. The board member selects the tools agents may use; nothing is selected by default. The selection is stored with the tool definitions as fetched (**pinned**). The gateway serves only the pinned definitions; upstream changes have no effect until a board member fetches again, and a refetch marks new, changed and removed tools, with new tools unselected.
-- **Enablement per project.** The project settings page gets an "MCP servers" tab. A run gets the pinned tools of every server enabled for its project. Per-persona grants come later and will intersect with it.
+- **Pinned tool list.** On "Fetch tools" the control plane calls the upstream's `tools/list` and shows every tool with its description, input schema and annotations. The board member selects the tools agents may use; nothing is selected by default. The selection is stored with exactly the definitions of the fetch the board member saw (**pinned**), at most 100 tools and 256 KiB per server and 2 MiB per instance. The gateway serves only the pinned definitions; upstream changes have no effect until a board member fetches again. A refetch marks new, changed and removed tools; new and changed tools come back unselected. Tools not annotated read-only are marked "may write", with the warning that their writes bypass push checks and approvals.
+- **Enablement per project, opt-in.** The project settings page gets an "MCP servers" tab. A run gets the pinned tools of every server enabled for its project. This amends ADR-0032 (projects there only restrict); per-persona grants come later and intersect with it.
 - **Gateway MCP endpoint.** The gateway serves one MCP endpoint (Streamable HTTP) at `/mcp` on the Git proxy's TLS listener, next to `/inference`. It identifies the run by source pod IP, answers `initialize` and `tools/list` from the policy snapshot, with tool names `<server>__<tool>`, and forwards `tools/call` to the upstream with the injected credential. A call to a tool outside the run's set is rejected without contacting the upstream. No header from the sandbox reaches the upstream.
-- **Upstream sessions and limits.** The gateway is the MCP client of each upstream, one session per run and server, opened on the first call. It advertises no client capabilities (no sampling, elicitation or roots). Fixed limits: request 1 MiB, result 4 MiB, connect 10 s, call 120 s, 8 concurrent calls per run.
+- **Upstream sessions and limits.** The gateway is the MCP client of each upstream, one session per gateway pod, run and server, opened on the first call. It advertises no client capabilities (no sampling, elicitation or roots) and follows no redirects. Fixed limits: request 1 MiB, result 4 MiB, connect 10 s, call 120 s, 8 concurrent calls per run and gateway pod. The gateway's `PolicyWatch` decode limit rises to 16 MiB, so pinned definitions can never make a snapshot undecodable.
 - **Egress for upstream calls.** Upstream connections apply the proxy's destination rules (§7 of `design/egress.md`): the name is resolved by the gateway, private, link-local and cluster addresses are refused, `https` only unless `network.allowPlainHttp`. An in-cluster server (for example a stdio → HTTP bridge) needs a per-server opt-in that comes with the bridge. A registered server needs no allowlist entry: registering it is the allow decision, as for model providers.
 - **Call records.** The gateway reports one record per call (run, server, tool, outcome, duration, request and response size) to the control plane, which stores it with the run and shows it in the run view. Arguments and results are not stored; the transcript already has them.
 - **Runtime.** `Assign` carries the gateway MCP endpoint when the run has at least one enabled server. The runtime registers it in ACP `session/new` and `session/load` as HTTP MCP server `ext`, next to `factory`, if the agent advertises `mcpCapabilities.http`; otherwise it emits a transcript notice and starts without it.
@@ -21,14 +21,15 @@ Iteration 4 plans this as two changes, `iter4-mcp-catalog` (control plane) and t
 
 Out of scope:
 - Periodic and automatic tool discovery, catalog snapshots with history, instance filters (globs, "read-only only"): `iter4-mcp-catalog`, roadmap iteration 4 ("Third-party MCP servers through the gateway"). The pinned list of this change is its first version.
-- Per-persona grants and per-project restrictions to single tools: roadmap iteration 4, "Full permission model (ADR-0011)", folded into the per-persona tool permissions (allowed, ask, denied).
+- Per-persona grants and per-project restrictions to single tools: `iter4-mcp-catalog`, roadmap iteration 4, built on the per-persona tool permissions (allowed, ask, denied) of "Full permission model (ADR-0011)". Until "ask" exists, the docs say not to select write tools of servers that reach the forge (design, Security).
 - The `tool-access` approval: `iter4-mcp-catalog`, roadmap iteration 4.
 - `search_tools` / `load_server` for large tool sets: backlog row added by this change ("MCP meta-tools for large tool sets"). The pinned selection keeps sets small until then.
 - Stdio servers: the stdio → HTTP bridge and project-scoped `.mcp.json` servers with the `repository-mcp-server` approval: `iter4-mcp-catalog`, roadmap iteration 4 (decision 8).
 - OAuth-based upstream servers: roadmap backlog (existing row, decision 7).
 - One credential per project or per persona for the same server: backlog row added by this change ("MCP server credentials per project").
-- MCP resources, prompts, and server-initiated requests (sampling, elicitation, roots): roadmap iteration 4 out-of-scope list ("MCP resources and prompts in the UI"), backlog. This change rejects them in the gateway.
-- Live `tools/list_changed` notifications to running sessions: rejected for now; a changed selection applies to calls at once and to the listed tools at the next session.
+- Rate limits per run against the shared upstream quota: backlog row added by this change ("MCP call rate limits per run").
+- MCP resources and prompts: backlog row added by this change ("MCP resources and prompts through the gateway"). Server-initiated requests (sampling, elicitation, roots): rejected; the gateway refuses them.
+- Live `tools/list_changed` notifications to running sessions: rejected for now; removals apply to calls at once, additions from the next run.
 - Storing call arguments or results: rejected; the transcript holds them.
 
 ## Capabilities
@@ -38,7 +39,7 @@ Out of scope:
 - `mcp-endpoint`: the gateway's MCP endpoint: caller identification, aggregated tool list, tool set enforcement, credential injection, upstream sessions, limits, egress rules for upstream connections, call records.
 
 ### Modified Capabilities
-- `egress-policy-distribution`: the policy snapshot carries MCP servers with pinned tools and credentials, and each sandbox entry the servers enabled for the run.
+- `egress-policy-distribution`: the policy snapshot carries MCP servers with pinned tools and credentials, and each sandbox entry the servers enabled for the run; the gateway accepts snapshots up to 16 MiB.
 - `run-orchestration`: `Assign` carries the gateway MCP endpoint.
 - `acp-harness`: the runtime registers the gateway MCP endpoint in `session/new` and `session/load`.
 - `opencode-harness`: OpenCode receives the gateway MCP endpoint the same way (checked by the spike in task 1.2).

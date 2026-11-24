@@ -19,6 +19,10 @@ When `Assign` carries an MCP endpoint, the runtime SHALL register it in `session
 - **WHEN** `Assign` carries no MCP endpoint
 - **THEN** `session/new` lists only `factory`
 
+#### Scenario: Repository defines `ext`
+- **WHEN** the repository's `.mcp.json` defines an HTTP server `ext` with another URL
+- **THEN** calls to `mcp__ext__` tools still go to the gateway MCP endpoint
+
 ### Requirement: Gateway MCP traffic bypasses the egress proxy
 The harness SHALL reach the gateway MCP endpoint directly, not through the CONNECT proxy, and SHALL trust its certificate through the instance CA variables it already receives for the inference endpoint.
 
