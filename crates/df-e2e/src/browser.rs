@@ -96,8 +96,8 @@ impl Session {
             return Ok(session);
         }
         // Held across the login on purpose (the one exception to the rule against holding a lock
-        // over an await, AGENTS.md "Concurrency"): a test that starts meanwhile needs exactly its
-        // result. Every step under the lock is bounded on the client by `within`/`within_for`
+        // over an await, CODING_STANDARDS.md "Concurrency"): a test that starts meanwhile needs
+        // exactly its result. Every step under the lock is bounded on the client by `within`/`within_for`
         // (`CONNECT_TIMEOUT`, `UI_TIMEOUT`) or, for the landing, by `LOGIN_TIMEOUT`. A stuck login
         // fails the test that runs it and releases the lock.
         let mut shared = SHARED_LOGIN.lock().await;

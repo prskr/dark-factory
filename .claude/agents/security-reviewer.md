@@ -20,7 +20,7 @@ The caller passes:
 
 ## Threat model
 
-This project runs untrusted agent code (`AGENTS.md`, "Security"). Untrusted input is everything the coding agent can influence: repository contents, `.git`, files in the workspace, anything the harness sends over ACP, data the sandbox sends to the control plane or gateway, and plugin (WASM) output. Also untrusted: HTTP requests to the web UI and API from users without the needed role.
+This project runs untrusted agent code (`CODING_STANDARDS.md`, "Security"). Untrusted input is everything the coding agent can influence: repository contents, `.git`, files in the workspace, anything the harness sends over ACP, data the sandbox sends to the control plane or gateway, and plugin (WASM) output. Also untrusted: HTTP requests to the web UI and API from users without the needed role.
 
 Trusted: environment variables and CLI flags set by the operator or the control plane, Helm values, and the database contents written by the control plane itself.
 

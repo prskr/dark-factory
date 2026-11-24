@@ -47,7 +47,7 @@ All tests run against one instance, two at a time per test binary. The script re
 ## Browser
 
 - **One `Session` per test** (`world.session`: own browser context, started with the login shared by the tests of the binary). A second viewer of the same user is a `Session::start_logged_in`.
-- **`Session::start_logged_in` holds a process-wide lock across the Dex login** on purpose (the one exception to the rule against holding a lock over an await, AGENTS.md "Concurrency"): tests that start together need that login's result. Every step under the lock is time-bounded (see the comment in `Session::start_logged_in`); keep it so.
+- **`Session::start_logged_in` holds a process-wide lock across the Dex login** on purpose (the one exception to the rule against holding a lock over an await, CODING_STANDARDS.md "Concurrency"): tests that start together need that login's result. Every step under the lock is time-bounded (see the comment in `Session::start_logged_in`); keep it so.
 - **A test that logs out or changes the session** (the login test, a sign-out, a changed user) must not touch the shared one: it uses its own `Session::start` + `Session::login`, which submits the Dex form and leaves the shared state alone.
 - **Locators by role and accessible name** where the UI has them (`get_by_role`, `aria-label`), ids for regions the app owns (`#transcript`, `#task-details`). Avoid layout chains and `:has-text` on buttons. `.first()` and `.last()` only with a comment saying why several elements match.
 - **Assert with retrying expectations** (`expect(...).to_contain_text`). Read text once (`region_text`, `inner_text`) only after an expectation has waited for the state, for example to count occurrences.
