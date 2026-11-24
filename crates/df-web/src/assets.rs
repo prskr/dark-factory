@@ -179,8 +179,15 @@ mod tests {
         let manifest: serde_json::Value =
             serde_json::from_str(include_str!("../package.json")).unwrap();
         for (package, pinned) in manifest["dependencies"].as_object().unwrap() {
-            let installed = read(package_file(package, "package.json"));
-            assert_eq!(&installed["version"], pinned, "{package}");
+            let path = package_file(package, "package.json");
+            let installed = read(path.clone());
+            assert_eq!(
+                &installed["version"],
+                pinned,
+                "{package}: {} is out of date with package.json; run `pnpm install \
+                 --frozen-lockfile` in crates/df-web, or update the VENDOR_SCRIPTS source",
+                path.display()
+            );
         }
     }
 
