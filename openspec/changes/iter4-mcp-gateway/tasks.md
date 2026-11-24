@@ -1,0 +1,61 @@
+# Tasks
+
+> **Spikes first:** group 1 checks the harness and protocol facts that D4, D9 and the `acp-harness` / `opencode-harness` deltas rely on. Write the results into `design.md` and the spec deltas before groups 5 and 6 start. Groups 2 to 4 do not depend on the spikes.
+
+## 1. Spikes
+
+- [ ] 1.1 Claude Code through the ACP adapter: does `initialize` advertise `mcpCapabilities.http`; does an `http` server in `session/new` and `session/load` work against a local Streamable HTTP server with the instance CA (`NODE_EXTRA_CA_CERTS`) and the pod's proxy env; is the tool shown as `mcp__ext__<server>__<tool>`; is the 64-character limit of the full name real; does a repository `.mcp.json` server named `ext` replace the session's. Verify: a note with commands and results in `design.md` (Context), and D5/D9 updated if a fact differs.
+- [ ] 1.2 OpenCode (`opencode acp`): the same questions as 1.1, plus whether a repository `opencode.json` `mcp.ext` entry overrides the session's. Verify: note in `design.md`; `specs/opencode-harness/spec.md` updated (or the fallback through `OPENCODE_CONFIG_CONTENT` written into D9 and the delta).
+- [ ] 1.3 `rmcp` 3.9 model types without its HTTP transports: build `initialize`, `tools/list`, `tools/call` messages and parse JSON and SSE answers of Context7 and the fake ACP agent's mock MCP server; list the protocol versions Claude Code and OpenCode send. Verify: a throwaway test or note in `design.md` D4 confirming the thin layer or switching to the `rmcp` transport.
+- [ ] 1.4 Context7 authentication (header name, key format) as the first static-credential server. Verify: the docs example in group 8 uses the confirmed header.
+
+## 2. Contracts
+
+- [ ] 2.1 Add `Snapshot.mcp_servers`, `SandboxEntry.mcp_server_ids`, `McpServer`, `McpTool`, the `GatewayMcp` service with `McpCallBatch`, `McpCallRecord`, `McpCallOutcome` and `ReportMcpCallsResponse` to `gateway.proto`, and `AcpHarness.mcp_endpoint` to `agent.proto` (design D7). Assign the final numbers for `<n1>`, `<n2>` and `<n3>`: the next free numbers of `Snapshot`, `SandboxEntry` and `AcpHarness` at implementation time, checked against their `reserved` entries and against changes merged by then (`iter4-skills` also adds `AcpHarness` fields); replace the placeholders in `design.md` D7. Update the comment of `Snapshot.provider_credentials`. Verify: `cargo build --workspace` and `bazel --bazelrc=.bazelrc.agents build //contract/...`.
+- [ ] 2.2 Redact `McpServer` credentials in `Debug` the way `ProviderCredential` is redacted, with a failing test first. Verify: `cargo nextest run -p df-proto`.
+
+## 3. Storage
+
+- [ ] 3.1 Write failing `df-db` tests first for design D2: create, update, delete (refused while enabled, naming projects), name uniqueness, store and replace a fetch, save a selection from the stored fetch (new/changed/removed rules), project enablement, the MCP routes of active runs (servers with pinned tools only), insert call records (idempotent by `call_id`, unknown run reported), list call records of a run, cascade with the run. Then add the migration and the `df-db` module `mcp_servers`, and regenerate `.sqlx/`. Verify: `cargo nextest run -p df-db mcp_servers` (container-backed).
+- [ ] 3.2 Validation in `df-core` with failing unit tests first: server name rule, URL rule (`https`, `http` only with `network.allowPlainHttp`, no user information or fragment), credential schemes and reserved header names, selectable tool names (pattern and 64 characters with `mcp__ext__<server>__`), the "changed" comparison over canonical JSON. Verify: `cargo nextest run -p df-core mcp`.
+- [ ] 3.3 Audit entries `mcp_server.create`, `mcp_server.update`, `mcp_server.delete`, `mcp_server.tools_update` (selected names), `project.mcp_servers_update`, with failing tests first. Verify: `cargo nextest run -p df-db mcp_servers` (container-backed).
+
+## 4. Gateway MCP client and endpoint
+
+- [ ] 4.1 MCP client in `df-gateway` (`mcp::client`, design D4/D6), tests first against a fake upstream: initialize with empty client capabilities, `tools/list` with pages and the 4 MiB / 1,000 tool limit, `tools/call` with JSON and SSE answers, server requests answered with `-32601`, notifications dropped, session id kept, re-initialize once on 404, `DELETE`, credential injection per scheme, no other headers, destination check through `BlockedRanges` (private, loopback, link-local, cluster), `http` only with `network.allowPlainHttp`, connect timeout 10 s, result over 4 MiB cut. Verify: `cargo nextest run -p df-gateway mcp::client`.
+- [ ] 4.2 `Policy` holds MCP servers and per-run server ids from the snapshot, with failing tests first (run's tool set, credential lookup, server without credential). Verify: `cargo nextest run -p df-gateway policy`.
+- [ ] 4.3 Endpoint `/mcp` on the Git port (`mcp::endpoint`), tests first for every scenario of `specs/mcp-endpoint/spec.md`: caller identification (403/503), `GET` 405, stateless session ids accepted across pods and rejected for another run, only-tools methods, aggregated `tools/list`, enforcement and `rejected` records, unchanged forwarding, credential missing, 413 for requests over 1 MiB, 120 s call timeout (with `tokio::time::pause`), 8 concurrent calls per run, cancellation forwarded, upstream sessions closed when the run leaves the snapshot or after 10 min idle, no payloads in logs (log capture of `df-telemetry`). Verify: `cargo nextest run -p df-gateway mcp`.
+- [ ] 4.4 Call reporter (`mcp::report`) on the usage reporter's pattern, tests first: batching, retry, oldest dropped and counted in `df.gateway.mcp.calls_dropped`. Wire endpoint and reporter in `run_gateway_command`. Verify: `cargo nextest run -p df-gateway mcp::report` and `cargo build --workspace`.
+
+## 5. Control plane
+
+- [ ] 5.1 Snapshot: `df-gateway-control` adds MCP servers and per-run server ids and resolves their credentials into `provider_credentials` once each, tests first for the `egress-policy-distribution` scenarios. Publish the policy notification on every MCP change (server save/delete, selection save, project enablement). Verify: `cargo nextest run -p df-gateway-control snapshot` (container-backed).
+- [ ] 5.2 `GatewayMcp.Report` service storing call records, tests first (stored, duplicate ignored, unknown run dropped and counted). Register it in `serve_internal`. Verify: `cargo nextest run -p df-gateway-control mcp` (container-backed).
+- [ ] 5.3 "Fetch tools": trait `McpToolLister` in `df-web`, implementation in `df-gateway-control` on the client of 4.1, wiring in the binary (design D3); tests first with a fake lister in `df-web` and the fake upstream in `df-gateway-control` (success, 401 message without credential, private address). Update the `df-gateway-control` row in `docs/architecture.md`. Verify: `cargo nextest run -p df-web mcp` and `cargo nextest run -p df-gateway-control mcp`.
+- [ ] 5.4 `Assign`: `df-agent-channel` sets `AcpHarness.mcp_endpoint` for runs whose project has an enabled server with pinned tools, chats included, tests first for the `run-orchestration` scenarios. Verify: `cargo nextest run -p df-agent-channel assign` (container-backed).
+
+## 6. Runtime
+
+- [ ] 6.1 `factory-agent` `setup_session()`: keep the `initialize` response, register `ext` in `session/new` and `session/load` when `mcp_endpoint` is set and `mcpCapabilities.http` is advertised, else emit `harness.mcp_http_unsupported`; tests first with `fake-acp-agent` (with and without the capability, resume, no endpoint). Extend `fake-acp-agent` to advertise the capability on request and to call an HTTP MCP server from a script. Verify: `cargo nextest run -p factory-agent harness`.
+- [ ] 6.2 OpenCode: apply the outcome of spike 1.2 (nothing more, or the `OPENCODE_CONFIG_CONTENT` fallback with a test in `df-core/src/harness/opencode.rs`). Verify: `cargo nextest run -p df-core opencode`.
+
+## 7. Web UI
+
+- [ ] 7.1 "MCP servers" settings page (list, form, scheme preview, fetch, tool table with selection, "may write", new/changed/removed, disabled tools with reason, plain-text descriptions) behind `require_board_member`, tests first for the `mcp-servers` scenarios (including 403 for non-board members and delete refused). Verify: `cargo nextest run -p df-web mcp_servers`.
+- [ ] 7.2 Project settings tab "MCP servers" (enable/disable, pinned tool count, audit), tests first. Verify: `cargo nextest run -p df-web project`.
+- [ ] 7.3 Run view section "Tool calls (MCP)", tests first (two calls, one `rejected`). Verify: `cargo nextest run -p df-web run`.
+
+## 8. Documentation
+
+- [ ] 8.1 Published docs: new `docs/content/security/mcp-endpoint.md` (identity, pinned definitions, credential handling, one credential per instance, write tools and exfiltration, untrusted results, limits, destination check); new how-to `docs/content/using/mcp-servers.md` (register Context7, fetch, select, enable for a project, read call records); `docs/content/architecture/agent-runs.md` (the `ext` server next to `factory`); the security index and the egress gateway page (`/mcp` next to `/inference`); the metric `df.gateway.mcp.calls_dropped` in `docs/content/observability/telemetry.md`. Verify: `just docs-build`.
+- [ ] 8.2 Contributor docs: `design/egress.md` §10 (the slice and what remains), ADR-0032 "Related" line pointing to this change. Verify: links resolve (`just docs-build` for published links, review for the rest).
+
+## 9. Integration
+
+- [ ] 9.1 End-to-end test in `crates/df-e2e` with the fake ACP agent and a fake MCP server: register, fetch, select one of two tools, enable for the project, the agent calls the selected tool (succeeds, record shown in the run view) and the unselected one (rejected, upstream not reached), and the sandbox holds no credential. Verify: `just e2e-local` (skill `e2e`).
+- [ ] 9.2 Manual run against Claude Code and Context7 (demo step 3 of iteration 4, without discovery flags). Verify: a note in the PR with the transcript excerpt and the run view.
+- [ ] 9.3 `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete`, `cargo xtask check-crates`, `openspec validate iter4-mcp-gateway --strict`. Verify: all pass.
+
+## Workflow follow-up
+
+- At archive: point the backlog rows "MCP meta-tools …" and "MCP server credentials per project …" in `product/iterations/roadmap.md` (added by this change) at the archived path, and update the MCP rows of `iteration-4.md`.
