@@ -121,6 +121,8 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | OAuth-based upstream MCP servers (token storage and refresh per server) | idea | [`iteration-4.md`](iteration-4.md) decision 7 |
 | MCP meta-tools `search_tools` / `load_server` for large tool sets in the gateway endpoint | decided | ADR-0032, `openspec/changes/iter4-mcp-gateway` (out of scope) |
 | MCP server credentials per project or persona (today one credential per server per instance) | idea | `openspec/changes/iter4-mcp-gateway` (design, Security) |
+| MCP call rate limits per run, so one run cannot use up a shared upstream quota | idea | `openspec/changes/iter4-mcp-gateway` (design, Security) |
+| MCP resources and prompts through the gateway endpoint, and in the UI | idea | ADR-0032, [`iteration-4.md`](iteration-4.md) §6, `openspec/changes/iter4-mcp-gateway` (out of scope) |
 | Scheduled import of published model price lists into the pricing tables (as AgentGateway does) | idea | [`iteration-4.md`](iteration-4.md) decision 14, ADR-0021 |
 | Token and cost budgets: per persona, per task subtree, enforced per request by the gateway | idea | ADR-0011, ADR-0034, [`design/egress.md`](../../design/egress.md) §9 |
 | Provider adapters as WASI plugins (protocol translation, custom auth) | idea | F5, `openspec/changes/archive/2026-11-04-iter3-inference-gateway` (out of scope) |

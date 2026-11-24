@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: MCP servers in the snapshot
-The policy snapshot SHALL carry every MCP server enabled for at least one active run once (id, name, upstream URL, credential reference and scheme, pinned tools), and each sandbox entry SHALL list the ids of the servers enabled for its run's project. The snapshot SHALL carry the referenced credentials once each. Gateways SHALL keep them in memory only and never log them.
+The policy snapshot SHALL carry every MCP server enabled for at least one active run once (id, name, upstream URL, credential reference and scheme, a configuration version, pinned tools), and each sandbox entry SHALL list the ids of the servers enabled for its run's project. The snapshot SHALL carry the referenced credentials once each. Gateways SHALL keep them in memory only and never log them.
 
 #### Scenario: Run with an MCP server
 - **WHEN** a gateway receives a snapshot while run R of project `DF` is active and `DF` has `context7` enabled with two pinned tools
@@ -14,6 +14,13 @@ The policy snapshot SHALL carry every MCP server enabled for at least one active
 #### Scenario: Unresolvable MCP credential
 - **WHEN** the Secret of a server's credential cannot be read
 - **THEN** the snapshot carries the server without that credential and the other entries are unaffected
+
+### Requirement: Snapshot size stays decodable
+The gateway's `PolicyWatch` client SHALL accept snapshots up to 16 MiB. The control plane SHALL keep the pinned definitions within the limits of the `mcp-servers` capability, so that MCP data cannot make a snapshot undecodable and stop the proxy, Git or inference traffic.
+
+#### Scenario: Instance at the pinned limit
+- **WHEN** the instance has 2 MiB of pinned definitions across its servers and 200 active runs
+- **THEN** every gateway decodes the snapshot and enforces it
 
 ### Requirement: MCP changes propagate within a second
 Saving a server's pinned tools, editing or deleting a server, and changing a project's enabled servers SHALL publish a policy notification, so that every connected gateway pod has the change within about a second, regardless of the control plane replica.
