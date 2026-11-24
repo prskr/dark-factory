@@ -292,7 +292,7 @@ pull(
 
 pull(
     name = "debian_trixie_git",
-    digest = "sha256:188a9dfa5e813c917be00c3f474bc75488b62914305e13fa21dff1cfef2eb354",
+    digest = "sha256:ea2082e0425eddd2235dab794106a61e5cdfd6fff5f7759fed0b2d0bd4d53529",
     downloader = "bazel",
     platforms = [
         "linux/amd64",
