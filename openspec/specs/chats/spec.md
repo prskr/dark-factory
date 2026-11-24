@@ -43,7 +43,7 @@ Every run of a chat SHALL receive the persona's system prompt followed by fixed 
 - **THEN** its system prompt contains no chat instructions
 
 ### Requirement: Tools of a chat run
-A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `send_message`, `report_progress`, `request_approval`, `write_artifact`, `list_artifacts` and `read_artifact`, and SHALL NOT be offered `complete_task`, `ask_question`, `update_pull_request` or `comment_on_issue`. A call to a tool not offered SHALL be answered with a tool error and change nothing.
+A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `send_message`, `report_progress`, `request_approval`, `write_artifact`, `list_artifacts`, `read_artifact`, `list_issues` and `create_issue`, and SHALL NOT be offered `complete_task`, `ask_question`, `update_pull_request` or `comment_on_issue`. A call to a tool not offered SHALL be answered with a tool error and change nothing.
 
 #### Scenario: Delegation from a chat
 - **WHEN** the agent of `DF-12-CHAT` calls `create_task` for persona Linus
@@ -52,6 +52,10 @@ A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `s
 #### Scenario: Completing a chat
 - **WHEN** the agent of `DF-12-CHAT` calls `complete_task`
 - **THEN** the call returns a tool error and the chat's status is unchanged
+
+#### Scenario: Issues from a chat
+- **WHEN** the agent of `DF-12-CHAT` calls `list_issues`
+- **THEN** the call returns the open issues of the project's repository
 
 ### Requirement: Read-only checkout
 A chat run SHALL work in a checkout of the project's base branch, reset to the remote base branch at the start of every run, discarding local changes. A chat SHALL have no task branch, no WIP branch and no pull request, and SHALL NOT be the base task of another task.
