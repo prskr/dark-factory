@@ -161,7 +161,7 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
                 a href=(crate::layout::item_path(&card.task_key)) class="font-medium text-accent-text hover:underline" { (card.task_key) }
                 span class="min-w-0 truncate" { (card.task_title) }
             }
-            div class="md-body min-w-0 break-words text-sm [&_p]:my-1" {
+            div class="md-body md-request min-w-0 break-words text-sm [&_p]:my-1" {
                 @match row.kind {
                     RequestKind::Question => (markdown::render(row.question_text())),
                     RequestKind::Approval => {

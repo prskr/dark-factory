@@ -408,9 +408,11 @@
   }
   /* User bubbles are light in the light theme and dark in the dark one, the reverse of the agent
      bubbles: inline code takes the panel color (white on light, near black on dark) instead of
-     `code-on-agent`, which would be dark on dark. */
+     `code-on-agent`, which would be dark on dark. Request cards (`md-request`) sit on the sunk
+     background with normal text, so they take the panel color too. */
   .md-user :not(pre) > code,
-  .md-tool :not(pre) > code {
+  .md-tool :not(pre) > code,
+  .md-request :not(pre) > code {
     @apply bg-panel;
   }
   /* Mermaid fences: the drawn diagram is an iframe; the error line shows under the source. It keeps
