@@ -16,30 +16,30 @@ The pod of a run with sidecars SHALL carry each sidecar of the run's snapshot as
 - **THEN** init container `playwright` carries exactly these requests and limits, and the agent container keeps `sandbox.resources`
 
 ### Requirement: Proxy variables and loopback
-A sidecar with egress `proxy` SHALL get the agent container's proxy variables; a sidecar with egress `none` SHALL get none. The `NO_PROXY` and `no_proxy` values of the agent container SHALL contain `localhost`, `127.0.0.1` and `::1`, in addition to the existing entries.
+Every sidecar SHALL get the agent container's proxy variables. The `NO_PROXY` and `no_proxy` values of the agent container SHALL contain `localhost`, `127.0.0.1` and `::1`, in addition to the existing entries.
 
-#### Scenario: Proxy variables only with egress proxy
-- **WHEN** the run has sidecar `playwright` with egress `proxy` and sidecar `postgres` with egress `none`
-- **THEN** `playwright` has the agent container's `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` values and their lower-case forms, and `postgres` has none of them
+#### Scenario: Proxy variables in every sidecar
+- **WHEN** the run has sidecars `playwright` and `postgres`
+- **THEN** both have the agent container's `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` values and their lower-case forms
 
 #### Scenario: Loopback in NO_PROXY
 - **WHEN** any run is provisioned
 - **THEN** the agent container's `NO_PROXY` contains `localhost`, `127.0.0.1` and `::1`
 
 ### Requirement: Sidecar volumes
-A sidecar with a data path SHALL mount an `emptyDir` there, with its ephemeral storage limit as size limit when set. When a sidecar has the shared directory on, the pod SHALL have one `emptyDir` with size limit `sandbox.sharedDirSizeLimit` (default `1Gi`), mounted at `/tmp/shared` in the agent container and in every such sidecar. Without such a sidecar the pod SHALL have no shared volume.
+A sidecar with a scratch path SHALL mount an `emptyDir` there, with its ephemeral storage limit as size limit when set. When a sidecar has the shared directory on, the pod SHALL have one `emptyDir` with size limit `sandbox.sharedDirSizeLimit` (default `1Gi`), mounted at `/srv` in the agent container and in every such sidecar. Without such a sidecar the pod SHALL have no shared volume.
 
 #### Scenario: Data directory with a size limit
-- **WHEN** sidecar `postgres` has data path `/var/lib/postgresql/data` and ephemeral storage limit `2Gi`
+- **WHEN** sidecar `postgres` has scratch path `/var/lib/postgresql/data` and ephemeral storage limit `2Gi`
 - **THEN** init container `postgres` mounts an `emptyDir` with size limit `2Gi` at that path
 
 #### Scenario: Shared volume
 - **WHEN** the run has sidecar `playwright` with the shared directory on
-- **THEN** the pod has one `emptyDir` with size limit `1Gi`, mounted at `/tmp/shared` in `agent` and in `playwright`
+- **THEN** the pod has one `emptyDir` with size limit `1Gi`, mounted at `/srv` in `agent` and in `playwright`
 
 #### Scenario: No shared volume
 - **WHEN** the run's only sidecar `postgres` has the shared directory off
-- **THEN** neither `agent` nor `postgres` mounts `/tmp/shared`
+- **THEN** neither `agent` nor `postgres` mounts `/srv`
 
 ### Requirement: Restricted sidecar containers
 Every sidecar container SHALL have `allowPrivilegeEscalation: false` and all capabilities dropped, and SHALL inherit the pod's non-root user and group 1000, `fsGroup` 1000 and the `RuntimeDefault` seccomp profile, so the pod passes the `restricted` Pod Security Standard. Sidecars SHALL NOT mount the runtime image, a harness image, the certificate volume, the `/run/factory` memory volume or the task volume.
@@ -74,8 +74,16 @@ While the agent container of a run has not started, a sidecar image that can't b
 - **WHEN** the kubelet event `Failed to pull image "<postgres image>"` arrives before the pod status shows the waiting reason
 - **THEN** the first `Gone` event of the run already has the reason `sidecar postgres: image pull failed: <image>`
 
-### Requirement: Pod larger than the quota
-Before creating a run's pod, the provider SHALL compare the pod's total CPU and memory requests and limits (agent plus sidecars) with the `hard` values of every `ResourceQuota` in the sandbox namespace. A pod that exceeds one of them on its own SHALL NOT be created; provisioning SHALL fail with a reason naming the resource, the pod's total and the quota value, and SHALL NOT be treated as `capacity`.
+### Requirement: Pod the quota can never admit
+Before creating a run's pod, the provider SHALL check it against the `hard` values for `requests.cpu`, `requests.memory`, `limits.cpu` and `limits.memory` of every `ResourceQuota` in the sandbox namespace: each container SHALL set every such resource, and the pod's total SHALL NOT exceed the value. A pod that fails SHALL NOT be created; provisioning SHALL fail with a reason naming the container or the resource and the quota, and SHALL NOT be treated as `capacity`.
+
+#### Scenario: Best-effort sidecar under a quota
+- **WHEN** the namespace quota limits `limits.memory` and sidecar `postgres` has no memory limit
+- **THEN** no pod is created and the run ends `provisioning_failed` with a reason naming `postgres`, `limits.memory` and the quota, not `capacity`
+
+#### Scenario: Best-effort sidecar without a quota
+- **WHEN** the namespace has no `ResourceQuota` and sidecar `postgres` has no resources
+- **THEN** the pod is created with `postgres` without requests and limits
 
 #### Scenario: Sidecars too large for the quota
 - **WHEN** the quota allows `limits.memory` 64Gi and the agent (4Gi) plus sidecars (64Gi) need 68Gi

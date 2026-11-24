@@ -15,9 +15,9 @@ Creating a run SHALL store the project's sidecars on the run in the same transac
 - **WHEN** a replica stops after creating run 1 of `DF-7` and before creating its sandbox
 - **THEN** the next tick provisions the run with the two sidecars stored at creation
 
-### Requirement: Sidecar MCP servers in Assign
-`Assign.sidecar_mcp_servers` SHALL contain one entry per sidecar of the run's snapshot that has an MCP endpoint: the sidecar's name and the URL `http://localhost:<port><path>`, in the snapshot's order.
+### Requirement: Sidecar MCP servers in the harness settings
+`AcpHarness.sidecar_mcp_servers` SHALL contain one entry per sidecar of the run's snapshot that has an MCP endpoint: the sidecar's name and the URL `http://localhost:<port><path>`, in the snapshot's order.
 
 #### Scenario: Assign with a Playwright sidecar
 - **WHEN** run 1 of `DF-7` connects with sidecar `playwright` (MCP on port 8931, path `/mcp`) and sidecar `postgres` (no MCP endpoint)
-- **THEN** `Assign.sidecar_mcp_servers` is exactly [`playwright`, `http://localhost:8931/mcp`]
+- **THEN** `AcpHarness.sidecar_mcp_servers` is exactly [`playwright`, `http://localhost:8931/mcp`]
