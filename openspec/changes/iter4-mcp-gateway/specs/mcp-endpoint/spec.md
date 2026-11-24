@@ -177,6 +177,10 @@ When the harness closes the connection of a call in progress, the gateway SHALL 
 - **WHEN** the harness closes the connection while a call waits for the upstream
 - **THEN** the upstream request is cancelled, the slot is free and the record has outcome `cancelled`
 
+#### Scenario: Cancel notification on the holding pod
+- **WHEN** the harness sends `notifications/cancelled` for a call in progress and it reaches the pod holding the call
+- **THEN** the pod forwards the cancellation to the upstream, closes the pending call's response without a JSON-RPC result, frees the slot and records `cancelled`
+
 ### Requirement: Upstream destination rules
 Upstream connections SHALL follow the egress proxy's destination rules: the gateway resolves the host itself and refuses the connection if any resolved address is private, link-local, loopback or in `gateway.blockedCidrs`, and connects to `http://` URLs only while `network.allowPlainHttp` is on. A refused destination SHALL give `isError: true`, outcome `upstream-error`. No `http-host` allowlist entry SHALL be needed for a registered server.
 

@@ -44,6 +44,10 @@ Changing a server's URL SHALL unselect all its tools and discard its stored fetc
 - **WHEN** a board member changes the URL of `context7`, which has two pinned tools
 - **THEN** after saving the server has no pinned tools, and runs of projects that enable it list no `context7__` tools
 
+#### Scenario: Fetch running while the URL changes
+- **WHEN** board member A's fetch against the old URL finishes after board member B saved a new URL, and A saves
+- **THEN** A's save is refused because the fetch belongs to an older server configuration, and nothing is pinned
+
 #### Scenario: Rotated credential reference
 - **WHEN** a board member points `context7` at another credential reference
 - **THEN** the pinned tools stay, and the next call opens a new upstream session with the new credential
@@ -94,7 +98,7 @@ On "Fetch tools" the control plane SHALL connect to the upstream with the server
 - **THEN** the fetch fails with "not an MCP server", "upstream timeout" or "tool list too large", and the stored selection is unchanged
 
 ### Requirement: Pinned tool selection
-A board member SHALL select which fetched tools agents may use; no tool SHALL be selected by default. Saving SHALL store the selected tools with exactly the definitions shown in that fetch (pinned). A save SHALL be refused when another fetch of the server happened after the one shown, or when it names a tool that fetch did not list. Saving SHALL be audited with the selected tool names.
+A board member SHALL select which fetched tools agents may use; no tool SHALL be selected by default. Saving SHALL store the selected tools with exactly the definitions shown in that fetch (pinned). A save SHALL be refused when another fetch of the server happened after the one shown, when the server's configuration changed since that fetch started, or when it names a tool that fetch did not list. Saving SHALL be audited with the selected tool names.
 
 #### Scenario: Select two tools
 - **WHEN** a board member selects `resolve-library-id` and `get-library-docs` and saves
