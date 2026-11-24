@@ -77,7 +77,7 @@ sequenceDiagram
    NetworkPolicy for the run.
 3. **Connecting.** The runtime dials the control plane with its pod certificate. The control plane
    resolves the certificate to the run and sends the `Assign`: repository URL through the Git proxy,
-   branches, the project's hidden paths, commit identity, system prompt (with a `Sandbox` section when paths are hidden), harness settings, the harness environment (the gateway's
+   branches, the project's hidden paths, the commit identity (the run's persona identity: display name and commit email, copied onto the run when it is created; a run without one is not started and the runtime fails an `Assign` that has none), system prompt (with a `Sandbox` section when paths are hidden), harness settings, the harness environment (the gateway's
    [inference endpoint](../security/inference-endpoint.md) as base URL, a placeholder API key and the
    instance CA; no credential), budgets and the continuation of earlier runs (harness session id and
    a transcript summary).

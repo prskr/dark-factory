@@ -342,6 +342,18 @@ async fn an_approved_protected_path_exception_lets_the_same_commits_through() ->
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rebase_of_a_commit_by_another_author_is_rejected_by_the_identity_check() -> Result<()> {
+    rebase_of_a_commit_by("Renovate", "renovate@bot.test").await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rebase_of_the_commit_of_another_persona_is_rejected_by_the_identity_check() -> Result<()>
+{
+    rebase_of_a_commit_by("Ada", "ada@example.org").await
+}
+
+/// A branch on the forge holds a commit by `name <email>`; the run's persona rebases it onto a
+/// moved base and pushes the rewrite with a lease.
+async fn rebase_of_a_commit_by(name: &str, email: &str) -> Result<()> {
     let gateway = Gateway::start().await?;
     let work = gateway.client()?;
     let forge = gateway
@@ -351,16 +363,10 @@ async fn a_rebase_of_a_commit_by_another_author_is_rejected_by_the_identity_chec
         .display()
         .to_string();
     // A bot's branch on the forge: one commit authored and committed by Renovate.
-    commit_as(
-        &work,
-        "dep.txt",
-        "serde 1.0.1\n",
-        "Renovate",
-        "renovate@bot.test",
-    )?;
+    commit_as(&work, "dep.txt", "serde 1.0.1\n", name, email)?;
     git(&work, &["push", "-q", &forge, &format!("HEAD:{BRANCH}")])?;
-    let pushed = gateway.forge_head()?.context("the bot branch")?;
-    // The base moved on; the agent rebases the bot's commit onto it as the instance identity.
+    let pushed = gateway.forge_head()?.context("the foreign branch")?;
+    // The base moved on; the agent rebases the foreign commit onto it as the run's identity.
     git(&work, &["checkout", "-q", "-b", "moved", "HEAD~1"])?;
     commit(&work, "moved.txt", "main moved\n")?;
     git(&work, &["checkout", "-q", "-b", "rebased", &pushed])?;

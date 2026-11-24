@@ -16,7 +16,7 @@ use jiff::Timestamp;
 use maud::{Markup, html};
 
 use crate::components::transcript::ToolStatus;
-use crate::components::{Icon, transcript as c};
+use crate::components::{Icon, PersonaLabel, transcript as c};
 use crate::markdown;
 
 mod tool;
@@ -31,6 +31,8 @@ pub struct Item {
     pub kind: ItemKind,
     /// Who wrote the item (board member or the persona), empty for items without an author.
     pub author: String,
+    /// The persona that wrote the item; `None` for items of a board member or of the control plane.
+    pub persona: Option<PersonaLabel>,
     /// When the event that created the item was recorded.
     pub at: Timestamp,
     /// DOM id of the tool call group the item belongs to (design D3). A group is a streak of
@@ -156,8 +158,8 @@ pub struct Folder {
     plans: HashMap<String, usize>,
     /// Id of the last event folded.
     last_id: i64,
-    /// Name of the persona, the author of agent items.
-    agent_name: String,
+    /// The persona, the author of agent items.
+    agent: PersonaLabel,
     /// Run of the last event folded, 0 before the first.
     run: i64,
     /// A run that started and has no item yet: its divider goes in front of the next item.
@@ -174,10 +176,11 @@ pub struct Folder {
 }
 
 impl Folder {
-    /// A folder whose agent items are authored by `agent_name`.
-    pub fn new(agent_name: impl Into<String>) -> Self {
+    /// A folder whose agent items are authored by `agent`, as it is now: a renamed persona also
+    /// renames its old transcripts (design D7).
+    pub fn new(agent: impl Into<PersonaLabel>) -> Self {
         Self {
-            agent_name: agent_name.into(),
+            agent: agent.into(),
             ..Self::default()
         }
     }
@@ -392,6 +395,7 @@ impl Folder {
                 turn_id: String::new(),
                 kind: ItemKind::RunStart { number, started_at },
                 author: String::new(),
+                persona: None,
                 at: started_at,
                 group: None,
             });
@@ -400,12 +404,12 @@ impl Folder {
                 added: true,
             });
         }
-        let author = match &kind {
-            ItemKind::User { author, .. } => author.clone(),
+        let (author, persona) = match &kind {
+            ItemKind::User { author, .. } => (author.clone(), None),
             ItemKind::Agent { .. } | ItemKind::Thought { .. } | ItemKind::Tool(_) => {
-                self.agent_name.clone()
+                (self.agent.display_name.clone(), Some(self.agent.clone()))
             }
-            _ => String::new(),
+            _ => (String::new(), None),
         };
         let group = self.group_for(&dom_id, &kind);
         self.items.push(Item {
@@ -413,6 +417,7 @@ impl Folder {
             turn_id,
             kind,
             author,
+            persona,
             at: self.now,
             group,
         });
@@ -816,12 +821,8 @@ pub fn render_item(item: &Item) -> Markup {
             } else {
                 html! { (text) }
             };
-            let author = if item.author.is_empty() {
-                "Agent"
-            } else {
-                &item.author
-            };
-            c::agent_message(id, author, item.at, body, *complete)
+            let author = item.persona.clone().unwrap_or_default();
+            c::agent_message(id, &author, item.at, body, *complete)
         }
         ItemKind::RunStart { number, started_at } => c::run_divider(id, *number, *started_at),
         ItemKind::Thought { text, complete } => c::thought(id, text, *complete),
@@ -960,6 +961,7 @@ impl Item {
                 complete: true,
             },
             author: String::new(),
+            persona: None,
             at,
             group: None,
         }

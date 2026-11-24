@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT r.task_id, t.branch AS task_branch, t.persona_id, p.name\n        FROM runs r\n        JOIN tasks t ON t.id = r.task_id\n        JOIN personas p ON p.id = t.persona_id\n        WHERE r.id = $1\n        ",
+  "query": "\n        SELECT r.task_id, t.branch AS task_branch, t.persona_id, p.display_name AS name\n        FROM runs r\n        JOIN tasks t ON t.id = r.task_id\n        JOIN personas p ON p.id = t.persona_id\n        WHERE r.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -43,7 +43,7 @@
         "origin": {
           "Table": {
             "table": "personas",
-            "name": "name"
+            "name": "display_name"
           }
         }
       }
@@ -60,5 +60,5 @@
       false
     ]
   },
-  "hash": "b2de3beace50667bfe7ccd0b381ce987434e3509b8d226d4a638759e4874ba1d"
+  "hash": "a54f0048633dfd36fd3c1f62790e9d0d3a4c36ed2a0013ca80a04a1fe2956a34"
 }

@@ -302,7 +302,9 @@ async fn a_saved_entry_updates_the_count_in_the_header_of_the_answer() {
         assert_eq!(count(&page, "Projects"), n.to_string());
     }
     let persona = form(&[
-        ("name", "Ada"),
+        ("display_name", "Ada"),
+        ("handle", "ada"),
+        ("commit_email", "ada@example.org"),
         ("system_prompt", "x"),
         ("model", "claude-sonnet-5-5"),
         ("model_provider_id", &provider),

@@ -287,7 +287,7 @@ async fn run_agent(
 ) -> Result<(Principal, PushingTask), DbError> {
     let row = sqlx::query!(
         r#"
-        SELECT r.task_id, t.branch AS task_branch, t.persona_id, p.name
+        SELECT r.task_id, t.branch AS task_branch, t.persona_id, p.display_name AS name
         FROM runs r
         JOIN tasks t ON t.id = r.task_id
         JOIN personas p ON p.id = t.persona_id

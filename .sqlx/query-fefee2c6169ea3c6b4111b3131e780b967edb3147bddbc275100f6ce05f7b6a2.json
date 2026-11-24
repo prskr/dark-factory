@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO runs (id, task_id, number)\n            VALUES ($1, $2, (SELECT COALESCE(MAX(number), 0) + 1 FROM runs WHERE task_id = $2))\n            RETURNING id AS \"id!\", task_id AS \"task_id!\", number AS \"number!\", state AS \"state!\",\n                      outcome, detail AS \"detail!\", pod_ip,\n                      last_persisted_seq AS \"last_persisted_seq!\",\n                      harness_session_id AS \"harness_session_id!\",\n                      started_at AS \"started_at!\", connected_at, stop_requested_at,\n                      finalize_reason\n            ",
+  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason,\n               commit_name, commit_email\n        FROM runs\n        WHERE state <> ALL($1)\n          AND (\n            (stop_requested_at IS NOT NULL AND state = ANY($2))\n            OR (stop_requested_at IS NOT NULL AND $3::bigint IS NOT NULL\n                AND stop_requested_at + $3::bigint * interval '1 second' < $4)\n            OR (state = ANY($2) AND $5::bigint IS NOT NULL\n                AND started_at + $5::bigint * interval '1 second' < $4)\n            OR (state = ANY($6) AND $7::bigint IS NOT NULL\n                AND COALESCE(connected_at, started_at) + $7::bigint * interval '1 second' < $4)\n          )\n        ORDER BY started_at\n        ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id!",
+        "name": "id",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "task_id!",
+        "name": "task_id",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -27,7 +27,7 @@
       },
       {
         "ordinal": 2,
-        "name": "number!",
+        "name": "number",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -38,7 +38,7 @@
       },
       {
         "ordinal": 3,
-        "name": "state!",
+        "name": "state",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +60,7 @@
       },
       {
         "ordinal": 5,
-        "name": "detail!",
+        "name": "detail",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,7 +82,7 @@
       },
       {
         "ordinal": 7,
-        "name": "last_persisted_seq!",
+        "name": "last_persisted_seq",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -93,7 +93,7 @@
       },
       {
         "ordinal": 8,
-        "name": "harness_session_id!",
+        "name": "harness_session_id",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -104,7 +104,7 @@
       },
       {
         "ordinal": 9,
-        "name": "started_at!",
+        "name": "started_at",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -145,12 +145,39 @@
             "name": "finalize_reason"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "commit_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "commit_name"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "commit_email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "commit_email"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid"
+        "TextArray",
+        "TextArray",
+        "Int8",
+        "Timestamptz",
+        "Int8",
+        "TextArray",
+        "Int8"
       ]
     },
     "nullable": [
@@ -166,8 +193,10 @@
       false,
       true,
       true,
-      true
+      true,
+      false,
+      false
     ]
   },
-  "hash": "9a60d05d045eac0fd2c32d97643a5943ca62b827ef92f7c3f67747755e48c1b1"
+  "hash": "fefee2c6169ea3c6b4111b3131e780b967edb3147bddbc275100f6ce05f7b6a2"
 }

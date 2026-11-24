@@ -159,7 +159,9 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Real screenshots of the task views for the landing page cards, from the demo profile (`just seed-demo`, delivered by `e2e-suite-and-seed`) | idea | [`docs/design-workflow.md`](../../docs/design-workflow.md) "Build order", `docs/landing/_index.md` |
 | Automated screenshot capture: a Playwright script over the demo data (`just serve-local` + `just seed-demo`) for docs and landing page | idea | `openspec/changes/e2e-suite-and-seed` (out of scope) |
 | Configuration view: read-only page listing the effective instance options (`InstanceConfig`, secrets redacted), the first option being `web.showHiddenBlocks` | decided | `openspec/changes/archive/2026-10-28-hide-system-prompt-blocks` |
-| Commit signing without keys in the sandbox, signature verification in the Git proxy | designed | F7, [`design/agent-run.md`](../../design/agent-run.md) §12 |
+| Commit signing without keys in the sandbox, signature verification in the Git proxy; per-persona keys bound to the persona identity | designed | F7, [`design/agent-run.md`](../../design/agent-run.md) §12, ADR-0063, follow-up change `persona-commit-signing` (builds on `persona-identity`) |
+| Route `@handle` mentions in forge comments and chats to the persona with that handle | idea | `openspec/changes/persona-identity` (out of scope), ADR-0062 |
+| Persona avatars in the chat UI (chat list, persona strip, transcript author), reusing the `persona_avatar` component | idea | `openspec/changes/persona-identity` (out of scope; `iter3-chats` archived without it) |
 | Cilium mode, DNS server in the gateway | designed | [`design/egress.md`](../../design/egress.md) §5.3, §12 |
 | Persisted per-run egress aggregates (host, verdict, connections, bytes) | designed | [`design/egress.md`](../../design/egress.md) §8, §13 |
 | Deny rules at project scope | idea | `openspec/changes/archive/2026-11-03-iter2-egress-deny-rules` (non-goal) |

@@ -71,7 +71,18 @@ async fn seed_writes_the_demo_data() -> Result<()> {
         data::SETTINGS_PROVIDER_URL
     );
     let personas = list_personas(&pool).await?;
-    assert_eq!(personas[0].name, data::PERSONA_NAME);
+    assert_eq!(
+        (
+            personas[0].handle.as_str(),
+            personas[0].display_name.as_str(),
+            personas[0].commit_email.as_str()
+        ),
+        (
+            data::PERSONA_HANDLE,
+            data::PERSONA_NAME,
+            data::PERSONA_EMAIL
+        )
+    );
     assert_eq!(personas[0].model_provider_id, fake.id);
     assert_eq!(personas[0].model, data::PERSONA_MODEL);
     assert_eq!(fake.input.models.len(), 1);

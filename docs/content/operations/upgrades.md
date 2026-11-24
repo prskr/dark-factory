@@ -169,6 +169,31 @@ harness `opencode` is available ([guide](../using/opencode.md)).
 
 To roll back, restore the database backup taken before the upgrade, then roll back the release.
 
+### Persona identity
+
+Every persona now has a handle, a display name and a commit email, and agents commit as their
+persona ([Give a persona its identity](../using/setup.md#give-a-persona-its-identity)).
+
+1. **Let active runs finish, or cancel them, before the upgrade.** An active run can hold unpushed
+   commits with the old instance identity, which the Git proxy would reject (`df:identity`) against
+   the persona's identity. Run the control plane, the gateway and the sandbox runtime image from the
+   same chart version.
+2. The `migrate` job gives every persona an identity. The handle is the name as a slug (lower
+   case, other characters than letters and digits become `-`, at most 39 characters; `persona` if
+   nothing is left); a handle that an earlier persona (by creation time) holds gets `-2`, `-3`, ….
+   The display name is the old name without control characters, `<` and `>`, at most 100
+   characters. The commit email is `<handle>@dark-factory.localhost`. Runs that exist get the
+   identity of their persona.
+3. **Set real emails.** Commits after the upgrade carry the placeholder email until you edit the
+   persona. Check **Settings → Personas**.
+4. `create_task` takes the persona's **handle**; `list_personas` returns handle, display name and
+   description. Agents that named a persona by its old name need the handle.
+5. The key `agent.commitIdentity` of the instance configuration file is removed: delete it from
+   your file, the configuration fails validation with it (the chart has no value for it). The runtime has no
+   built-in author any more and fails a run whose `Assign` has no commit identity.
+
+To roll back, restore the database backup taken before the upgrade, then roll back the release.
+
 ### Other releases
 
 Some releases need a step beyond `helm upgrade`, for example removing the forge host from the egress

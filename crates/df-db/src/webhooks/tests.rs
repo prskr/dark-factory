@@ -23,8 +23,8 @@ async fn seed_project(pool: &PgPool) -> (ProjectId, PersonaId) {
     .unwrap();
     let provider_id = crate::model_providers::tests::seed_provider(pool).await;
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, harness, model, model_provider_id)
-         VALUES ($1, 'Linus', 'You are Linus.', 'claude-code', 'test-model', $2)",
+        "INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, harness, model, model_provider_id)
+         VALUES ($1, 'Linus', 'linus', 'linus@example.org', 'You are Linus.', 'claude-code', 'test-model', $2)",
     )
     .bind(persona_id.as_uuid())
     .bind(provider_id)

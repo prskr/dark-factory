@@ -519,6 +519,28 @@ async fn only_due_tasks_start_and_a_rate_limited_one_needs_no_message() {
 }
 
 #[tokio::test]
+async fn a_started_run_keeps_the_identity_its_persona_had_at_the_start() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+
+    let started = start_queued_runs(&pool, 10, 4, 2).await.unwrap();
+    sqlx::query("UPDATE personas SET display_name = 'Linus T', commit_email = 'linus@corp.example' WHERE id = $1")
+        .bind(env.persona_id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let run = get_run(&pool, started[0].id).await.unwrap().unwrap();
+    assert_eq!(
+        (
+            run.commit_identity.name.as_str(),
+            run.commit_identity.email.as_str(),
+        ),
+        ("Linus", "linus@example.org")
+    );
+}
+
+#[tokio::test]
 async fn a_start_attempt_at_the_limit_releases_the_start_lock_at_once() {
     use sqlx::Connection as _;
 

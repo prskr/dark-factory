@@ -100,8 +100,8 @@ async fn insert_persona(pool: &PgPool, id: Uuid, name: &str) {
     }
     let provider = crate::model_providers::tests::seed_provider(pool).await;
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, model, model_provider_id) \
-         VALUES ($1, $2, '', 'test-model', $3)",
+        "INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id) \
+         VALUES ($1, $2, replace(lower($2), ' ', '-'), replace(lower($2), ' ', '-') || '@example.org', '', 'test-model', $3)",
     )
     .bind(id)
     .bind(name)
@@ -368,7 +368,7 @@ fn subject(run: bool) -> Subject {
         task_id: Uuid::from_u128(2),
         task_key: "DF-42".into(),
         persona_id: Uuid::from_u128(3),
-        persona_name: "Linus".into(),
+        persona_display_name: "Linus".into(),
         run: run.then_some((Uuid::from_u128(4), 3)),
     }
 }

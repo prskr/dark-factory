@@ -32,7 +32,7 @@ The transcript SHALL read as a conversation: human messages aligned to the right
 ## ADDED Requirements
 
 ### Requirement: Persona on task rows and in the task details
-Each task list row SHALL show the task persona's avatar, with the display name as its label. In the task details, the persona value SHALL show the avatar, the display name and the `@handle`. The persona value keeps linking to `/personas`.
+Each task list row SHALL show the task persona's avatar before the time, with the display name as its label. In the task details, the persona value SHALL show the avatar, the display name and the `@handle`, and no longer the harness. The persona value keeps linking to `/personas`.
 
 #### Scenario: Task row
 - **WHEN** task `DF-21` with persona `linus` ("Linus") is listed

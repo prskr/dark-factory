@@ -216,6 +216,42 @@ async fn assign_for_the_first_run_of_df_1() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn assign_carries_the_persona_identity_the_run_started_with() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run1 = env.insert_run(env.task.id, 1, "running").await;
+    let rc1 = load_run_context(&pool, get_run(&pool, run1).await?.expect("run")).await?;
+    let first = build_assign(&env.ctx, &rc1).await?;
+
+    sqlx::query("UPDATE personas SET commit_email = 'linus@corp.example'")
+        .execute(&pool)
+        .await?;
+    // The edit happens while run 1 is active: its Assign (also a rebuilt one) keeps the identity.
+    let again = build_assign(&env.ctx, &rc1).await?;
+    sqlx::query("UPDATE runs SET state = 'succeeded' WHERE id = $1")
+        .bind(run1.as_uuid())
+        .execute(&pool)
+        .await?;
+    let run2 = env.insert_run(env.task.id, 2, "connecting").await;
+    let rc2 = load_run_context(&pool, get_run(&pool, run2).await?.expect("run")).await?;
+    let second = build_assign(&env.ctx, &rc2).await?;
+
+    let identity = |assign: Assign| {
+        let identity = assign.workspace.expect("workspace").commit_identity;
+        let identity = identity.expect("identity");
+        (identity.name, identity.email)
+    };
+    let linus = ("Linus".to_owned(), "linus@example.org".to_owned());
+    assert_eq!(identity(first), linus);
+    assert_eq!(identity(again), linus);
+    assert_eq!(
+        identity(second),
+        ("Linus".to_owned(), "linus@corp.example".to_owned())
+    );
+    Ok(())
+}
+
 /// The system prompt file of the harness in `assign`.
 fn prompt_file(assign: &Assign, env: &Env) -> String {
     let Some(harness_kind::Kind::Acp(acp)) = assign.harness.clone().and_then(|h| h.kind) else {

@@ -65,6 +65,6 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0059](0059-repository-file-reads-through-the-forge-plugin.md) | Repository file reads through the forge plugin | Accepted |
 | [ADR-0060](0060-project-image-builds.md) | Project image builds | Accepted |
 | [ADR-0061](0061-run-transitions-through-one-transition-function.md) | Run transitions through one transition function | Accepted |
-| [ADR-0062](0062-persona-identity.md) | Persona identity with a shared forge bot account | Proposed |
+| [ADR-0062](0062-persona-identity.md) | Persona identity with a shared forge bot account | Accepted |
 | [ADR-0063](0063-generated-per-persona-signing-keys.md) | Generated per-persona signing keys | Proposed |
 | [ADR-0064](0064-model-calls-of-the-control-plane-go-through-the-gateway.md) | Model calls of the control plane go through the gateway | Proposed (change `factory-minion`) |

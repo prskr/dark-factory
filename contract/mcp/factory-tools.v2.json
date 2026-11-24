@@ -275,14 +275,14 @@
     {
       "name": "create_task",
       "title": "Create a task",
-      "description": "Hand work to another persona by creating a task in this project. You become its parent. Pick the persona with list_personas. The new task starts on its own once every task in depends_on is satisfied (kind completion: that task called complete_task at least once, or is done; kind done: that task is done, its pull request merged or marked done by a board member). Without depends_on it starts at once. Dependencies only gate the first start. After delegating, end your turn: do not poll or wait for the child. You are woken with a message whenever a child completes, becomes done, fails or is cancelled; you do not get a message for a child that waits for a human. Later rounds (for example asking the implementer to address review findings) are your job: relay them with send_message. Returns the new task's key and status (awaiting_dependencies or queued). Use branch to hand an existing branch (for example a failing Renovate pull request) to a persona. Use base_task to start the new task from another task's branch. There are limits on how deep tasks may nest and how many open subtasks one task may have; exceeding one is an error.",
+      "description": "Hand work to another persona by creating a task in this project. You become its parent. Pick the persona by its handle with list_personas. The new task starts on its own once every task in depends_on is satisfied (kind completion: that task called complete_task at least once, or is done; kind done: that task is done, its pull request merged or marked done by a board member). Without depends_on it starts at once. Dependencies only gate the first start. After delegating, end your turn: do not poll or wait for the child. You are woken with a message whenever a child completes, becomes done, fails or is cancelled; you do not get a message for a child that waits for a human. Later rounds (for example asking the implementer to address review findings) are your job: relay them with send_message. Returns the new task's key and status (awaiting_dependencies or queued). Use branch to hand an existing branch (for example a failing Renovate pull request) to a persona. Use base_task to start the new task from another task's branch. There are limits on how deep tasks may nest and how many open subtasks one task may have; exceeding one is an error.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "persona": {
             "type": "string",
             "minLength": 1,
-            "description": "Name of the persona that does the work, as listed by list_personas."
+            "description": "Handle of the persona that does the work, as listed by list_personas (the display name does not work). Its commits carry its identity."
           },
           "title": {
             "type": "string",
@@ -357,7 +357,7 @@
     {
       "name": "list_personas",
       "title": "List personas",
-      "description": "List the personas of this instance with their names and descriptions (role and strengths), ordered by name. Use it to choose the persona for create_task.",
+      "description": "List the personas of this instance with their handles, display names and descriptions (role and strengths), ordered by handle. Use it to choose the persona for create_task, which takes the handle. Every commit carries the identity of the persona whose run made it, and the push checks reject rewriting commits of another persona.",
       "inputSchema": {
         "type": "object",
         "properties": {},

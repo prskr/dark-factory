@@ -64,15 +64,15 @@ pub(crate) fn chat_rows(
                             "x-on:click"="select($el)"
                             class="block min-h-11 border-b border-line border-l-[3px] border-l-transparent py-3.5 pr-5 pl-[17px] hover:bg-sunk aria-[current=page]:border-l-accent aria-[current=page]:bg-accent-soft" {
                             div class="flex items-center gap-2" {
-                                (avatar(&initials(&chat.persona_name)))
-                                span class="min-w-0 truncate text-sm font-medium" { (chat.persona_name) }
+                                (avatar(&initials(&chat.persona_display_name)))
+                                span class="min-w-0 truncate text-sm font-medium" { (chat.persona_display_name) }
                                 @if chat.needs_you { (needs_you_dot()) }
                                 @else if chat.status != TaskStatus::Waiting { (status_badge(chat.status)) }
                                 time datetime=(chat.last_activity_at.to_string()) class="ml-auto shrink-0 font-mono text-xs text-faint" { (short_time(chat.last_activity_at)) }
                             }
                             div title=(chat.title) class={"mt-1 truncate text-[15px] font-medium" @if chat.title_source == TitleSource::Placeholder { " italic text-muted" }} { (chat.title) }
                             @if chat.title_source == TitleSource::Placeholder {
-                                div class="mt-0.5 truncate text-xs text-muted" { (chat.persona_name) " sets the topic when the run starts" }
+                                div class="mt-0.5 truncate text-xs text-muted" { (chat.persona_display_name) " sets the topic when the run starts" }
                             } @else if !chat.last_message.is_empty() {
                                 div class="mt-0.5 truncate text-xs text-muted" { (chat.last_message) }
                             }
@@ -121,8 +121,8 @@ pub(super) fn list_column(
             div class="ws-list-strip flex-col items-center gap-2 py-3" {
                 button type="button" aria-label="Expand chat list" "x-on:click"="setListCollapsed(false)" class=(ICON_BUTTON_CLASS) { (icon(Icon::PanelLeft)) }
                 @for chat in &personas {
-                    a href={"/chats/" (chat.key)} aria-label=(format!("Chat with {}", chat.persona_name)) title=(chat.persona_name) class="relative rounded-full" {
-                        (avatar(&initials(&chat.persona_name)))
+                    a href={"/chats/" (chat.key)} aria-label=(format!("Chat with {}", chat.persona_display_name)) title=(chat.persona_display_name) class="relative rounded-full" {
+                        (avatar(&initials(&chat.persona_display_name)))
                         @if chat.needs_you { span class="absolute -right-0.5 -top-0.5" { (needs_you_dot()) } }
                     }
                 }
@@ -200,10 +200,10 @@ pub(crate) fn head_region(task: &TaskDetail) -> Markup {
             div class="flex items-center gap-1" {
                 a href=(list) aria-label="Back to chats" class={(ICON_BUTTON_CLASS) " md:hidden"} { (icon(Icon::ChevronLeft)) }
                 div class="flex min-w-0 flex-1 items-center gap-2 md:hidden" {
-                    (avatar(&initials(&task.persona_name)))
+                    (avatar(&initials(&task.persona_display_name)))
                     div class="min-w-0" {
                         div class="truncate text-sm font-semibold" title=(task.title) { (task.title) }
-                        div class="truncate text-xs text-muted" { (task.persona_name) }
+                        div class="truncate text-xs text-muted" { (task.persona_display_name) }
                     }
                     @if task.status != TaskStatus::Waiting { (status_badge(task.status)) }
                 }
@@ -279,7 +279,7 @@ pub(crate) fn overview_region(task: &TaskDetail, base_branch: &str, error: Optio
         ),
         (
             "Persona",
-            html! { (task.persona_name) " " span class="font-normal text-muted" { "· " (harness_label(&task.persona_harness)) @if let Some(model) = &task.persona_model { " · " (model) } } },
+            html! { (task.persona_display_name) " " span class="font-normal text-muted" { "· " (harness_label(&task.persona_harness)) @if let Some(model) = &task.persona_model { " · " (model) } } },
         ),
         (
             "Key",
@@ -300,9 +300,9 @@ pub(crate) fn overview_region(task: &TaskDetail, base_branch: &str, error: Optio
             div class="ws-details-full" {
                 (section("Agent", html! {
                     div class="flex items-start gap-3" {
-                        (avatar(&initials(&task.persona_name)))
+                        (avatar(&initials(&task.persona_display_name)))
                         div class="min-w-0" {
-                            p class="font-medium" { (task.persona_name) }
+                            p class="font-medium" { (task.persona_display_name) }
                             @if !task.persona_description.is_empty() {
                                 p class="text-sm text-muted" { (task.persona_description) }
                             }
@@ -410,7 +410,7 @@ pub(super) fn compose_form(
 /// The persona picker: a button with the chosen persona that opens the list of all personas,
 /// each with harness, model and description.
 fn persona_picker(personas: &[PersonaRecord], chosen: Option<&PersonaRecord>) -> Markup {
-    let name = chosen.map(|p| p.name.as_str()).unwrap_or_default();
+    let name = chosen.map(|p| p.display_name.as_str()).unwrap_or_default();
     html! {
         div class="relative" x-data={"{ open: false, name: " (serde_json::json!(name)) " }"} "x-on:keydown.escape.stop"="open = false" "x-on:click.outside"="open = false" {
             button type="button" aria-haspopup="listbox" ":aria-expanded"="open" "x-on:click"="open = !open"
@@ -423,9 +423,9 @@ fn persona_picker(personas: &[PersonaRecord], chosen: Option<&PersonaRecord>) ->
                 @for persona in personas {
                     label class="flex cursor-pointer items-start gap-2 rounded-lg p-2 text-sm hover:bg-sunk has-[:checked]:bg-accent-soft" {
                         input type="radio" name="persona" value=(persona.id) checked[chosen.is_some_and(|c| c.id == persona.id)]
-                            "x-on:change"={"name = " (serde_json::json!(persona.name)) "; open = false"} class="mt-1";
+                            "x-on:change"={"name = " (serde_json::json!(persona.display_name)) "; open = false"} class="mt-1";
                         span class="min-w-0" {
-                            span class="block font-medium" { (persona.name) }
+                            span class="block font-medium" { (persona.display_name) }
                             span class="block text-xs text-muted" { (harness_label(&persona.harness)) " · " (persona.model) }
                             @if !persona.description.is_empty() { span class="block text-xs text-muted" { (persona.description) } }
                         }

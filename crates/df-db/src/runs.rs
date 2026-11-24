@@ -65,6 +65,8 @@ pub struct RunRow {
     pub stop_requested_at: Option<Timestamp>,
     /// Why the run is `finalizing`; `None` for a run that is not.
     pub finalize_reason: Option<FinalizeReason>,
+    /// The persona identity the run commits with, frozen when the run was created.
+    pub commit_identity: df_core::CommitIdentity,
 }
 
 impl RunRow {
@@ -93,6 +95,8 @@ struct RunRecord {
     connected_at: Option<jiff_sqlx::Timestamp>,
     stop_requested_at: Option<jiff_sqlx::Timestamp>,
     finalize_reason: Option<String>,
+    commit_name: String,
+    commit_email: String,
 }
 
 impl TryFrom<RunRecord> for RunRow {
@@ -114,6 +118,10 @@ impl TryFrom<RunRecord> for RunRow {
             connected_at: r.connected_at.map(Into::into),
             stop_requested_at: r.stop_requested_at.map(Into::into),
             finalize_reason: r.finalize_reason.map(|r| r.parse()).transpose()?,
+            commit_identity: df_core::CommitIdentity {
+                name: r.commit_name,
+                email: r.commit_email,
+            },
         })
     }
 }
@@ -127,7 +135,8 @@ pub async fn get_run(
         RunRecord,
         r#"
         SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,
-               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason
+               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason,
+               commit_name, commit_email
         FROM runs WHERE id = $1
         "#,
         run_id.as_uuid()
@@ -173,7 +182,8 @@ pub async fn list_active_runs(executor: impl PgExecutor<'_>) -> Result<Vec<RunRo
         RunRecord,
         r#"
         SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,
-               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason
+               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason,
+               commit_name, commit_email
         FROM runs WHERE state <> ALL($1) ORDER BY started_at
         "#,
         &state_list(RunState::TERMINAL)
@@ -195,7 +205,8 @@ pub async fn list_unprovisioned_runs(
         RunRecord,
         r#"
         SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,
-               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason
+               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason,
+               commit_name, commit_email
         FROM runs
         WHERE state = ANY($1) AND started_at < $2 AND stop_requested_at IS NULL
         ORDER BY started_at
@@ -233,7 +244,8 @@ pub async fn list_overdue_runs(
         RunRecord,
         r#"
         SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,
-               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason
+               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason,
+               commit_name, commit_email
         FROM runs
         WHERE state <> ALL($1)
           AND (
@@ -347,6 +359,8 @@ pub async fn start_queued_runs(
         if task.resumed {
             crate::tasks::queue_resume_prompt_tx(&mut tx, TaskId::from_uuid(task.id)).await?;
         }
+        // The trigger `runs_freeze_commit_identity` fills `commit_name` and `commit_email` from the
+        // task's persona in this insert, so the run keeps the identity it started with.
         let record = sqlx::query_as!(
             RunRecord,
             r#"
@@ -357,7 +371,8 @@ pub async fn start_queued_runs(
                       last_persisted_seq AS "last_persisted_seq!",
                       harness_session_id AS "harness_session_id!",
                       started_at AS "started_at!", connected_at, stop_requested_at,
-                      finalize_reason
+                      finalize_reason, commit_name AS "commit_name!",
+                      commit_email AS "commit_email!"
             "#,
             RunId::new().as_uuid(),
             task.id

@@ -3,6 +3,63 @@
 use super::*;
 use df_core::Principal;
 
+fn list_item(key: &str) -> TaskListItem {
+    let at: Timestamp = "2026-10-03T04:05:06Z".parse().unwrap();
+    TaskListItem {
+        id: uuid::Uuid::nil(),
+        key: key.to_owned(),
+        title: "Fix login".to_owned(),
+        title_source: TitleSource::User,
+        project_key: "DF".to_owned(),
+        project_name: "Dark Factory".to_owned(),
+        persona_id: uuid::Uuid::from_u128(0x0192_a000_0000_7000_8000_0000_0000_0001),
+        persona_handle: "linus".to_owned(),
+        persona_display_name: "Linus".to_owned(),
+        status: "queued".to_owned(),
+        status_line: String::new(),
+        resume_at: None,
+        subtasks: df_db::task_views::SubtaskProgress { done: 0, total: 0 },
+        created_at: at,
+        updated_at: at,
+    }
+}
+
+#[test]
+fn a_task_row_shows_the_persona_avatar_labelled_with_its_name_before_the_time() {
+    let filters = Filters::new(None, None, None);
+
+    let html = task_rows(&[list_item("DF-21")], None, &filters).into_string();
+
+    let avatar = crate::testkit::tag_around(&html, "aria-label=\"Linus\"");
+    assert!(
+        avatar.contains("role=\"img\"") && avatar.contains("size-5"),
+        "{avatar}"
+    );
+    assert!(
+        html.find("aria-label=\"Linus\"").unwrap() < html.find("<time ").unwrap(),
+        "{html}"
+    );
+    assert!(html.contains(">L<"), "{html}");
+}
+
+#[test]
+fn the_persona_in_the_details_shows_avatar_name_and_handle_and_links_to_the_list() {
+    let task = crate::testkit::task_detail("DF-21");
+
+    let html = persona_value(&task).into_string();
+
+    assert!(html.starts_with("<a href=\"/personas\""), "{html}");
+    assert!(
+        html.contains("role=\"img\"") && html.contains(">L<") && html.contains("size-5"),
+        "{html}"
+    );
+    assert!(
+        html.contains("Linus <span class=\"font-normal text-muted\">@linus</span>"),
+        "{html}"
+    );
+    assert!(!html.contains("Claude Code"), "{html}");
+}
+
 #[test]
 fn the_full_time_shows_date_and_seconds_in_utc() {
     let at: Timestamp = "2026-10-03T04:05:06Z".parse().unwrap();
@@ -120,7 +177,7 @@ fn queued_stack_prefixes_no_human_author() {
 }
 
 #[test]
-fn queued_stack_prefixes_agent_authors_with_the_persona_name_without_edit_actions() {
+fn queued_stack_prefixes_agent_authors_with_the_persona_display_name_without_edit_actions() {
     let mut messages = queued(1);
     messages[0].author = Principal::agent(
         df_core::PersonaId::new(),

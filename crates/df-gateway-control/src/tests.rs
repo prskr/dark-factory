@@ -66,8 +66,6 @@ impl SecretStore for TestSecrets {
 pub(crate) fn git_settings() -> GitSettings {
     GitSettings {
         username: "dark-factory".into(),
-        commit_name: "Dark Factory".into(),
-        commit_email: "factory@example.test".into(),
         allow_plain_http: false,
     }
 }
@@ -123,8 +121,8 @@ pub(crate) async fn seed(pool: &PgPool) -> Result<Seed> {
     .execute(pool)
     .await?;
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, model, model_provider_id)
-         VALUES ($1, 'Linus', 'x', 'test-model', $2)",
+        "INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id)
+         VALUES ($1, 'Linus', 'linus', 'linus@example.org', 'x', 'test-model', $2)",
     )
     .bind(persona)
     .bind(provider)
@@ -385,6 +383,42 @@ async fn snapshot_has_the_git_route_of_an_active_run_and_the_current_forge_crede
 }
 
 #[tokio::test]
+async fn the_git_route_carries_the_identity_the_run_started_with_after_a_persona_edit() -> Result<()>
+{
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    sqlx::query(
+        "UPDATE personas SET display_name = 'Linus T', commit_email = 'linus@corp.example'",
+    )
+    .execute(&pool)
+    .await?;
+    let second = insert_task(&pool, seed.project, seed.persona, 2).await?;
+    insert_run(&pool, second, 1, "running", Some("10.1.0.8")).await?;
+
+    let update = snapshot::build(&pool, &TestSecrets::new("t"), &git_settings()).await?;
+
+    let identity: Vec<_> = update
+        .snapshot
+        .unwrap()
+        .sandboxes
+        .iter()
+        .map(|sandbox| {
+            let git = sandbox.git.as_ref().unwrap();
+            (git.commit_name.clone(), git.commit_email.clone())
+        })
+        .collect();
+    assert_eq!(
+        identity,
+        [
+            ("Linus".to_owned(), "linus@example.org".to_owned()),
+            ("Linus T".to_owned(), "linus@corp.example".to_owned())
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn snapshot_has_the_inference_route_of_an_active_run_and_the_current_provider_credential()
 -> Result<()> {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
@@ -480,8 +514,8 @@ async fn seed_second_provider(pool: &PgPool, project: Uuid) -> Result<(Uuid, Uui
     .execute(pool)
     .await?;
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, model, model_provider_id)
-         VALUES ($1, 'Ada', 'x', 'test-model', $2)",
+        "INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id)
+         VALUES ($1, 'Ada', 'ada', 'ada@example.org', 'x', 'test-model', $2)",
     )
     .bind(persona)
     .bind(provider)
@@ -1143,7 +1177,7 @@ async fn a_saved_push_policy_reaches_the_snapshot_and_the_next_push_check() -> R
         .and_then(|policy| policy.push_policy("DF"))
         .ok_or_else(|| anyhow::anyhow!("no push policy for DF"))?;
     let id = |n: u8| gix::ObjectId::from_bytes_or_panic(&[n; 20]);
-    let email = git_settings().commit_email;
+    let email = "linus@example.org".to_owned();
     let view = PushView {
         commits: vec![AddedCommit {
             id: id(2),

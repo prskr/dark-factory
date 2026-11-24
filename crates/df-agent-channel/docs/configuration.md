@@ -14,7 +14,6 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `agent.tls.certFile` | yes | none | PEM server certificate (chain) of the agent port. `serve` refuses to start without `agent.tls`. The three files are checked for changes at most every 10 s; changed (rotated) material applies to new connections without a restart, material that does not parse is ignored with a warning. |
 | `agent.tls.keyFile` | yes | none | PEM private key of `certFile`. |
 | `agent.tls.clientCaFile` | yes | none | PEM CA bundle. Client certificates must chain to it. |
-| `agent.commitIdentity.name` / `.email` | no | `Dark Factory` / `dark-factory@localhost` | Commit identity in `Assign.workspace.commit_identity`. |
 | `agent.gitUsername` | no | `dark-factory` | User name the gateway's Git proxy sends with the project's forge token. |
 | `harness.claudeCode.image` | no | `ghcr.io/prskr/dark-factory/claude-harness:0.107.0` | Harness image, mounted read-only at `/opt/harness/claude-code` in the sandbox of every run whose project has no adapter command. The tag is the adapter version. The chart renders it from `image.harness.claudeCode.*`. |
 | `harness.claudeCode.adapterCommand` | no | `["/opt/harness/claude-code/bin/node", "/opt/harness/claude-code/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"]` | ACP adapter command from the harness image; a project's own adapter command replaces it (and the harness image mount). Personas have no adapter command. |
@@ -48,6 +47,13 @@ configuration file (`--config`, default `/etc/dark-factory/config.yaml`).
 | `lifecycleEvents.subscriptions[].events` | no | `[]` (all) | Event types sent to this subscription (`volume.provisioned`, `volume.destroyed`, `sandbox.provisioning`, `sandbox.provisioned`, `sandbox.provisioning_failed`, `sandbox.destroyed`). Empty means all, including types added later. An unknown type refuses the start. |
 
 The Helm chart sets `agent.tls` to the cert-manager secret mounted at `/etc/dark-factory/tls`.
+
+The commit identity of a run is not a setting: it is the identity of the run's persona (display name
+and commit email), copied onto the run when it is created and sent as
+`Assign.workspace.commit_identity`. The gateway's Git route carries the same values, so the sandbox
+and the `df:identity` check always agree. An edit of a persona applies to runs created after it. The
+former setting `agent.commitIdentity` is removed; a configuration file that still has it fails
+validation (unknown field).
 
 The `scheduling` section holds only waits after which the control plane acts on its own. Timeouts
 (handshake, connect, keepalive, drain, wall clock) are fixed or have their own setting under `runs`,

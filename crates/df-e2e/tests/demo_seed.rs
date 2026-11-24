@@ -51,8 +51,16 @@ async fn demo_profile_writes_projects_personas_and_tasks_in_every_state() -> Res
         ["OPS", "PAY", "WEB"]
     );
     assert_eq!(
-        strings(&pool, "SELECT name FROM personas ORDER BY name").await?,
-        ["Ada", "Grace", "Linus"]
+        strings(
+            &pool,
+            "SELECT handle || ' ' || display_name || ' ' || commit_email FROM personas ORDER BY handle"
+        )
+        .await?,
+        [
+            "ada Ada ada@example.org",
+            "grace Grace grace@example.org",
+            "linus Linus linus@example.org"
+        ]
     );
     let states = strings(
         &pool,
@@ -295,7 +303,7 @@ async fn demo_profile_leaves_the_e2e_fixtures_unchanged() -> Result<()> {
         rows.extend(
             strings(
                 &pool,
-                "SELECT to_jsonb(p)::text FROM personas p WHERE name = 'e2e'",
+                "SELECT to_jsonb(p)::text FROM personas p WHERE handle = 'e2e'",
             )
             .await?,
         );

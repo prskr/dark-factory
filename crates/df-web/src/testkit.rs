@@ -731,7 +731,9 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
         actor,
         None,
         &PersonaInput {
-            name: "Linus".into(),
+            handle: "linus".into(),
+            display_name: "Linus".into(),
+            commit_email: "linus@example.org".into(),
             description: String::new(),
             system_prompt: "Be Linus.".into(),
             harness: "claude-code".into(),
@@ -812,12 +814,15 @@ pub(crate) async fn add_persona(
         principal: &principal,
         roles: &roles,
     };
+    let handle = name.to_lowercase().replace(' ', "-");
     let persona = save_persona(
         pool,
         actor,
         None,
         &PersonaInput {
-            name: name.into(),
+            commit_email: format!("{handle}@example.org"),
+            handle,
+            display_name: name.into(),
             description: description.into(),
             system_prompt: format!("Be {name}."),
             harness: "claude-code".into(),
@@ -1080,7 +1085,9 @@ pub(crate) fn task_detail(key: &str) -> df_db::task_views::TaskDetail {
         project_name: "Dark Factory".to_owned(),
         repo_url: "https://forge.example/df.git".to_owned(),
         issue_tracker_url: None,
-        persona_name: "Linus".to_owned(),
+        persona_id: uuid::Uuid::from_u128(0x0192_a000_0000_7000_8000_0000_0000_0001),
+        persona_handle: "linus".to_owned(),
+        persona_display_name: "Linus".to_owned(),
         persona_harness: "claude-code".to_owned(),
         persona_model: None,
         persona_description: String::new(),
@@ -1100,7 +1107,7 @@ pub(crate) fn task_detail(key: &str) -> df_db::task_views::TaskDetail {
         creator_task_key: None,
         parent_key: None,
         parent_title: None,
-        parent_persona_name: None,
+        parent_persona_display_name: None,
         base_task_key: None,
         base_task_title: None,
     }

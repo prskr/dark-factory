@@ -58,7 +58,12 @@ counts hold tasks only; [chats](chats.md) have their own pages under **Chats**.
 - **Artifacts**: once the agent has written an [artifact](artifacts.md), the details get an
   Artifacts tab with a card per artifact; an artifact opens next to the transcript.
 
-The transcript shows the author of each message. In the queued-message stack, messages from agents and
+The transcript shows the author of each message. The author of an agent message is its persona:
+the display name with the `@handle` ("Linus @linus · 10:42") and the persona's
+[avatar](setup.md#personas), taken from the persona as it is now, so a renamed persona also renames
+its old messages. Every row of the task list shows the avatar of the task's persona before the time
+(its label is the display name), and the persona in the details is the avatar, the display name and
+the `@handle`, linked to the persona list. In the queued-message stack, messages from agents and
 the system are prefixed with their name; your own messages have none. System authors use
 readable names instead of internal reason codes: **Task assignment**, **Resume**, **Request decision**,
 **Push check**, **Forge events** and **Subtask update**. Other system authors show **Dark Factory**.

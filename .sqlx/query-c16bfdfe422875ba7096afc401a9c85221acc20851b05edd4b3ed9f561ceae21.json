@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT handle, (handle = $2) AS \"same_handle!\"\n        FROM personas\n        WHERE (handle = $2 OR commit_email = $3) AND id IS DISTINCT FROM $1\n        ORDER BY (handle = $2) DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "handle",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "handle"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "same_handle!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "c16bfdfe422875ba7096afc401a9c85221acc20851b05edd4b3ed9f561ceae21"
+}

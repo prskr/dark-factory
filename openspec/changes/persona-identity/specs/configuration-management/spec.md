@@ -29,6 +29,14 @@ Board members SHALL list, create and edit personas with a persona identity (hand
 - **WHEN** a board member types display name "Code Reviewer" in the persona form
 - **THEN** the avatar preview shows "CR" without a page reload
 
+#### Scenario: Identity fields on the form
+- **WHEN** a board member opens the persona form
+- **THEN** it shows the avatar preview, the fields "Display name", "Handle" (prefixed with `@`) and "Commit email", and below the email the hint "Author and committer of this persona's commits. Edits apply to runs started after saving."
+
+#### Scenario: Duplicate email on the form
+- **WHEN** a board member saves a persona with an email that persona `linus` already uses
+- **THEN** the email field shows "Already used by @linus."
+
 #### Scenario: Existing persona after the upgrade
 - **WHEN** persona "Linus" referenced harness credential `claude` before the upgrade
 - **THEN** after migrating it references a model provider with scheme `claude-subscription`, Anthropic Messages at `https://api.anthropic.com` and credential reference `claude`

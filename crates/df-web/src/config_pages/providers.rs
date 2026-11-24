@@ -903,7 +903,7 @@ async fn persona_conflicts(
         if let Err(error) =
             harness::check_compatible(&persona.harness, model.wire_api, input.scheme)
         {
-            problems.push(format!("Persona {}: {error}", persona.name));
+            problems.push(format!("Persona {}: {error}", persona.display_name));
         }
     }
     Ok(problems)

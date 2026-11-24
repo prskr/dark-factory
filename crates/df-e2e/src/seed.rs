@@ -261,7 +261,9 @@ async fn ensure_credentials_and_persona(pool: &PgPool, actor: Actor<'_>) -> Resu
         pool,
         actor,
         &PersonaInput {
-            name: data::PERSONA_NAME.into(),
+            handle: data::PERSONA_HANDLE.into(),
+            display_name: data::PERSONA_NAME.into(),
+            commit_email: data::PERSONA_EMAIL.into(),
             description: String::new(),
             system_prompt: "You are the e2e persona.".into(),
             harness: df_core::config::CLAUDE_CODE_HARNESS.into(),
@@ -348,8 +350,10 @@ pub(crate) async fn ensure_persona(
     let existing = list_personas(pool)
         .await?
         .into_iter()
-        .find(|p| p.name == wanted.name);
+        .find(|p| p.handle == wanted.handle);
     if let Some(p) = &existing
+        && p.display_name == wanted.display_name
+        && p.commit_email == wanted.commit_email
         && p.system_prompt == wanted.system_prompt
         && p.description == wanted.description
         && p.harness == wanted.harness

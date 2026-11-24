@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id, t.key, t.title, t.title_source, p.key AS project_key,\n               p.name AS project_name, ps.name AS persona_name,\n               t.status, t.status_line, t.resume_at,\n               COALESCE(sub.done, 0) AS \"subtasks_done!\", COALESCE(sub.total, 0) AS \"subtasks_total!\",\n               t.created_at, t.updated_at\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas ps ON ps.id = t.persona_id\n        LEFT JOIN LATERAL (\n            SELECT count(*) FILTER (WHERE s.status = ANY($4)) AS done,\n                   count(*) FILTER (WHERE s.status <> 'cancelled') AS total\n            FROM tasks s WHERE s.parent_id = t.id\n        ) sub ON true\n        WHERE t.kind = 'task'\n          AND ($1::text[] IS NULL OR t.status = ANY($1))\n          AND ($2::text IS NULL OR p.key = $2)\n        ORDER BY CASE WHEN $3 = 'updated_desc' THEN t.updated_at END DESC,\n                 CASE WHEN $3 = 'updated_asc' THEN t.updated_at END ASC,\n                 CASE WHEN $3 = 'created_desc' THEN t.created_at END DESC,\n                 CASE WHEN $3 = 'updated_asc' THEN t.id END ASC,\n                 t.id DESC\n        ",
+  "query": "\n        SELECT t.id, t.key, t.title, t.title_source, p.key AS project_key,\n               p.name AS project_name, ps.id AS persona_id, ps.handle AS persona_handle,\n               ps.display_name AS persona_display_name,\n               t.status, t.status_line, t.resume_at,\n               COALESCE(sub.done, 0) AS \"subtasks_done!\", COALESCE(sub.total, 0) AS \"subtasks_total!\",\n               t.created_at, t.updated_at\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas ps ON ps.id = t.persona_id\n        LEFT JOIN LATERAL (\n            SELECT count(*) FILTER (WHERE s.status = ANY($4)) AS done,\n                   count(*) FILTER (WHERE s.status <> 'cancelled') AS total\n            FROM tasks s WHERE s.parent_id = t.id\n        ) sub ON true\n        WHERE t.kind = 'task'\n          AND ($1::text[] IS NULL OR t.status = ANY($1))\n          AND ($2::text IS NULL OR p.key = $2)\n        ORDER BY CASE WHEN $3 = 'updated_desc' THEN t.updated_at END DESC,\n                 CASE WHEN $3 = 'updated_asc' THEN t.updated_at END ASC,\n                 CASE WHEN $3 = 'created_desc' THEN t.created_at END DESC,\n                 CASE WHEN $3 = 'updated_asc' THEN t.id END ASC,\n                 t.id DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -71,17 +71,39 @@
       },
       {
         "ordinal": 6,
-        "name": "persona_name",
-        "type_info": "Text",
+        "name": "persona_id",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
             "table": "personas",
-            "name": "name"
+            "name": "id"
           }
         }
       },
       {
         "ordinal": 7,
+        "name": "persona_handle",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "handle"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "persona_display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
         "name": "status",
         "type_info": "Text",
         "origin": {
@@ -92,7 +114,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "status_line",
         "type_info": "Text",
         "origin": {
@@ -103,7 +125,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "resume_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,19 +136,19 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "subtasks_done!",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "subtasks_total!",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -137,7 +159,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -166,6 +188,8 @@
       false,
       false,
       false,
+      false,
+      false,
       true,
       null,
       null,
@@ -173,5 +197,5 @@
       false
     ]
   },
-  "hash": "936cf3503d313dd6c92eaa2958dec3121fb74cd64cc451e832a5c3a2436d8795"
+  "hash": "5b47ca658552c8c6ed78694e5e4e73b7f3a12db10637f5aafb2a4eda5fb90f66"
 }

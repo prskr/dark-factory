@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, description, system_prompt, harness, model, model_provider_id\n         FROM personas ORDER BY name",
+  "query": "SELECT id, handle, display_name, commit_email, description, system_prompt, harness, model,\n                model_provider_id\n         FROM personas ORDER BY handle",
   "describe": {
     "columns": [
       {
@@ -16,17 +16,39 @@
       },
       {
         "ordinal": 1,
-        "name": "name",
+        "name": "handle",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "personas",
-            "name": "name"
+            "name": "handle"
           }
         }
       },
       {
         "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "commit_email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "commit_email"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "description",
         "type_info": "Text",
         "origin": {
@@ -37,7 +59,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 5,
         "name": "system_prompt",
         "type_info": "Text",
         "origin": {
@@ -48,7 +70,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 6,
         "name": "harness",
         "type_info": "Text",
         "origin": {
@@ -59,7 +81,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "model",
         "type_info": "Text",
         "origin": {
@@ -70,7 +92,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "model_provider_id",
         "type_info": "Uuid",
         "origin": {
@@ -91,8 +113,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "5d536d4aab5386c54724316e3b9fc674a9e5702b4fe35c4d094739be6dc795df"
+  "hash": "2aeb93af6d1a38e7e55c7b67dfeaff783b9bb27aca75ee04dbea64786692cfe1"
 }

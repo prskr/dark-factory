@@ -68,7 +68,9 @@ fn input(name: &str, credential: Uuid) -> ModelProviderInput {
 
 fn persona(provider: Uuid) -> PersonaInput {
     PersonaInput {
-        name: "Linus".into(),
+        handle: "linus".into(),
+        display_name: "Linus".into(),
+        commit_email: "linus@example.org".into(),
         description: String::new(),
         system_prompt: "p".into(),
         harness: "claude-code".into(),

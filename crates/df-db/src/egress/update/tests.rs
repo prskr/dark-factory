@@ -53,8 +53,8 @@ async fn task(pool: &PgPool, project: Uuid, number: i64) -> Uuid {
     crate::model_providers::tests::seed_provider(pool).await;
     let persona = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, model, model_provider_id)
-         VALUES ($1, $1::text, 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))",
+        "INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id)
+         VALUES ($1, $1::text, $1::text, $1::text || '@example.org', 'x', 'test-model', (SELECT id FROM model_providers LIMIT 1))",
     )
     .bind(persona)
     .execute(pool)

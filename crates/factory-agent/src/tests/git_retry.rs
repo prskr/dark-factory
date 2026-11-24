@@ -63,7 +63,7 @@ fn workspace(upstream: &Path) -> Workspace {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-1".to_string(),
         wip_branch: "factory/wip/DF-1".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),

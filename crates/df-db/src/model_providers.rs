@@ -122,12 +122,12 @@ pub async fn get_model_provider(
 
 /// Names of the personas that use the provider, sorted.
 pub async fn personas_using(pool: &PgPool, id: Uuid) -> Result<Vec<String>, DbError> {
-    Ok(
-        sqlx::query_scalar("SELECT name FROM personas WHERE model_provider_id = $1 ORDER BY name")
-            .bind(id)
-            .fetch_all(pool)
-            .await?,
+    Ok(sqlx::query_scalar!(
+        "SELECT display_name FROM personas WHERE model_provider_id = $1 ORDER BY display_name",
+        id
     )
+    .fetch_all(pool)
+    .await?)
 }
 
 /// Creates (`id` is `None`) or updates a provider with its APIs and audits the change.
@@ -282,11 +282,11 @@ async fn personas_of_model<'e>(
     id: Uuid,
     model_id: &str,
 ) -> Result<Vec<String>, DbError> {
-    Ok(sqlx::query_scalar(
-        "SELECT name FROM personas WHERE model_provider_id = $1 AND model = $2 ORDER BY name",
+    Ok(sqlx::query_scalar!(
+        "SELECT display_name FROM personas WHERE model_provider_id = $1 AND model = $2 ORDER BY display_name",
+        id,
+        model_id
     )
-    .bind(id)
-    .bind(model_id)
     .fetch_all(executor)
     .await?)
 }
@@ -305,11 +305,12 @@ pub async fn delete_model_provider(
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| DbError::NotFound(format!("model provider `{id}`")))?;
-    let users: Vec<String> =
-        sqlx::query_scalar("SELECT name FROM personas WHERE model_provider_id = $1 ORDER BY name")
-            .bind(id)
-            .fetch_all(&mut *tx)
-            .await?;
+    let users: Vec<String> = sqlx::query_scalar!(
+        "SELECT display_name FROM personas WHERE model_provider_id = $1 ORDER BY display_name",
+        id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
     if !users.is_empty() {
         return Err(DbError::Conflict(format!(
             "model provider `{name}` is used by persona {}",

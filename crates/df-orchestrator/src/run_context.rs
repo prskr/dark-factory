@@ -46,7 +46,7 @@ impl ProjectInfo {
 #[derive(Debug, Clone)]
 pub struct PersonaInfo {
     pub id: PersonaId,
-    pub name: String,
+    pub display_name: String,
     pub system_prompt: String,
     pub harness: String,
     pub model: String,
@@ -125,7 +125,7 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         })?;
     let persona = PersonaInfo {
         id: task.persona_id,
-        name: persona.name,
+        display_name: persona.display_name,
         system_prompt: persona.system_prompt,
         harness: persona.harness,
         model: persona.model,

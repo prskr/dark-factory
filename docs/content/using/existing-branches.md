@@ -120,10 +120,10 @@ lease as long as the remote is still where the runtime left it. If the remote mo
 is reported as diverged.
 
 **Limit: commits by others cannot be rewritten.** The Git proxy requires every new commit to carry
-the instance's commit identity (`df:identity`). A rebase gives the commits of a bot branch new
-hashes but keeps their author, so a rebase of commits authored by Renovate or a human is rejected
-with `df:identity` (the run report shows `REJECTED_BY_CHECK`) and the remote branch stays
-unchanged. Rebase works for commits the factory made. On a bot branch, ask the bot to rebase (for
+the commit identity of the run's persona (`df:identity`). A rebase gives the commits of a bot branch
+new hashes but keeps their author, so a rebase of commits authored by Renovate, a human or another
+persona is rejected with `df:identity` (the run report shows `REJECTED_BY_CHECK`) and the remote
+branch stays unchanged. Rebase works for commits the run's own persona made. On a bot branch, ask the bot to rebase (for
 Renovate, comment on the pull request) and add the agent's fixes as new commits on top.
 
 Renovate stops managing a branch once the agent adds commits to it. Say so to reviewers in a

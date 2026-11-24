@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, description, system_prompt, harness, model, model_provider_id\n                 FROM personas WHERE id = $1 FOR UPDATE",
+  "query": "SELECT id, handle, display_name, commit_email, description, system_prompt, harness, model,\n                model_provider_id\n         FROM personas WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -16,17 +16,39 @@
       },
       {
         "ordinal": 1,
-        "name": "name",
+        "name": "handle",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "personas",
-            "name": "name"
+            "name": "handle"
           }
         }
       },
       {
         "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "commit_email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "commit_email"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "description",
         "type_info": "Text",
         "origin": {
@@ -37,7 +59,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 5,
         "name": "system_prompt",
         "type_info": "Text",
         "origin": {
@@ -48,7 +70,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 6,
         "name": "harness",
         "type_info": "Text",
         "origin": {
@@ -59,7 +81,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "model",
         "type_info": "Text",
         "origin": {
@@ -70,7 +92,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "model_provider_id",
         "type_info": "Uuid",
         "origin": {
@@ -93,8 +115,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "817c2c05b3a327786114abcc899bab8683ca592ea4976ce85a5522a59ef57039"
+  "hash": "8401967952a1461dd8a7a50a47f0be72662b49d07b464c1313a15bea850dffb5"
 }

@@ -146,7 +146,7 @@ async fn test_scenario_push_after_turn_with_commits_and_rejection() {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-1".to_string(),
         wip_branch: "factory/wip/DF-1".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
@@ -333,7 +333,7 @@ async fn test_scenario_finalize_uncommitted_work_and_secret_exclusion() {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-1".to_string(),
         wip_branch: "factory/wip/DF-1".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
@@ -526,7 +526,7 @@ async fn test_scenario_finalize_clean_worktree_deletes_remote_wip() {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-1".to_string(),
         wip_branch: "factory/wip/DF-1".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
@@ -687,7 +687,7 @@ async fn test_scenario_finalize_wip_size_cap_exceeded() {
         base_branch: "main".to_string(),
         task_branch: "factory/task/DF-1".to_string(),
         wip_branch: "factory/wip/DF-1".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
@@ -901,7 +901,7 @@ async fn test_wip_snapshot_keeps_tracked_secret_file_edits() {
         base_branch: "main".to_string(),
         task_branch: "main".to_string(),
         wip_branch: "factory/wip/DF-3".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
@@ -935,6 +935,67 @@ async fn test_wip_snapshot_keeps_tracked_secret_file_edits() {
 }
 
 #[tokio::test]
+async fn the_wip_snapshot_commit_carries_the_assign_identity() {
+    use crate::git::Git;
+    use crate::workspace::{FinalizeParams, finalize_workspace};
+    use df_proto::agent::v1::{RunOutcome, Workspace};
+
+    let temp = tempfile::tempdir().unwrap();
+    let upstream = setup_test_remote_repo(temp.path());
+    let local = temp.path().join("local");
+    let runtime_dir = temp.path().join("runtime");
+    let hooks = temp.path().join("hooks-empty");
+    std::fs::create_dir_all(&runtime_dir).unwrap();
+    std::fs::create_dir_all(&hooks).unwrap();
+    clone_for_workspace_test(&upstream, &local);
+    let git = Git::new(&local)
+        .allow_protocols(["https", "file"])
+        .with_hooks_empty_dir(&hooks);
+    std::fs::write(local.join("notes.txt"), "uncommitted\n").unwrap();
+    let workspace = Workspace {
+        repo_url: format!("file://{}", upstream.display()),
+        base_branch: "main".to_string(),
+        task_branch: "main".to_string(),
+        wip_branch: "factory/wip/DF-3".to_string(),
+        commit_identity: super::identity(),
+        ..Default::default()
+    };
+    let params = FinalizeParams {
+        repo_dir: &local,
+        runtime_dir: &runtime_dir,
+        workspace: &workspace,
+        run_id: "run-identity",
+        outcome: RunOutcome::Completed,
+        detail: "",
+        harness_session_id: "",
+        hooks_path: &hooks,
+        ssl_ca_info: None,
+        wip_size_cap_bytes: 10 * 1024 * 1024,
+        diverged: false,
+    };
+
+    finalize_workspace(&git, &params, &mut Some(git.current_head().await.unwrap()))
+        .await
+        .expect("finalize");
+
+    let log = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&upstream)
+        .args([
+            "log",
+            "-1",
+            "--format=%an <%ae>|%cn <%ce>",
+            "factory/wip/DF-3",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&log.stdout).trim(),
+        "Linus <linus@example.org>|Linus <linus@example.org>"
+    );
+}
+
+#[tokio::test]
 async fn test_wip_snapshot_excludes_quoted_and_glob_like_secret_names() {
     use crate::git::Git;
     use crate::workspace::{FinalizeParams, finalize_workspace};
@@ -962,7 +1023,7 @@ async fn test_wip_snapshot_excludes_quoted_and_glob_like_secret_names() {
         base_branch: "main".to_string(),
         task_branch: "main".to_string(),
         wip_branch: "factory/wip/DF-41".to_string(),
-        commit_identity: None,
+        commit_identity: super::identity(),
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),

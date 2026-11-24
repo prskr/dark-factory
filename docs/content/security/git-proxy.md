@@ -66,7 +66,7 @@ checked again):
 | Check | Finding | Configurable per project |
 | --- | --- | --- |
 | Secret scan | `df:secret-scan`: rule, path, line and a masked preview; the secret itself is never stored or logged | mode `approval` (default) or `reject` |
-| Commit identity | `df:identity`: author and committer must be the instance's commit identity | no, always enforced |
+| Commit identity | `df:identity`: author and committer email must be the commit email of the run's persona | no, always enforced |
 | Hidden paths | `df:hidden-path`: a change to a path below a hidden glob (see [Hide files from agents](../using/hidden-paths.md)); also on the WIP branch | globs (default none); always `reject`, no exception request |
 | Protected paths | `df:protected-path`: a change below a protected glob; `.dark-factory/**` is always protected | globs (default CI workflow directories and `CODEOWNERS`) and mode |
 | Blob size | `df:blob-too-large`: a file larger than the limit | limit (default 5 MiB) and mode |

@@ -113,6 +113,7 @@ impl Scenario {
             base_branch: base.to_string(),
             task_branch: task.to_string(),
             wip_branch: "factory/wip/DF-21".to_string(),
+            commit_identity: super::identity(),
             ..Default::default()
         }
     }

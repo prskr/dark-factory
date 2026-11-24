@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT p.id AS project_id, p.key AS project_key, p.repo_url,\n               t.id AS task_id, t.key AS task_key,\n               pe.id AS persona_id, pe.name AS persona_name,\n               r.id AS \"run_id?\", r.number AS \"run_number?\",\n               now() AS \"occurred_at!\"\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas pe ON pe.id = t.persona_id\n        LEFT JOIN runs r ON r.id = $2 AND r.task_id = t.id\n        WHERE t.id = COALESCE($1, (SELECT task_id FROM runs WHERE id = $2))\n        ",
+  "query": "\n        SELECT p.id AS project_id, p.key AS project_key, p.repo_url,\n               t.id AS task_id, t.key AS task_key,\n               pe.id AS persona_id, pe.display_name AS persona_display_name,\n               r.id AS \"run_id?\", r.number AS \"run_number?\",\n               now() AS \"occurred_at!\"\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas pe ON pe.id = t.persona_id\n        LEFT JOIN runs r ON r.id = $2 AND r.task_id = t.id\n        WHERE t.id = COALESCE($1, (SELECT task_id FROM runs WHERE id = $2))\n        ",
   "describe": {
     "columns": [
       {
@@ -71,12 +71,12 @@
       },
       {
         "ordinal": 6,
-        "name": "persona_name",
+        "name": "persona_display_name",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "personas",
-            "name": "name"
+            "name": "display_name"
           }
         }
       },
@@ -128,5 +128,5 @@
       null
     ]
   },
-  "hash": "bb561da747aa5b470070fc5d84eaefce9affbfec3baf6494224ab3738fd3afb1"
+  "hash": "242b940f16b83a1ae06a5166d1ce80e07a4e577b2103bc6408b21dfc8286dc81"
 }

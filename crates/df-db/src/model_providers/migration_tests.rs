@@ -121,8 +121,8 @@ async fn personas_accept_the_opencode_harness() {
     let (pool, provider) = before(Some("m")).await;
     crate::MIGRATOR.run(&pool).await.unwrap();
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, harness, model, model_provider_id) \
-         VALUES ($1, 'Ada', 'p', 'opencode', 'm', $2)",
+        "INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, harness, model, model_provider_id) \
+         VALUES ($1, 'Ada', 'ada', 'ada@example.org', 'p', 'opencode', 'm', $2)",
     )
     .bind(Uuid::now_v7())
     .bind(provider)

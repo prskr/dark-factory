@@ -15,7 +15,7 @@ async fn seed_run(pool: &PgPool) -> RunId {
     .unwrap();
     crate::model_providers::tests::seed_provider(pool).await;
     sqlx::query(
-        "INSERT INTO personas (id, name, system_prompt, harness, model, model_provider_id) VALUES ($1, 'Linus', '', 'claude-code', 'test-model', (SELECT id FROM model_providers LIMIT 1))",
+        "INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, harness, model, model_provider_id) VALUES ($1, 'Linus', 'linus', 'linus@example.org', '', 'claude-code', 'test-model', (SELECT id FROM model_providers LIMIT 1))",
     )
     .bind(persona)
     .execute(pool)

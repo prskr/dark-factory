@@ -75,7 +75,7 @@ pub(crate) async fn load_selected(
     detail: TaskDetail,
 ) -> Result<Selected, df_db::DbError> {
     let id = TaskId::from_uuid(detail.id);
-    let folder = load_folder(state, id, &detail.persona_name).await?;
+    let folder = load_folder(state, id, crate::task_pages::persona_label(&detail)).await?;
     let base_branch = df_db::base_branch(&state.pool, id).await?;
     let requests = crate::requests::task_cards(state, id, &detail.key, &detail.title).await?;
     let artifacts = crate::artifacts::load_cards(state, id).await?;
@@ -216,7 +216,7 @@ fn chat_columns(s: &Selected, show_hidden: bool) -> Markup {
                     @if task.archived_at.is_some() {
                         (archived_notice(key))
                     } @else {
-                        (message_area(key, &task.persona_name, task.status, &s.data.runs, &s.data.pending, show_hidden))
+                        (message_area(key, &task.persona_display_name, task.status, &s.data.runs, &s.data.pending, show_hidden))
                     }
                 }
                 (crate::artifacts::split_pane())

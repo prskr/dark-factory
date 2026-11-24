@@ -125,6 +125,10 @@ mod tests {
             base_branch: "main".into(),
             task_branch: "factory/task/DF-7".into(),
             rewrite_policy: df_core::RewritePolicy::WithLease,
+            commit_identity: df_core::CommitIdentity {
+                name: "Linus".into(),
+                email: "linus@example.org".into(),
+            },
             forge_credential: None,
         }
     }

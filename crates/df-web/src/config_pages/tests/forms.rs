@@ -99,7 +99,9 @@ async fn forms_end_with_cancel_and_a_named_primary_action_at_the_bottom_right() 
     let provider = seed_provider(&app.pool).await.to_string();
     seed(&app.pool).await;
     let persona = form(&[
-        ("name", "Ada"),
+        ("display_name", "Ada"),
+        ("handle", "ada"),
+        ("commit_email", "ada@example.org"),
         ("system_prompt", "x"),
         ("model", "claude-sonnet-5-5"),
         ("model_provider_id", &provider),
@@ -111,7 +113,7 @@ async fn forms_end_with_cancel_and_a_named_primary_action_at_the_bottom_right() 
         &cookie,
     )
     .await;
-    let persona_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas WHERE name = 'Ada'")
+    let persona_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas WHERE handle = 'ada'")
         .fetch_one(&app.pool)
         .await
         .unwrap();

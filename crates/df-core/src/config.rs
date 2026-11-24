@@ -549,15 +549,14 @@ impl Default for SandboxProvisioningConfig {
     }
 }
 
-/// Agent port settings: server certificate, commit identity and Git credential user name.
+/// Agent port settings: server certificate and Git credential user name. The commit identity is
+/// the run's persona identity, not an instance setting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentConfig {
     /// Server certificate and client CA for the mTLS agent port. Required by `serve`.
     #[serde(default)]
     pub tls: Option<AgentTlsConfig>,
-    #[serde(default)]
-    pub commit_identity: CommitIdentityConfig,
     /// User name sent with the project's forge token in a Git credential grant.
     #[serde(default = "default_git_username")]
     pub git_username: String,
@@ -567,7 +566,6 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             tls: None,
-            commit_identity: CommitIdentityConfig::default(),
             git_username: default_git_username(),
         }
     }
@@ -581,25 +579,6 @@ pub struct AgentTlsConfig {
     pub cert_file: PathBuf,
     pub key_file: PathBuf,
     pub client_ca_file: PathBuf,
-}
-
-/// Author and committer identity of commits made by agents.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CommitIdentityConfig {
-    #[serde(default = "default_commit_name")]
-    pub name: String,
-    #[serde(default = "default_commit_email")]
-    pub email: String,
-}
-
-impl Default for CommitIdentityConfig {
-    fn default() -> Self {
-        Self {
-            name: default_commit_name(),
-            email: default_commit_email(),
-        }
-    }
 }
 
 /// Name of the Claude Code harness (persona `harness` value, key of the harness image map).
@@ -1177,14 +1156,6 @@ pub fn read_secret_file(path: &Path) -> Result<SecretString, ConfigError> {
 
 fn default_git_username() -> String {
     "dark-factory".to_string()
-}
-
-fn default_commit_name() -> String {
-    "Dark Factory".to_string()
-}
-
-fn default_commit_email() -> String {
-    "dark-factory@localhost".to_string()
 }
 
 /// The adapter version is the tag of the harness image (`deploy/images/claude-harness`).

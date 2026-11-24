@@ -97,7 +97,7 @@ Snapshot content: every run in a non-terminal state with a `pod_ip`, with the `h
 
 - upstream: the project's repository URL; a repository that is not `https://` gets no route (warning), unless it is `http://` and `network.allowPlainHttp` is on,
 - `refs/heads/<base branch>`, `refs/heads/factory/task/<KEY>`, `refs/heads/factory/wip/<KEY>`,
-- commit identity `agent.commitIdentity`,
+- commit identity: the run's persona identity (display name and commit email, as frozen on the run when it was created),
 - `credential_ref`: the id of the project's forge credential reference (empty without one).
 
 `forge_credentials` holds each referenced credential once: user name `agent.gitUsername`, password read through the secret store on every rebuild. A credential that cannot be read is left out with a warning (never the value); its routes stay, so the Git proxy answers their requests with its own error.
@@ -264,7 +264,7 @@ Board members set the policy in the web UI: **Projects → Edit (pencil) → Sec
 | Blob size limit: mode | Ask for approval | As above, for `df:blob-too-large` findings. |
 | Linear history | off | On: merge commits are `df:merge-commit` findings (always `Reject`). |
 
-Always on, whatever the policy: the commit identity (`df:identity`) and changes to `.dark-factory/**` (`df:protected-path`, `Reject`).
+Always on, whatever the policy: the commit identity (`df:identity`: author and committer email equal the commit email of the run's persona in `GitRoute.commit_email`, so rewriting commits of another persona or a human is rejected) and changes to `.dark-factory/**` (`df:protected-path`, `Reject`).
 
 - Saving validates every glob; an invalid one keeps the form open with the error on the field, for example `Line 5: "deploy/[" is not a valid glob (unclosed character class).`
 - A changed policy is written to the audit log (`push_policy.create` or `push_policy.update`, label = project key, `before` and `after`) and publishes `egress_policy`, so gateways get it with the next snapshot (within a second) and the next push of the project's tasks is checked against it. Saving an unchanged policy writes nothing; saving the defaults for a project without a row stores none.

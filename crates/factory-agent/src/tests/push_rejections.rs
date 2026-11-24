@@ -66,7 +66,7 @@ impl RejectingRemote {
             base_branch: "main".into(),
             task_branch: TASK_BRANCH.into(),
             wip_branch: "factory/wip/DF-1".into(),
-            commit_identity: None,
+            commit_identity: super::identity(),
             git_hooks: vec![],
             git_config: vec![],
             hidden_paths: Vec::new(),

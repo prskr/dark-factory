@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason\n        FROM runs\n        WHERE state <> ALL($1)\n          AND (\n            (stop_requested_at IS NOT NULL AND state = ANY($2))\n            OR (stop_requested_at IS NOT NULL AND $3::bigint IS NOT NULL\n                AND stop_requested_at + $3::bigint * interval '1 second' < $4)\n            OR (state = ANY($2) AND $5::bigint IS NOT NULL\n                AND started_at + $5::bigint * interval '1 second' < $4)\n            OR (state = ANY($6) AND $7::bigint IS NOT NULL\n                AND COALESCE(connected_at, started_at) + $7::bigint * interval '1 second' < $4)\n          )\n        ORDER BY started_at\n        ",
+  "query": "\n        SELECT id, task_id, number, state, outcome, detail, pod_ip, last_persisted_seq,\n               harness_session_id, started_at, connected_at, stop_requested_at, finalize_reason,\n               commit_name, commit_email\n        FROM runs\n        WHERE state = ANY($1) AND started_at < $2 AND stop_requested_at IS NULL\n        ORDER BY started_at\n        ",
   "describe": {
     "columns": [
       {
@@ -145,17 +145,34 @@
             "name": "finalize_reason"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "commit_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "commit_name"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "commit_email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "commit_email"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "TextArray",
-        "TextArray",
-        "Int8",
-        "Timestamptz",
-        "Int8",
-        "TextArray",
-        "Int8"
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -171,8 +188,10 @@
       false,
       true,
       true,
-      true
+      true,
+      false,
+      false
     ]
   },
-  "hash": "e434941224925c83aff40b272a7076e7f57e98b5f75dccc542a83bbb2c8b1395"
+  "hash": "8e1cef91c168f3e68d1c8bf17d9e9608f125a5189cba04f68f0ffcc5a9c4ecf2"
 }

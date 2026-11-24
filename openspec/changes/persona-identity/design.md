@@ -30,6 +30,9 @@ Motivation: see `proposal.md`. Requirements: see `specs/`.
 
 When a run is created, the persona's display name and commit email are copied onto the run row (`runs.commit_name`, `runs.commit_email`, both NOT NULL). `Assign` and the gateway snapshot both read the identity from the run, not from the persona.
 
+- How: a `BEFORE INSERT` trigger on `runs` (`runs_freeze_commit_identity`) fills both columns from the task's persona when the insert leaves them NULL. `runs::start_queued_runs` does not name the columns; a comment there points at the trigger. Why a trigger and not an explicit copy: it covers every path that creates a run (the scheduler, chat starts, seeds and tests with raw SQL) in one place, so no insert can leave a run without an identity. The cost is that the copy is not visible in the Rust insert and run creation reads `personas` in the database. A migration step backfills existing runs from their persona.
+- In Rust the pair is one value, `df_core::CommitIdentity { name, email }`, carried by `RunRow` and `ActiveRun` and turned into the proto types of `Assign` and the Git route at the edge.
+
 - Creation is the run's start: the scheduler inserts the run row in the same transaction as the task's `RunStarted` event (`runs::start_queued_runs`, which also sets `started_at`). `pending` is the first state of a started run, not a queue, so "at the run's start" and "at creation" are the same moment.
 
 - Why: the gateway snapshot is rebuilt continuously. If it read the persona live, an identity edit during a run would make the snapshot expect the new email while the sandbox keeps committing with the old one, and `df:identity` would reject every push. Freezing on the run gives the spec's "identity at the run's start" in one place.
@@ -41,7 +44,7 @@ The migration:
 1. Renames `name` to `display_name` and drops its unique constraint.
 2. Adds `handle` and `commit_email`.
 3. Backfills both in a PL/pgSQL `DO` block that walks the personas ordered by `created_at, id`. The slug comes from `regexp_replace` on `lower(display_name)`, cut to 39 characters, with `persona` when the result is empty. If a persona already processed holds the slug, the block tries `-2`, `-3`, â€¦ and cuts the slug to `39 - length(suffix)` characters (trailing `-` trimmed) before appending, until the handle is free. Checking against every handle assigned so far, not per slug group, keeps `Ada`, `ADA!` and `Ada-2` distinct (`ada`, `ada-2`, `ada-2-2`). The email is `<handle>@dark-factory.localhost`. The display name is the old name with control characters, `<` and `>` removed, trimmed and cut to 100 characters, or the handle when nothing is left. Today's form only requires a non-blank name, so such names can exist.
-4. Sets both columns NOT NULL with unique constraints, plus a CHECK on the handle pattern.
+4. Sets both columns NOT NULL with unique constraints, plus a CHECK on the handle pattern (`personas_handle_format`) and a CHECK on the email (`personas_commit_email_format`: one `@`, no `<`, `>`, `,`, whitespace or control characters, at most 254 characters).
 
 - Why: renaming keeps the existing values and the audit history readable. Uniqueness in the database also catches concurrent saves, and the form maps a unique violation to a field error naming the other persona.
 - The handle CHECK duplicates the validation in `df-core` on purpose: the database is the last line for data that tools read.
@@ -57,7 +60,7 @@ A `PersonaIdentity { handle, display_name, commit_email }` value type with const
 - display name: length, and no control characters, `<`, `>` or newline, because these would corrupt `user.name` in git config and commit headers;
 - email: one `@`, no whitespace, `<`, `>` or `,`, at most 254 characters, lowercased.
 
-The web form and the DB layer use the same type. No new dependency: the checks are character tests, not a full RFC 5322 parser. An address the forge rejects shows up when the operator registers it.
+`save_persona` validates every save through `PersonaIdentity::new` and stores the normalized values (trimmed name, lower-case email); an invalid identity is `DbError::InvalidPersonaIdentity`. The web form uses the same per-part parsers (`parse_handle`, `parse_display_name`, `parse_email`), because it shows each error at its own field. No new dependency: the checks are character tests, not a full RFC 5322 parser. An address the forge rejects shows up when the operator registers it.
 
 ### D5: The avatar is a server-rendered component
 
@@ -67,7 +70,7 @@ The avatar is a `df-web` partial that renders a `<span role="img" aria-label="â€
 
 ### D6: Remove the fallbacks
 
-- `agent.commitIdentity` is removed from config, Helm values and docs.
+- `agent.commitIdentity` is removed from the instance configuration (an unknown field now) and from the docs. The Helm chart has no value for it.
 - factory-agent drops `DEFAULT_COMMIT_AUTHOR_*` and fails the run before preparing the workspace when `commit_identity` is missing or has an empty field.
 - The proto field stays as it is. Only its comment changes to "the run's persona identity".
 

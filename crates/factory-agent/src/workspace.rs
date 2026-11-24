@@ -17,8 +17,7 @@ use df_proto::transcript::v1::{Notice, NoticeLevel};
 use df_sandbox_contract::glob::{GlobSet, hidden_glob_set};
 
 use crate::git::{
-    DEFAULT_COMMIT_AUTHOR_EMAIL, DEFAULT_COMMIT_AUTHOR_NAME, Force, Git, GitConfigParams,
-    nul_separated, proxy_ca_override, rewrite_git_config, shown_args,
+    Force, Git, GitConfigParams, nul_separated, proxy_ca_override, rewrite_git_config, shown_args,
 };
 use crate::hidden_paths;
 
@@ -99,22 +98,30 @@ async fn force_for(git: &Git, workspace: &Workspace, head: &str) -> Force {
     }
 }
 
-/// Builds the runtime-owned git config parameters for a workspace.
+/// Builds the runtime-owned git config parameters for a workspace. Every commit of the run, the
+/// harness's and the WIP snapshots, carries the persona identity of the `Assign`; a run without
+/// one is an error, there is no fallback author.
 fn config_params<'a>(
     workspace: &'a Workspace,
     hooks_path: &'a Path,
     ssl_ca_info: Option<&'a Path>,
-) -> GitConfigParams<'a> {
-    let identity = workspace.commit_identity.as_ref();
-    GitConfigParams {
+) -> anyhow::Result<GitConfigParams<'a>> {
+    let identity = workspace
+        .commit_identity
+        .as_ref()
+        .filter(|identity| !identity.name.trim().is_empty() && !identity.email.trim().is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("the assignment has no commit identity (name and email) for the run")
+        })?;
+    Ok(GitConfigParams {
         repo_url: &workspace.repo_url,
-        commit_author_name: identity.map_or(DEFAULT_COMMIT_AUTHOR_NAME, |c| c.name.as_str()),
-        commit_author_email: identity.map_or(DEFAULT_COMMIT_AUTHOR_EMAIL, |c| c.email.as_str()),
+        commit_author_name: &identity.name,
+        commit_author_email: &identity.email,
         hooks_path,
         ssl_ca_info,
         extra_config: &workspace.git_config,
         hidden_paths: &workspace.hidden_paths,
-    }
+    })
 }
 
 /// Prepares the repository workspace before a run begins.
@@ -132,7 +139,7 @@ pub async fn prepare_workspace(
     hooks_path: &Path,
     ssl_ca_info: Option<&Path>,
 ) -> anyhow::Result<PrepareResult> {
-    let config_params = config_params(workspace, hooks_path, ssl_ca_info);
+    let config_params = config_params(workspace, hooks_path, ssl_ca_info)?;
     if workspace.read_only {
         prepare_read_only(git, repo_dir, workspace, &config_params).await
     } else if repo_dir.join(".git").exists() {
@@ -799,7 +806,7 @@ pub async fn finalize_workspace(
     let workspace = params.workspace;
 
     // 1. Rewrite .git/config
-    let config_params = config_params(workspace, params.hooks_path, params.ssl_ca_info);
+    let config_params = config_params(workspace, params.hooks_path, params.ssl_ca_info)?;
     rewrite_git_config(params.repo_dir, &config_params)?;
 
     if workspace.read_only {

@@ -91,9 +91,6 @@ pub fn is_transient_git_failure(output: &str) -> bool {
     TRANSIENT_FAILURE_MARKERS.iter().any(|m| has(m))
 }
 
-pub const DEFAULT_COMMIT_AUTHOR_NAME: &str = "Dark Factory Agent";
-pub const DEFAULT_COMMIT_AUTHOR_EMAIL: &str = "agent@dark-factory.internal";
-
 /// Parameters for rendering the runtime-owned `.git/config`.
 #[derive(Debug, Clone)]
 pub struct GitConfigParams<'a> {

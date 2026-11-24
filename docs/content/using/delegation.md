@@ -14,8 +14,8 @@ Every task of an agent gets four more [factory tools](../architecture/agent-runs
 
 | Tool | What it does |
 | --- | --- |
-| `list_personas` | Returns the name and the [description](setup.md#personas) of every persona, ordered by name. |
-| `create_task` | Creates a task in the project of the caller with `persona`, `title`, `prompt`, optional `depends_on`, optional `base_task` ([below](#base-task)), optional `issue` ([below](#link-an-issue)) and optional `branch` (an [existing branch](existing-branches.md) that matches the project's [agent branches](existing-branches.md#agent-branches); not together with `base_task`). The caller becomes the **parent**. Returns the key and the status of the new task. Fails when a [limit](#limits) is reached. |
+| `list_personas` | Returns the handle, the display name and the [description](setup.md#personas) of every persona, ordered by handle. |
+| `create_task` | Creates a task in the project of the caller with `persona` (the **handle**, for example `reviewer`; a display name is an error that says so), `title`, `prompt`, optional `depends_on`, optional `base_task` ([below](#base-task)), optional `issue` ([below](#link-an-issue)) and optional `branch` (an [existing branch](existing-branches.md) that matches the project's [agent branches](existing-branches.md#agent-branches); not together with `base_task`). The caller becomes the **parent**. Returns the key and the status of the new task. Fails when a [limit](#limits) is reached. |
 | `send_message` | Queues a message on a child of the caller, with the same effect as your message in the task view. The caller cannot message any other task. |
 | `merge_subtask_pr` | Merges the pull request of a subtask into the caller's own task branch ([below](#merge-subtask-pull-requests)). Only if the project's `subtask_merge` setting is *Parent agent*. |
 
@@ -173,7 +173,8 @@ sequenceDiagram
     I-->>C: wake: DG-2 completed
 ```
 
-1. Describe the work to the coordinator persona. It calls `list_personas`, then `create_task` for
+1. Describe the work to the coordinator persona. It calls `list_personas`, then `create_task` (with
+   the handles of the personas) for
    the implementation and for the review with `depends_on: [{task: "DG-2", kind: "completion"}]`,
    and ends its turn. The review shows `awaiting dependencies`.
 2. The implementation completes. The review is released in the same transaction and the coordinator
@@ -208,3 +209,11 @@ descendants ([Tasks](tasks.md#interrupt-stop-mark-done-cancel)).
 
 There is no limit on relayed messages between a parent and its children; watch the transcript and
 cancel a task that runs away. A persona is not restricted in whom it may delegate to.
+
+## Commits of other personas
+
+Every commit carries the identity of the persona whose run made it
+([Give a persona its identity](setup.md#give-a-persona-its-identity)). A child that builds on the
+branch of another persona (`base_task`) adds commits on top; rewriting the commits of the other
+persona (a rebase or an amend of them) is rejected by the Git proxy with `df:identity`, as is the
+rewrite of commits by a human or a bot. Give such work to the persona that wrote the commits.
