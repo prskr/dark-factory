@@ -82,11 +82,15 @@ When a cluster target of the run is temporarily unresolvable and has no earlier 
 - **THEN** the run ends `connect_timeout` and the task is resumed or failed per "Automatic resume after infrastructure failures"
 
 ### Requirement: Assign content
-`Assign` SHALL contain the task reference, the workspace (repo URL through the gateway's Git proxy, base branch, task and WIP branch, the instance's commit identity), the persona's system prompt and ACP harness (adapter command, non-secret env, model, settings), the factory tools v2, budgets from instance configuration and the continuation. The adapter command SHALL be the project's, otherwise the instance's default.
+`Assign` SHALL contain the task reference, the workspace (repo URL through the gateway's Git proxy, base branch, task and WIP branch, the commit identity of the task's persona), the persona's system prompt and ACP harness (adapter command, non-secret env, model, settings), the factory tools v2, budgets from instance configuration and the continuation. The adapter command SHALL be the project's, otherwise the instance's default.
 
 #### Scenario: Assign for DF-1
 - **WHEN** run 1 of `DF-1` connects
 - **THEN** `Assign.workspace.task_branch` is `factory/task/DF-1` and `Assign.tools` contains exactly the seven factory tools v2, including `request_approval`
+
+#### Scenario: Persona commit identity
+- **WHEN** run 1 of `DF-1` with persona `linus` ("Linus", `linus@example.org`) connects
+- **THEN** `Assign.workspace.commit_identity` has name "Linus" and email `linus@example.org`
 
 #### Scenario: Default adapter command
 - **WHEN** a run of a project without an adapter command connects

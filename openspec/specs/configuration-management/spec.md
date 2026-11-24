@@ -71,14 +71,14 @@ The adapter command field of a project SHALL use shell-style quoting: arguments 
 - **THEN** the form shows a validation error at Adapter command and nothing is stored
 
 ### Requirement: Personas
-Board members SHALL list, create and edit personas with name, system prompt, harness (`claude-code` or `opencode`), a required model provider and a required model of that provider, both compatible with the harness. A persona SHALL NOT have an adapter command.
+Board members SHALL list, create and edit personas with a persona identity (handle, display name, commit email; see `persona-identity`), system prompt, harness (`claude-code` or `opencode`), a required model provider and a required model of that provider, both compatible with the harness. A persona SHALL NOT have an adapter command. The form SHALL show a live preview of the generated avatar.
 
 #### Scenario: Create a persona
-- **WHEN** a board member creates persona "Linus" with a system prompt, model provider "Claude subscription" and model `claude-sonnet-5-5`
+- **WHEN** a board member creates persona `linus` with display name "Linus", email `linus@example.org`, a system prompt, model provider "Claude subscription" and model `claude-sonnet-5-5`
 - **THEN** the persona is stored and can be selected when creating a task
 
 #### Scenario: Create an OpenCode persona
-- **WHEN** a board member creates persona "Ada" with harness `opencode`, model provider "Go" and model `glm-5.3`
+- **WHEN** a board member creates persona `ada` with display name "Ada", email `ada@example.org`, harness `opencode`, model provider "Go" and model `glm-5.3`
 - **THEN** the persona is stored and its runs start OpenCode
 
 #### Scenario: Model is required
@@ -92,6 +92,18 @@ Board members SHALL list, create and edit personas with name, system prompt, har
 #### Scenario: No adapter command on the form
 - **WHEN** a board member opens the persona form
 - **THEN** it has no adapter command field
+
+#### Scenario: Avatar preview
+- **WHEN** a board member types display name "Code Reviewer" in the persona form
+- **THEN** the avatar preview shows "CR" without a page reload
+
+#### Scenario: Identity fields on the form
+- **WHEN** a board member opens the persona form
+- **THEN** it shows the avatar preview, the fields "Display name", "Handle" (prefixed with `@`) and "Commit email", and below the email the hint "Author and committer of this persona's commits. Edits apply to runs started after saving."
+
+#### Scenario: Duplicate email on the form
+- **WHEN** a board member saves a persona with an email that persona `linus` already uses
+- **THEN** the email field shows "Already used by @linus."
 
 #### Scenario: Existing persona after the upgrade
 - **WHEN** persona "Linus" referenced harness credential `claude` before the upgrade
@@ -257,11 +269,11 @@ While a board member types the repository URL or the issue tracker URL in the pr
 - **THEN** the field shows the generic Git icon and the hint says no forge integration applies
 
 ### Requirement: Persona cards
-The persona list SHALL show each persona as a card with its name, harness, model (or "default"), the start of its system prompt and its harness credential reference.
+The persona list SHALL be ordered by handle and show each persona as a card with its avatar, display name, `@handle`, commit email, harness and model, and the start of its system prompt.
 
 #### Scenario: Persona card
-- **WHEN** persona "Linus" with model `opus` and credential `anthropic-api` exists
-- **THEN** its card shows "Linus", "Claude Code · opus", the first lines of its prompt and `anthropic-api`
+- **WHEN** persona `linus` with display name "Linus", email `linus@example.org`, harness `claude-code` and model `opus` exists
+- **THEN** its card shows the avatar "L", "Linus", "@linus", `linus@example.org`, "Claude Code · opus" and the first lines of its prompt
 
 ### Requirement: Configuration forms as modals
 Creating a project or a model provider, and creating and editing a persona or credential reference, SHALL happen in a modal over the corresponding list (a full-height sheet below 768 px). A validation error SHALL keep the modal open with the entered values and the error at the field. Saving a persona or credential reference SHALL close the modal and update the list without a full page load. Creating a project or a model provider SHALL close the modal and open the new item's settings page.
