@@ -19,7 +19,7 @@
 
 #### Scenario: Truncated
 - **WHEN** the plugin stops at its listing limit
-- **THEN** the result has `truncated: true` and a `next_cursor`
+- **THEN** the result has `truncated: true`, and a `next_cursor` unless a forge's search cap ended the listing
 
 #### Scenario: Untrusted content
 - **WHEN** the tool descriptors are built

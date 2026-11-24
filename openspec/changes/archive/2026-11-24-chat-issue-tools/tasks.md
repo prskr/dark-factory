@@ -45,7 +45,7 @@
 ## 7. Docs
 
 - [x] 7.1 Update the published docs: the tool table in `docs/content/architecture/agent-runs.md` (both tools, chat-only, approval, untrusted content; the `issue` argument of `create_task`), the chat page `docs/content/using/chats.md` (tool list, what members can ask for, approving an issue), `docs/content/using/delegation.md` (the `issue` argument and that comments on a linked issue can wake the child under the project's wake policy), `docs/content/using/requests.md` (new approval type `create-issue` in the table), and `product/iterations/roadmap.md` (the backlog rows "Agents manage issues", "Link an issue to an existing task" and "Issue tracker separate from the forge" are added with this proposal; check they still match; per-persona tool permissions are the existing "Full permission model" row); verify with `just docs-build`
-- [ ] 7.2 Update `openspec/specs/task-delegation` and the other main specs by syncing the deltas of this change at archive time (`openspec-sync-specs`); verify the main specs contain the new requirements
+- [x] 7.2 Update `openspec/specs/task-delegation` and the other main specs by syncing the deltas of this change at archive time (`openspec-sync-specs`); verify the main specs contain the new requirements
 
 ## 8. Integration checks
 
