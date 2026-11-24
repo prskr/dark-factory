@@ -203,6 +203,15 @@ async fn one_tap_on_a_suggested_answer_answers_the_question() {
 }
 
 #[tokio::test]
+async fn request_card_inline_code_uses_panel_background() {
+    let f = fixture().await;
+    f.ask("Use `cargo`?", &[]).await;
+    f.approval("runs `cargo`").await;
+    let page = f.page("/requests").await;
+    assert_eq!(page.matches("md-body md-request").count(), 2, "{page}");
+}
+
+#[tokio::test]
 async fn card_inputs_use_the_shared_input_class() {
     let f = fixture().await;
     f.ask("Postgres?", &[]).await;
