@@ -1,18 +1,18 @@
-# Function length limit enforced by `clippy::too_many_lines` (see AGENTS.md, "File structure").
+# Function length limit enforced by `clippy::too_many_lines` (see CODING_STANDARDS.md, "File structure").
 too-many-lines-threshold = 100
 
-# Test code may unwrap, panic, index, print and use `dbg!` (see AGENTS.md, "Tests").
+# Test code may unwrap, panic, index, print and use `dbg!` (see CODING_STANDARDS.md, "Tests").
 allow-unwrap-in-tests = true
 allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
 allow-dbg-in-tests = true
 allow-print-in-tests = true
 # Block nesting limit of `clippy::excessive_nesting`; measured hits before the refactoring:
-# threshold 4: 106 (51 production / 55 test), 5: 25 (12 / 13), 6: 6 (5 / 1); see AGENTS.md,
-# "File structure".
+# threshold 4: 106 (51 production / 55 test), 5: 25 (12 / 13), 6: 6 (5 / 1); see
+# CODING_STANDARDS.md, "File structure".
 excessive-nesting-threshold = 5
 
-# Tests and tools use `tempfile` for temporary files (AGENTS.md, "Tests").
+# Tests and tools use `tempfile` for temporary files (CODING_STANDARDS.md, "Tests").
 #
 # Database access only via `df-db` (AGENTS.md, "Database access"): `df-db`, `df-e2e` and
 # `df-test-postgres` opt out at crate level, `df-web/src/auth/store.rs` at module level, test code

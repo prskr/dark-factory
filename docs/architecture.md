@@ -71,7 +71,7 @@ flowchart TD
 3. **Wire types at the edges.** `df-proto` types are used by the gRPC edges (`df-agent-channel`, `df-gateway`, `df-gateway-control`, `factory-agent`, `dark-factory`) and as the stored or rendered payload format (`df-db`, `df-web`, `df-orchestrator`) where a decision says so: transcript events as canonical protobuf JSON (ADR-0017, `transcript-storage`) and egress flow events. Domain rules take `df-core` types, not wire types.
 4. **Infrastructure in infrastructure crates.** TLS, telemetry and the sandbox contract live in their own crates. A crate never depends on another domain or adapter crate only to reuse its infrastructure.
 5. **The sandbox runtime stays small.** `factory-agent` depends on no control-plane crate (`df-core`, `df-db`, `df-agent-channel`, …); everything it shares with the control plane is in `df-proto`, `df-sandbox-contract` or `df-artifact-types`. It may also use the infrastructure crate `df-telemetry`.
-6. **Traits where consumed.** A trait seam with several consuming crates lives in `df-core::seams`; otherwise it is declared in the crate that consumes it (AGENTS.md, "Traits over closures").
+6. **Traits where consumed.** A trait seam with several consuming crates lives in `df-core::seams`; otherwise it is declared in the crate that consumes it (CODING_STANDARDS.md, "Traits over closures").
 7. **Configuration.** Config types live in `df-core::config`, the binary loads them. Not a separate crate: domain modules (`routing`, `artifacts`, `lifecycle`) and the config types depend on each other.
 
 ## When this changes
