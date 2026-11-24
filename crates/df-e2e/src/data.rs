@@ -79,6 +79,11 @@ pub const CHAT_IMPLEMENTATION: &str = "[chat-impl]";
 pub const CHAT_REVIEW: &str = "[chat-review]";
 pub const CHAT_FINISH: &str = "[chat-finish]";
 pub const CHAT_TOPIC: &str = "Helm chart plan";
+/// The title of the issue the chat asks for with `create_issue`.
+pub const CHAT_ISSUE_TITLE: &str = "E2E chat issue";
+/// The body of that issue, as `chat.yaml` stores it.
+pub const CHAT_ISSUE_BODY: &str =
+    "Filed from the e2e chat.\n\nSee [the docs](https://example.org/docs).";
 pub const CHAT_IMPLEMENTATION_DONE: &str = "The implementation is in.";
 
 /// Project whose fake agents build on each other's branches (`iter3-task-tree`, demo steps 1 and

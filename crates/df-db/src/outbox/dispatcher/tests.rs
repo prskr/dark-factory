@@ -28,6 +28,10 @@ struct Fake {
     gate: Option<Arc<Semaphore>>,
     running: AtomicUsize,
     max_running: AtomicUsize,
+    /// The errors [`OutboxHandler::expired`] was told about.
+    expired: Mutex<Vec<String>>,
+    /// How many calls of [`OutboxHandler::expired`] fail before they succeed.
+    expired_failures: AtomicUsize,
 }
 
 impl Fake {
@@ -41,6 +45,8 @@ impl Fake {
             gate: None,
             running: AtomicUsize::new(0),
             max_running: AtomicUsize::new(0),
+            expired: Mutex::default(),
+            expired_failures: AtomicUsize::new(0),
         };
         (fake, rx)
     }
@@ -73,6 +79,15 @@ impl OutboxHandler for Fake {
             return Err(JobError::Retry("still down".into()));
         }
         self.script.lock().unwrap().pop_front().unwrap_or(Ok(()))
+    }
+
+    async fn expired(&self, _payload: &Value, last_error: &str) -> Result<(), JobError> {
+        self.expired.lock().unwrap().push(last_error.to_string());
+        if self.expired_failures.load(Ordering::SeqCst) > 0 {
+            self.expired_failures.fetch_sub(1, Ordering::SeqCst);
+            return Err(JobError::Retry("database unavailable".into()));
+        }
+        Ok(())
     }
 }
 
@@ -217,7 +232,8 @@ async fn a_give_up_of_the_handler_gives_the_job_up() {
 async fn a_job_claimed_past_the_give_up_age_is_given_up_without_running() {
     let (pool, notifier) = setup().await;
     let (fake, mut seen) = Fake::new(KIND);
-    let dispatcher = dispatcher(&pool, &notifier, vec![Arc::new(fake)]);
+    let fake = Arc::new(fake);
+    let dispatcher = dispatcher(&pool, &notifier, vec![fake.clone()]);
     let failed_before = enqueue_job(&pool, KIND, json!({})).await;
     let never_ran = enqueue_job(&pool, KIND, json!({})).await;
     sqlx::query(
@@ -232,6 +248,13 @@ async fn a_job_claimed_past_the_give_up_age_is_given_up_without_running() {
     assert_eq!(dispatcher.run_due().await.unwrap(), 2);
 
     assert!(seen.try_recv().is_err(), "the handler ran");
+    let mut told = fake.expired.lock().unwrap().clone();
+    told.sort();
+    assert_eq!(
+        told,
+        ["503", "expired before the first attempt"],
+        "the handler is told the last error of each expired job"
+    );
     for (id, error) in [
         (failed_before, "503"),
         (never_ran, "expired before the first attempt"),
@@ -240,6 +263,35 @@ async fn a_job_claimed_past_the_give_up_age_is_given_up_without_running() {
         assert!(row.gave_up && !row.done && !row.leased, "{row:?}");
         assert_eq!(row.last_error.as_deref(), Some(error));
     }
+}
+
+#[tokio::test]
+async fn a_failing_expiry_callback_keeps_the_last_attempts_error_for_the_next_expiry() {
+    let (pool, notifier) = setup().await;
+    let (fake, _seen) = Fake::new(KIND);
+    fake.expired_failures.store(1, Ordering::SeqCst);
+    let fake = Arc::new(fake);
+    let dispatcher = dispatcher(&pool, &notifier, vec![fake.clone()]);
+    let id = enqueue_job(&pool, KIND, json!({})).await;
+    sqlx::query("UPDATE outbox SET created_at = now() - interval '24 hours', last_error = '503'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    dispatcher.run_due().await.unwrap();
+
+    let after_failure = row(&pool, id).await;
+    assert!(!after_failure.gave_up, "{after_failure:?}");
+    assert_eq!(after_failure.last_error.as_deref(), Some("503"));
+    make_due(&pool, id).await;
+    dispatcher.run_due().await.unwrap();
+
+    assert!(row(&pool, id).await.gave_up);
+    assert_eq!(
+        *fake.expired.lock().unwrap(),
+        ["503", "503"],
+        "both calls got the forge's error, not the callback's"
+    );
 }
 
 #[tokio::test]

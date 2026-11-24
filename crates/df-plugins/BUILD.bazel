@@ -125,6 +125,7 @@ EXTRAS = {
             "FORGEJO_PLUGIN_WASM": IMAGE_FORGEJO,
             "GITHUB_PLUGIN_WASM": IMAGE_GITHUB,
         },
+        "issues": {"TEST_PROBE_WASM": PROBE},
         "load": {
             "FORGEJO_PLUGIN_WASM": FORGEJO,
             "GITHUB_PLUGIN_WASM": GITHUB,

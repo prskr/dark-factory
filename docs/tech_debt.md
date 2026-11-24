@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-130.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-131.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -115,6 +115,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-127 | low   | `deploy` Helm, `df-plugins` policy | The GitHub plugin's default `extraHosts` admit every Azure storage account |
 | TD-128 | low   | `df-web` egress dialogs | Scope values `task:<KEY>` / `project:<KEY>` are built and parsed with string operations |
 | TD-129 | low   | design file (PenPot) | Project settings boards keep a white panel in the Dark theme preview |
+| TD-130 | low   | `plugins/forgejo`, `plugins/github` | Both plugins carry the same issue-list page cursor code |
 
 ## Entries
 
@@ -826,6 +827,18 @@ The panel of every project settings board (the older ones and the Egress boards 
 **Matters when:** someone checks a dark-mode implementation against these boards.
 
 **Fix:** bind the panel fill to the surface token on the project settings boards and check them in the Dark theme.
+
+Origin of TD-130: code review of `chat-issue-tools` (`plugins/forgejo`, `plugins/github`, 2026-11-24). The `TD-n (ID)` heading gives the ID used in that review.
+
+### TD-130 (S4). Both plugins carry the same issue-list page cursor code
+
+`plugins/forgejo/src/api/issues.rs`, `plugins/github/src/api/issues.rs`
+
+Both plugins have the same `Position { page, offset }` cursor (`page:offset`) with parse and format, and the same function that cuts a page out of the fetched items. `forge-common` already holds shared plugin code.
+
+**Matters when:** a third forge plugin lists issues, or the cursor format changes; both copies must change in step.
+
+**Fix:** move `Position` and the page function to `forge-common`, with their tests.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122

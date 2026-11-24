@@ -38,6 +38,9 @@ Title prefixes, timestamps, the stderr log and the `wasi:http` transport are sha
 | `ci.job-log` | v16 or later (`unsupported` naming v16 below): `GET .../actions/jobs/{id}/logs` with `Range: bytes=-4194304`; a `206` whose `Content-Range` starts after byte 0, or a body longer than 4 MiB (a server that ignores `Range`), sets `head-dropped`. A `404` (unknown or expired job) is `not-found` |
 | issues `get` | `GET .../issues/{index}` |
 | issues `add-comment` | `POST .../issues/{index}/comments` (pull request numbers work as issue numbers) |
+| issues `list` | `GET .../issues?type=issues&state=&labels=&q=&page=N&limit=50`, newest first; at most 5 pages per call, items with a `pull_request` field are dropped and labels are checked again in the plugin. The cursor is `page:offset` (the offset counts raw items of that page), so a call ending inside a page resumes there; `truncated` and a cursor when the limit or the 5 pages are reached with more to read; a `limit` of 0 is `invalid-input` |
+| issues `create` | `GET .../labels?page=N&limit=50` to resolve label names to ids (an unknown label is `invalid-input` naming it, nothing is created), then `POST .../issues` with `title`, `body` and `labels` |
+| issues `get` | also sets `pull-request` from the `pull_request` field of the answer; `list` and `create` return `false` |
 | `list-feedback` | `GET /api/v1/user` (the bot), `GET .../issues/{index}/comments[?since=]` (PR comments, one request), `GET .../pulls/{index}/reviews`, `GET .../pulls/{index}/reviews/{id}/comments` for each of the 20 newest submitted reviews, `GET .../collaborators/{login}/permission` once per distinct non-bot author |
 | `reply` | `GET .../pulls/{index}/reviews/{review-id}`, `GET .../pulls/{index}/reviews/{review-id}/comments` (a path and line without a comment in that review yields `invalid-input`), then `POST .../pulls/{index}/reviews/{review-id}/comments` with `path` and `new_position` (or `old_position` for a negative line) |
 

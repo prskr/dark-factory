@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use df_core::{IntegrationError, Principal, PullRequestUpdate, TitleSource, sanitize_title};
+use df_db::create_issue::CREATE_ISSUE;
 use df_db::requests::{
     Raise, Raised, RequestError, close_pending_for_task, raise_approval, raise_question,
 };
@@ -21,7 +22,7 @@ use jsonschema::Validator;
 use serde_json::Value;
 
 use crate::ChannelContext;
-use crate::assign::{CHAT_TOOLS, tool_input_schemas};
+use crate::assign::{CHAT_ONLY_TOOLS, CHAT_TOOLS, tool_input_schemas};
 use crate::error::ChannelError;
 use df_orchestrator::OrchestratorError;
 use df_orchestrator::run_context::RunContext;
@@ -30,6 +31,7 @@ mod artifacts;
 mod ci;
 mod delegation;
 mod feedback;
+mod issues;
 
 static VALIDATORS: LazyLock<HashMap<&'static str, Validator>> = LazyLock::new(|| {
     tool_input_schemas()
@@ -114,14 +116,8 @@ async fn try_execute(
             &Outcome::error(format!("unknown tool `{}`", request.tool_name)),
         ));
     };
-    if rc.is_chat() && !CHAT_TOOLS.contains(&request.tool_name.as_str()) {
-        return Ok(result(
-            &call_id,
-            &Outcome::error(format!(
-                "`{}` is not available in a chat",
-                request.tool_name
-            )),
-        ));
+    if let Some(refused) = refused_for_run_kind(rc, &request.tool_name) {
+        return Ok(result(&call_id, &Outcome::error(refused)));
     }
     let arguments: Value = if request.arguments_json.trim().is_empty() {
         Value::Object(serde_json::Map::new())
@@ -205,6 +201,18 @@ async fn try_execute(
     write_audit_entry(&mut *tx, &entry).await?;
     tx.commit().await?;
     Ok(response)
+}
+
+/// Why `tool` is not available in the kind of run `rc` is (a chat is offered [`CHAT_TOOLS`], a
+/// task all but [`CHAT_ONLY_TOOLS`]), before any argument is looked at.
+fn refused_for_run_kind(rc: &RunContext, tool: &str) -> Option<String> {
+    if rc.is_chat() && !CHAT_TOOLS.contains(&tool) {
+        Some(format!("`{tool}` is not available in a chat"))
+    } else if !rc.is_chat() && CHAT_ONLY_TOOLS.contains(&tool) {
+        Some(format!("`{tool}` is only available in a chat"))
+    } else {
+        None
+    }
 }
 
 /// Answers a `call_id` that was claimed before: the stored result, or an error if the earlier
@@ -362,6 +370,8 @@ async fn run_handler(
         "list_pull_requests" => ci::list_pull_requests(ctx, rc, args).await,
         "read_ci_status" => ci::read_ci_status(ctx, rc, args).await,
         "read_ci_log" => ci::read_ci_log(ctx, rc, args).await,
+        "list_issues" => issues::list_issues(ctx, rc, args).await,
+        "create_issue" => issues::create_issue(ctx, rc, args).await,
         other => Ok(Outcome::error(format!("unknown tool `{other}`"))),
     }
 }
@@ -576,6 +586,11 @@ async fn request_approval(
     args: &Value,
 ) -> Result<Outcome, ChannelError> {
     let task_id = rc.task.id;
+    if text_arg(args, "type").as_deref() == Some(CREATE_ISSUE) {
+        return Ok(Outcome::error(
+            "issues are requested with `create_issue`, not with `request_approval`",
+        ));
+    }
     let blocking = args
         .get("blocking")
         .and_then(Value::as_bool)

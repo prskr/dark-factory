@@ -75,6 +75,13 @@ pub trait OutboxHandler: Send + Sync {
 
     async fn handle(&self, payload: &Value) -> Result<(), JobError>;
 
+    /// Runs when a job is given up because it is older than [`RetryPolicy::give_up_after`],
+    /// with the error of its last attempt, so a handler can report the failure. An `Err` keeps
+    /// the job (it is claimed again). Nothing by default.
+    async fn expired(&self, _payload: &Value, _last_error: &str) -> Result<(), JobError> {
+        Ok(())
+    }
+
     /// Runs after the periodic removal of finished jobs, for example to delete data that no job
     /// references any more.
     async fn cleanup(&self, _pool: &PgPool) -> Result<(), DbError> {
@@ -276,9 +283,21 @@ impl Dispatcher {
         };
         let policy = handler.retry_policy();
         let outcome = if job.age() >= policy.give_up_after {
-            Err(JobError::GiveUp(job.last_error.clone().unwrap_or_else(
-                || "expired before the first attempt".into(),
-            )))
+            let error = job
+                .last_error
+                .clone()
+                .unwrap_or_else(|| "expired before the first attempt".into());
+            match handler.expired(&job.payload, &error).await {
+                Ok(()) => Err(JobError::GiveUp(error)),
+                // Keep the error of the last attempt, which the next expiry reports.
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e, job_id = job.id, kind = %job.kind,
+                        "the expiry callback of an outbox job failed; retrying it"
+                    );
+                    Err(JobError::Retry(error))
+                }
+            }
         } else {
             handler.handle(&job.payload).await
         };

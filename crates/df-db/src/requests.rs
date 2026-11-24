@@ -296,6 +296,7 @@ impl ApprovalTypes {
         Self::default()
             .with(Arc::new(crate::network_access::NetworkAccess))
             .with(Arc::new(crate::push_checks::PushCheckException))
+            .with(Arc::new(crate::create_issue::CreateIssue))
     }
 
     #[must_use]
@@ -609,7 +610,7 @@ async fn record_decision(
 
 /// Locks the task and then the request (like `raise` and `close_pending_for_task`) and returns
 /// them; `None` if there is no such request.
-async fn lock_request(
+pub(crate) async fn lock_request(
     tx: &mut Transaction<'_, Postgres>,
     request_id: RequestId,
 ) -> Result<Option<(TaskId, RequestRow)>, DbError> {

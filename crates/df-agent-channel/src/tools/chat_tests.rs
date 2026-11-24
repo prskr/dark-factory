@@ -10,7 +10,7 @@ use crate::tools::execute;
 use crate::tools::tests::{call, message};
 
 /// A run of a chat that is `running`.
-async fn chat_run() -> (Env, RunContext) {
+pub(super) async fn chat_run() -> (Env, RunContext) {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;
     let chat = env.chat().await;

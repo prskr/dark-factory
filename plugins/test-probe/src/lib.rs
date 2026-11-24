@@ -23,7 +23,7 @@ use darkfactory::integrations::webhook_signature;
 #[cfg(feature = "ci")]
 use exports::darkfactory::integrations::ci::{Check, CiState, CiStatus, Guest as CiGuest, LogTail};
 use exports::darkfactory::integrations::issues::{
-    Comment, Guest as IssuesGuest, Issue, IssueState,
+    Comment, Guest as IssuesGuest, Issue, IssueFilter, IssuePage, IssueState, NewIssue, StateFilter,
 };
 use exports::darkfactory::integrations::pull_requests::{
     Author, AuthorRole, Feedback, Guest as PullRequestsGuest, ListedPullRequest, NewPullRequest,
@@ -97,7 +97,8 @@ impl IssuesGuest for Probe {
         reason = "the probe writes to stderr to test that the host forwards it"
     )]
     fn get(id: IssueRef) -> Result<Issue, Error> {
-        let body = match id.number {
+        let number = id.number;
+        let body = match number {
             ENVIRONMENT => format!("env={}", std::env::vars().count()),
             LOOP => loop {
                 std::hint::black_box(());
@@ -135,6 +136,58 @@ impl IssuesGuest for Probe {
             body,
             state: IssueState::Open,
             labels: Vec::new(),
+            // Number 40 stands for a pull request, as in `pull-requests.get`.
+            pull_request: number == 40,
+        })
+    }
+
+    /// One issue whose title echoes the arguments as `state|labels|query|limit|cursor`; the page
+    /// has the cursor `c2` and is truncated. `GET /issues/list` returning `429` is `rate-limited`.
+    fn list(
+        repo: RepoRef,
+        filter: IssueFilter,
+        limit: u32,
+        cursor: Option<String>,
+    ) -> Result<IssuePage, Error> {
+        rate_limited_on_429("/issues/list")?;
+        let state = match filter.state {
+            StateFilter::Open => "open",
+            StateFilter::Closed => "closed",
+            StateFilter::All => "all",
+        };
+        let title = format!(
+            "{state}|{}|{}|{limit}|{}",
+            filter.labels.join(","),
+            filter.query.unwrap_or_default(),
+            cursor.unwrap_or_default()
+        );
+        Ok(IssuePage {
+            issues: vec![Issue {
+                id: IssueRef { repo, number: 1 },
+                url: String::new(),
+                title,
+                body: String::new(),
+                state: IssueState::Open,
+                labels: Vec::new(),
+                pull_request: false,
+            }],
+            next_cursor: Some("c2".to_string()),
+            truncated: true,
+        })
+    }
+
+    /// Issue #99 with the given title, body and labels. `GET /issues/create` returning `429` is
+    /// `rate-limited`.
+    fn create(repo: RepoRef, issue: NewIssue) -> Result<Issue, Error> {
+        rate_limited_on_429("/issues/create")?;
+        Ok(Issue {
+            id: IssueRef { repo, number: 99 },
+            url: "https://forge.test/o/r/issues/99".to_string(),
+            title: issue.title,
+            body: issue.body,
+            state: IssueState::Open,
+            labels: issue.labels,
+            pull_request: false,
         })
     }
 

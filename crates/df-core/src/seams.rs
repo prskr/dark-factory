@@ -290,6 +290,47 @@ pub struct Issue {
     pub body: String,
     pub state: IssueState,
     pub labels: Vec<String>,
+    /// The number belongs to a pull request (`get` accepts both; `list` and `create` return false).
+    pub pull_request: bool,
+}
+
+/// Which issues to list (`issues.state-filter`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueStateFilter {
+    #[default]
+    Open,
+    Closed,
+    All,
+}
+
+/// Criteria of an issue listing (`issues.issue-filter`); all set fields apply together.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueFilter {
+    pub state: IssueStateFilter,
+    /// An issue must have all of them.
+    pub labels: Vec<String>,
+    /// Literal free text.
+    pub query: Option<String>,
+}
+
+/// One page of an issue listing (`issues.issue-page`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssuePage {
+    /// Issues only, newest first.
+    pub issues: Vec<Issue>,
+    /// Opaque; pass it to the next call. `None` when no further page can be read.
+    pub next_cursor: Option<String>,
+    /// More matching issues exist than were returned.
+    pub truncated: bool,
+}
+
+/// An issue to create (`issues.new-issue`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewIssue {
+    pub title: String,
+    pub body: String,
+    pub labels: Vec<String>,
 }
 
 /// Comment record (`darkfactory:integrations/issues.comment`); also the reply posted in a review
@@ -496,6 +537,23 @@ pub trait ForgeClient: Send + Sync {
     ) -> Result<Comment, IntegrationError>;
 
     async fn get_issue(&self, p: &ProjectId, number: u64) -> Result<Issue, IntegrationError>;
+
+    /// Issues (never pull requests) of the project's repository, at most `limit`, newest first;
+    /// `cursor` is a `next_cursor` of an earlier page.
+    async fn list_issues(
+        &self,
+        p: &ProjectId,
+        filter: &IssueFilter,
+        limit: u32,
+        cursor: Option<&str>,
+    ) -> Result<IssuePage, IntegrationError>;
+
+    /// Creates an issue in the project's repository. Not idempotent.
+    async fn create_issue(
+        &self,
+        p: &ProjectId,
+        issue: &NewIssue,
+    ) -> Result<Issue, IntegrationError>;
 
     async fn add_issue_comment(
         &self,

@@ -15,12 +15,27 @@ Every task of an agent gets four more [factory tools](../architecture/agent-runs
 | Tool | What it does |
 | --- | --- |
 | `list_personas` | Returns the name and the [description](setup.md#personas) of every persona, ordered by name. |
-| `create_task` | Creates a task in the project of the caller with `persona`, `title`, `prompt`, optional `depends_on`, optional `base_task` ([below](#base-task)) and optional `branch` (an [existing branch](existing-branches.md) that matches the project's [agent branches](existing-branches.md#agent-branches); not together with `base_task`). The caller becomes the **parent**. Returns the key and the status of the new task. Fails when a [limit](#limits) is reached. |
+| `create_task` | Creates a task in the project of the caller with `persona`, `title`, `prompt`, optional `depends_on`, optional `base_task` ([below](#base-task)), optional `issue` ([below](#link-an-issue)) and optional `branch` (an [existing branch](existing-branches.md) that matches the project's [agent branches](existing-branches.md#agent-branches); not together with `base_task`). The caller becomes the **parent**. Returns the key and the status of the new task. Fails when a [limit](#limits) is reached. |
 | `send_message` | Queues a message on a child of the caller, with the same effect as your message in the task view. The caller cannot message any other task. |
 | `merge_subtask_pr` | Merges the pull request of a subtask into the caller's own task branch ([below](#merge-subtask-pull-requests)). Only if the project's `subtask_merge` setting is *Parent agent*. |
 
 Tasks created in the UI have no parent. A task created by an agent shows that agent as its creator
 in the details.
+
+## Link an issue
+
+`issue` is the number of an issue of the project's repository. The new task is linked to it, as if
+you had entered the number in the "New task" form: the child can use `comment_on_issue`, and forge
+events of that issue are routed to it under the rules and filters of the
+[project's webhook settings](../integrations/forges/webhooks.md) (a comment must mention the bot
+account, and its author must pass the project's wake policy; linking adds no filter and bypasses
+none). The link does not change after creation, and the forge is not written to.
+
+The control plane asks the forge first (`issues.get`): the number must exist and must not be a pull
+request, otherwise the call fails with an error naming the problem and no task is created. `issue`
+works in every run that can call `create_task`, chats included. A chat agent usually gets the
+number from `list_issues`, or from the message that follows an approved
+[`create_issue`](chats.md#file-and-list-issues).
 
 ## Dependencies
 

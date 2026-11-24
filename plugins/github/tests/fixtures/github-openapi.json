@@ -24,12 +24,33 @@
           "type": "string"
         }
       },
+      "direction": {
+        "in": "query",
+        "name": "direction",
+        "required": false,
+        "schema": {
+          "default": "desc",
+          "enum": [
+            "asc",
+            "desc"
+          ],
+          "type": "string"
+        }
+      },
       "issue-number": {
         "in": "path",
         "name": "issue_number",
         "required": true,
         "schema": {
           "type": "integer"
+        }
+      },
+      "issues-advanced-search": {
+        "in": "query",
+        "name": "advanced_search",
+        "required": false,
+        "schema": {
+          "type": "string"
         }
       },
       "job-id": {
@@ -39,6 +60,27 @@
         "schema": {
           "format": "int64",
           "type": "integer"
+        }
+      },
+      "labels": {
+        "in": "query",
+        "name": "labels",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "order": {
+        "in": "query",
+        "name": "order",
+        "required": false,
+        "schema": {
+          "default": "desc",
+          "enum": [
+            "desc",
+            "asc"
+          ],
+          "type": "string"
         }
       },
       "owner": {
@@ -81,6 +123,27 @@
           "type": "string"
         }
       },
+      "search-type": {
+        "in": "query",
+        "name": "search_type",
+        "required": false,
+        "schema": {
+          "enum": [
+            "semantic",
+            "hybrid"
+          ],
+          "type": "string"
+        }
+      },
+      "since": {
+        "in": "query",
+        "name": "since",
+        "required": false,
+        "schema": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
       "status": {
         "in": "query",
         "name": "status",
@@ -104,6 +167,20 @@
       }
     },
     "responses": {
+      "bad_request": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/basic-error"
+            }
+          },
+          "application/scim+json": {
+            "schema": {
+              "$ref": "#/components/schemas/scim-error"
+            }
+          }
+        }
+      },
       "forbidden": {
         "content": {
           "application/json": {
@@ -150,6 +227,15 @@
         }
       },
       "not_modified": {},
+      "requires_authentication": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/basic-error"
+            }
+          }
+        }
+      },
       "service_unavailable": {
         "content": {
           "application/json": {
@@ -1425,6 +1511,298 @@
         "title": "Issue Field Value",
         "type": "object"
       },
+      "issue-search-result-item": {
+        "properties": {
+          "active_lock_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assignees": {
+            "items": {
+              "$ref": "#/components/schemas/simple-user"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "author_association": {
+            "$ref": "#/components/schemas/author-association"
+          },
+          "body": {
+            "type": "string"
+          },
+          "body_html": {
+            "type": "string"
+          },
+          "body_text": {
+            "type": "string"
+          },
+          "closed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "comments": {
+            "type": "integer"
+          },
+          "comments_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "draft": {
+            "type": "boolean"
+          },
+          "events_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "html_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "issue_dependencies_summary": {
+            "$ref": "#/components/schemas/issue-dependencies-summary"
+          },
+          "issue_field_values": {
+            "items": {
+              "$ref": "#/components/schemas/issue-field-value"
+            },
+            "type": "array"
+          },
+          "labels": {
+            "items": {
+              "properties": {
+                "archived_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "archived_by": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/simple-user"
+                    }
+                  ],
+                  "type": [
+                    "null"
+                  ]
+                },
+                "color": {
+                  "type": "string"
+                },
+                "default": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "labels_url": {
+            "type": "string"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "milestone": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/milestone"
+              }
+            ]
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "performed_via_github_app": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/integration"
+              }
+            ]
+          },
+          "pinned_comment": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/issue-comment"
+              }
+            ]
+          },
+          "pull_request": {
+            "properties": {
+              "diff_url": {
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "html_url": {
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "merged_at": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "patch_url": {
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "diff_url",
+              "html_url",
+              "patch_url",
+              "url"
+            ],
+            "type": "object"
+          },
+          "reactions": {
+            "$ref": "#/components/schemas/reaction-rollup"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/repository"
+          },
+          "repository_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "state": {
+            "type": "string"
+          },
+          "state_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sub_issues_summary": {
+            "$ref": "#/components/schemas/sub-issues-summary"
+          },
+          "text_matches": {
+            "$ref": "#/components/schemas/search-result-text-matches"
+          },
+          "timeline_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/issue-type"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/simple-user"
+              }
+            ]
+          }
+        },
+        "required": [
+          "closed_at",
+          "comments",
+          "comments_url",
+          "events_url",
+          "html_url",
+          "id",
+          "node_id",
+          "labels",
+          "labels_url",
+          "milestone",
+          "number",
+          "repository_url",
+          "state",
+          "locked",
+          "title",
+          "url",
+          "user",
+          "author_association",
+          "created_at",
+          "updated_at",
+          "score"
+        ],
+        "title": "Issue Search Result Item",
+        "type": "object"
+      },
       "issue-type": {
         "properties": {
           "color": {
@@ -1482,6 +1860,66 @@
           "object",
           "null"
         ]
+      },
+      "label": {
+        "properties": {
+          "archived_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "archived_by": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/simple-user"
+              }
+            ],
+            "type": [
+              "null"
+            ]
+          },
+          "color": {
+            "type": "string"
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "node_id",
+          "url",
+          "name",
+          "description",
+          "color",
+          "default",
+          "archived_at",
+          "archived_by"
+        ],
+        "title": "Label",
+        "type": "object"
       },
       "license-simple": {
         "properties": {
@@ -3483,6 +3921,86 @@
         "title": "Repository Collaborator Permission",
         "type": "object"
       },
+      "scim-error": {
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "documentation_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schemas": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scimType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "integer"
+          }
+        },
+        "title": "Scim Error",
+        "type": "object"
+      },
+      "search-result-text-matches": {
+        "items": {
+          "properties": {
+            "fragment": {
+              "type": "string"
+            },
+            "matches": {
+              "items": {
+                "properties": {
+                  "indices": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": "array"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "object_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "object_url": {
+              "type": "string"
+            },
+            "property": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "title": "Search Result Text Matches",
+        "type": "array"
+      },
       "security-and-analysis": {
         "properties": {
           "advanced_security": {
@@ -4277,6 +4795,308 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/issues": {
+      "get": {
+        "operationId": "issues/list-for-repo",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/owner"
+          },
+          {
+            "$ref": "#/components/parameters/repo"
+          },
+          {
+            "in": "query",
+            "name": "milestone",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "enum": [
+                "open",
+                "closed",
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assignee",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "creator",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mentioned",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "issue_field_values",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/labels"
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created",
+              "enum": [
+                "created",
+                "updated",
+                "comments"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/direction"
+          },
+          {
+            "$ref": "#/components/parameters/since"
+          },
+          {
+            "$ref": "#/components/parameters/per-page"
+          },
+          {
+            "$ref": "#/components/parameters/page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/issue"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "headers": {
+              "Link": {
+                "$ref": "#/components/headers/link"
+              }
+            }
+          },
+          "301": {
+            "$ref": "#/components/responses/moved_permanently"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "422": {
+            "$ref": "#/components/responses/validation_failed"
+          }
+        }
+      },
+      "post": {
+        "operationId": "issues/create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/owner"
+          },
+          {
+            "$ref": "#/components/parameters/repo"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "assignees": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "issue_field_values": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "field_id": {
+                          "type": "integer"
+                        },
+                        "value": {
+                          "oneOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "field_id",
+                        "value"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "labels": {
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "properties": {
+                            "color": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "description": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "id": {
+                              "type": "integer"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "type": "array"
+                  },
+                  "milestone": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      }
+                    ],
+                    "type": [
+                      "null",
+                      "string",
+                      "integer"
+                    ]
+                  },
+                  "parent_issue_id": {
+                    "type": "integer"
+                  },
+                  "title": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      }
+                    ]
+                  },
+                  "type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "title"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/issue"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/bad_request"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "410": {
+            "$ref": "#/components/responses/gone"
+          },
+          "422": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/service_unavailable"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/issues/{issue_number}": {
       "get": {
         "operationId": "issues/get",
@@ -4376,6 +5196,47 @@
           },
           "422": {
             "$ref": "#/components/responses/validation_failed"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/labels": {
+      "get": {
+        "operationId": "issues/list-labels-for-repo",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/owner"
+          },
+          {
+            "$ref": "#/components/parameters/repo"
+          },
+          {
+            "$ref": "#/components/parameters/per-page"
+          },
+          {
+            "$ref": "#/components/parameters/page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/label"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "headers": {
+              "Link": {
+                "$ref": "#/components/headers/link"
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
           }
         }
       }
@@ -4661,6 +5522,127 @@
           },
           "422": {
             "$ref": "#/components/responses/validation_failed"
+          }
+        }
+      }
+    },
+    "/search/issues": {
+      "get": {
+        "operationId": "search/issues-and-pull-requests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "enum": [
+                "comments",
+                "reactions",
+                "reactions-+1",
+                "reactions--1",
+                "reactions-smile",
+                "reactions-thinking_face",
+                "reactions-heart",
+                "reactions-tada",
+                "interactions",
+                "created",
+                "updated"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/order"
+          },
+          {
+            "$ref": "#/components/parameters/per-page"
+          },
+          {
+            "$ref": "#/components/parameters/page"
+          },
+          {
+            "$ref": "#/components/parameters/issues-advanced-search"
+          },
+          {
+            "$ref": "#/components/parameters/search-type"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "incomplete_results": {
+                      "type": "boolean"
+                    },
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/issue-search-result-item"
+                      },
+                      "type": "array"
+                    },
+                    "lexical_fallback_reason": {
+                      "items": {
+                        "enum": [
+                          "no_text_terms",
+                          "quoted_text",
+                          "non_issue_target",
+                          "or_boolean_not_supported",
+                          "no_accessible_repos",
+                          "server_error",
+                          "only_non_semantic_fields_requested",
+                          "service_unavailable"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "search_type": {
+                      "enum": [
+                        "lexical",
+                        "semantic",
+                        "hybrid"
+                      ],
+                      "type": "string"
+                    },
+                    "total_count": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "total_count",
+                    "incomplete_results",
+                    "items",
+                    "search_type"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/not_modified"
+          },
+          "401": {
+            "$ref": "#/components/responses/requires_authentication"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "503": {
+            "$ref": "#/components/responses/service_unavailable"
           }
         }
       }

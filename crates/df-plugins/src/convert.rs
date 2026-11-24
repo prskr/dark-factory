@@ -129,6 +129,35 @@ pub(crate) fn from_issue(i: issues::Issue) -> df_core::Issue {
             issues::IssueState::Closed => df_core::IssueState::Closed,
         },
         labels: i.labels,
+        pull_request: i.pull_request,
+    }
+}
+
+pub(crate) fn issue_filter(f: &df_core::IssueFilter) -> issues::IssueFilter {
+    issues::IssueFilter {
+        state: match f.state {
+            df_core::IssueStateFilter::Open => issues::StateFilter::Open,
+            df_core::IssueStateFilter::Closed => issues::StateFilter::Closed,
+            df_core::IssueStateFilter::All => issues::StateFilter::All,
+        },
+        labels: f.labels.clone(),
+        query: f.query.clone(),
+    }
+}
+
+pub(crate) fn new_issue(i: &df_core::NewIssue) -> issues::NewIssue {
+    issues::NewIssue {
+        title: i.title.clone(),
+        body: i.body.clone(),
+        labels: i.labels.clone(),
+    }
+}
+
+pub(crate) fn from_issue_page(p: issues::IssuePage) -> df_core::IssuePage {
+    df_core::IssuePage {
+        issues: p.issues.into_iter().map(from_issue).collect(),
+        next_cursor: p.next_cursor,
+        truncated: p.truncated,
     }
 }
 

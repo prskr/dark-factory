@@ -169,6 +169,9 @@ One row per view. The agent reads it to know the PenPot page and board, the rout
 | Tasks / Desktop · conversation flow · approval pending | `/tasks/<key>` | same task with a pending registered network-access approval; scopes, optional comment, Approve and Deny | 1440 |
 | Tasks / Desktop · conversation flow · approval approved | `/tasks/<key>` | same approval granted for this task; outcome and decider, no decision form | 1440 |
 | Tasks / Desktop · conversation flow · approval denied | `/tasks/<key>` | same approval denied with a reason; outcome and decider, no decision form | 1440 |
+| Tasks / Preview only · create-issue request states · light | `/chats/<key>`, `/requests` | manual seed (not built): chat DF-25-CHAT with `create-issue` requests (title, labels `bug`, `auth`, `ios`, Markdown body with a list, inline code and a link): pending with Preview (Markdown tab hovered), pending with Markdown selected and focused, pending with a long body (panel scrolls), approved (issue #57 created), denied with a note | 1440 |
+| Tasks / Preview only · create-issue request states · dark | `/chats/<key>`, `/requests` | as above, dark theme | 1440 |
+| Tasks / Phone · create-issue request card (390) | `/requests` | as above; pending request with a long body | 390 |
 | Tasks / Desktop · stop and cancel | `/tasks/<id>` | manual seed (not built): task `running` with an active run, 2 queued messages, PR; Status menu open | 1440 |
 | Tasks / Desktop · cancel task confirmation | `/tasks/<id>` | as Desktop · stop and cancel; "Cancel task…" chosen | 1440 |
 | Tasks / Desktop · reset workspace | `/tasks/<id>` | manual seed (not built): task `waiting` with ended runs; Status menu open | 1440 |

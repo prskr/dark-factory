@@ -38,7 +38,9 @@ fn embedded_tools_are_exactly_the_factory_tools() {
             "merge_subtask_pr",
             "list_pull_requests",
             "read_ci_status",
-            "read_ci_log"
+            "read_ci_log",
+            "list_issues",
+            "create_issue"
         ]
     );
     let first = &tool_descriptors()[0];
@@ -252,6 +254,8 @@ async fn assign_for_a_chat_run_is_read_only_without_branches_and_offers_the_chat
     );
     let tools: Vec<_> = assign.tools.iter().map(|t| t.name.as_str()).collect();
     assert!(tools.contains(&"create_task"), "{tools:?}");
+    assert!(tools.contains(&"list_issues"), "{tools:?}");
+    assert!(tools.contains(&"create_issue"), "{tools:?}");
     for excluded in [
         "complete_task",
         "ask_question",
@@ -279,7 +283,35 @@ async fn assign_for_a_task_run_has_no_chat_instructions_and_a_writable_workspace
     assert!(!assign.workspace.clone().expect("workspace").read_only);
     assert!(!prompt_file(&assign, &env).contains(CHAT_INSTRUCTIONS));
     assert!(assign.tools.iter().any(|t| t.name == "complete_task"));
+    for tool in CHAT_ONLY_TOOLS {
+        assert!(
+            assign.tools.iter().all(|t| t.name != *tool),
+            "{tool} is offered to a task"
+        );
+    }
     Ok(())
+}
+
+#[test]
+fn the_issue_tools_are_chat_only_and_say_what_a_chat_agent_must_know() {
+    assert_eq!(CHAT_ONLY_TOOLS, ["list_issues", "create_issue"]);
+    for tool in CHAT_ONLY_TOOLS {
+        assert!(CHAT_TOOLS.contains(tool), "{tool}");
+    }
+    let tools = tool_descriptors();
+    let find = |name: &str| tools.iter().find(|t| t.name == name).unwrap();
+    assert!(find("list_issues").description.contains("untrusted input"));
+    let create = &find("create_issue").description;
+    assert!(
+        create.contains("Nothing is posted before a member approves"),
+        "{create}"
+    );
+    assert!(
+        create.contains("no secrets and no workspace data"),
+        "{create}"
+    );
+    assert!(create.contains("create_task with issue"), "{create}");
+    assert!(find("create_task").input_schema_json.contains("\"issue\""));
 }
 
 #[test]

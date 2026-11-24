@@ -156,10 +156,11 @@ the run's task, and at most once per `call_id`.
 | --- | --- |
 | `update_pull_request`, `comment_on_issue`, `report_progress`, `set_task_title` | Shape the pull request, comment on the linked issue, set the status line and the title |
 | `complete_task` | Ends the run after the turn; the task goes to review. Fails while the task has [open subtasks](../using/delegation.md#completing-with-open-subtasks) |
-| `ask_question`, `request_approval` | [Requests](../using/requests.md) to the humans of the task |
+| `ask_question`, `request_approval` | [Requests](../using/requests.md) to the humans of the task. `request_approval` raises `network-access` requests only; issues are requested with `create_issue` |
 | `read_pull_request_feedback`, `comment_on_pull_request` | Read and answer reviews |
 | `list_pull_requests`, `read_ci_status`, `read_ci_log` | [CI reads](../integrations/forges/ci-reads.md): the open pull requests of the run's project, the CI checks of a pull request or ref, and the log of a job. Read-only, task runs only, never outside the project's repository; job logs are untrusted input |
-| `create_task`, `list_personas`, `send_message` | [Delegation](../using/delegation.md): create tasks for other personas, list them, message a child. `create_task` creates tasks only in the run's project, optionally on a [base task](../using/delegation.md#base-task) and within the [limits](../using/delegation.md#limits); `send_message` acts only on children of the run's task |
+| `create_task`, `list_personas`, `send_message` | [Delegation](../using/delegation.md): create tasks for other personas, list them, message a child. `create_task` creates tasks only in the run's project, optionally on a [base task](../using/delegation.md#base-task), [linked to an issue](../using/delegation.md#link-an-issue) (`issue`, checked on the forge: it must exist and not be a pull request) and within the [limits](../using/delegation.md#limits); `send_message` acts only on children of the run's task |
+| `list_issues`, `create_issue` | [Issues](../using/chats.md#file-and-list-issues) of the run's project repository, chats only (a call from a task is an error). `list_issues` returns issues, never pull requests, with a cursor and a `truncated` flag; titles and bodies are untrusted input. `create_issue` posts nothing: it raises a [`create-issue` request](../using/requests.md) and the issue is created after a member approves, from the stored text |
 | `merge_subtask_pr` | Merges the pull request of a subtask based on the run's task into the run's task branch, if the project allows it ([Build a feature in iterations](../using/build-a-feature.md)) |
 | `write_artifact`, `list_artifacts`, `read_artifact` | [Artifacts](../using/artifacts.md): write named text and image files on the own task, list and read those of related tasks |
 
@@ -178,6 +179,17 @@ the transaction that records their trigger and run by the dispatcher on the lead
 
 Failed forge calls are retried with backoff (a first delay of `scheduling.forgeRetryBaseSeconds`,
 30 s by default, doubling to 10 min) for one hour, also after a control plane restart; then the job is given up with a warning (`df.outbox.jobs{kind="pr.sync",result="gave_up"}`).
+The approval of a `create-issue` request is handled the same way: the decision enqueues an
+`issue.create` job in its transaction, and the dispatcher creates the issue from the stored request
+(never from the agent), records its number in the request's decision and queues a hidden message
+with the number and URL, or with the forge's error, on the task. `rate-limited` and `transport`
+errors are retried like the pull request jobs, and when the job reaches the give-up age (one hour)
+its last error is recorded and reported like the others (the dispatcher calls the handler's
+`expired` hook before it gives the job up); `invalid-input`, `unauthorized` and every other error
+are reported at once and not retried. Once the outcome is recorded the job does nothing. A crash or a
+transport failure after the forge created the issue and before the number was recorded can create a
+second issue on retry; this is accepted, because neither forge offers an idempotency key.
+
 Behavior to know:
 
 - A completed run that never pushed the task branch opens no pull request. A pull request an

@@ -14,9 +14,10 @@ use tokio_stream::wrappers::BroadcastStream;
 use crate::ids::{ProjectId, RunId};
 use crate::seams::{
     AuthorRole, CiJobLog, CiState, CiStatus, Comment, Feedback, ForgeClient, IntegrationError,
-    Issue, ListedPullRequest, NewPullRequest, PeerIdentity, ProviderError, PullRequest,
-    PullRequestFilter, PullRequestRef, PullRequestState, PullRequestUpdate, RunSandboxSpec,
-    SandboxEvent, SandboxProvider, SecretError, SecretKeyRef, SecretStore, TaskVolumeSpec,
+    Issue, IssueFilter, IssuePage, IssueRef, IssueState, IssueStateFilter, ListedPullRequest,
+    NewIssue, NewPullRequest, PeerIdentity, ProviderError, PullRequest, PullRequestFilter,
+    PullRequestRef, PullRequestState, PullRequestUpdate, RepoRef, RunSandboxSpec, SandboxEvent,
+    SandboxProvider, SecretError, SecretKeyRef, SecretStore, TaskVolumeSpec,
 };
 
 // ---------------------------------------------------------------------------
@@ -239,6 +240,16 @@ pub enum ForgeCall {
         number: u64,
         body: String,
     },
+    ListIssues {
+        project_id: ProjectId,
+        filter: IssueFilter,
+        limit: u32,
+        cursor: Option<String>,
+    },
+    CreateIssue {
+        project_id: ProjectId,
+        issue: NewIssue,
+    },
     ListPullRequestFeedback {
         project_id: ProjectId,
         number: u64,
@@ -289,6 +300,8 @@ struct ForgeState {
     update_pr_results: VecDeque<Result<PullRequest, IntegrationError>>,
     get_issue_results: VecDeque<Result<Issue, IntegrationError>>,
     add_comment_results: VecDeque<Result<Comment, IntegrationError>>,
+    list_issues_results: VecDeque<Result<IssuePage, IntegrationError>>,
+    create_issue_results: VecDeque<Result<Issue, IntegrationError>>,
     feedback: HashMap<(ProjectId, u64), Feedback>,
     feedback_results: VecDeque<Result<Feedback, IntegrationError>>,
     reply_results: VecDeque<Result<Comment, IntegrationError>>,
@@ -443,6 +456,24 @@ impl FakeForgeClient {
             .lock()
             .expect("lock poisoned")
             .get_issue_results
+            .push_back(res);
+    }
+
+    /// Queues a scripted result for `list_issues`.
+    pub fn push_list_issues_result(&self, res: Result<IssuePage, IntegrationError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .list_issues_results
+            .push_back(res);
+    }
+
+    /// Queues a scripted result for `create_issue`.
+    pub fn push_create_issue_result(&self, res: Result<Issue, IntegrationError>) {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .create_issue_results
             .push_back(res);
     }
 
@@ -788,6 +819,101 @@ impl ForgeClient for FakeForgeClient {
             .ok_or_else(|| IntegrationError::NotFound(format!("issue #{number} not found")))
     }
 
+    /// Unscripted: the seeded issues of the project, newest (highest number) first, filtered by
+    /// state and labels; the cursor is the number of issues already returned.
+    async fn list_issues(
+        &self,
+        p: &ProjectId,
+        filter: &IssueFilter,
+        limit: u32,
+        cursor: Option<&str>,
+    ) -> Result<IssuePage, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::ListIssues {
+            project_id: *p,
+            filter: filter.clone(),
+            limit,
+            cursor: cursor.map(str::to_string),
+        });
+        if let Some(scripted) = state.list_issues_results.pop_front() {
+            return scripted;
+        }
+        if limit == 0 {
+            return Err(IntegrationError::InvalidInput(
+                "limit must be at least 1".into(),
+            ));
+        }
+        let offset: usize = cursor.and_then(|c| c.parse().ok()).unwrap_or(0);
+        let wants = |issue: &Issue| {
+            let state = filter.state == IssueStateFilter::All
+                || (filter.state == IssueStateFilter::Open) == (issue.state == IssueState::Open);
+            let text = filter
+                .query
+                .as_deref()
+                .is_none_or(|q| issue.title.contains(q) || issue.body.contains(q));
+            !issue.pull_request
+                && state
+                && text
+                && filter.labels.iter().all(|l| issue.labels.contains(l))
+        };
+        let mut matching: Vec<&Issue> = state
+            .issues
+            .iter()
+            .filter(|((project, _), issue)| project == p && wants(issue))
+            .map(|(_, issue)| issue)
+            .collect();
+        matching.sort_by_key(|issue| std::cmp::Reverse(issue.id.number));
+        let rest = matching.split_off(offset.min(matching.len()));
+        let limit = limit as usize;
+        let more = rest.len() > limit;
+        Ok(IssuePage {
+            issues: rest.into_iter().take(limit).cloned().collect(),
+            next_cursor: more.then(|| (offset + limit).to_string()),
+            truncated: more,
+        })
+    }
+
+    /// Unscripted: stores the issue under the next free number of the project.
+    async fn create_issue(
+        &self,
+        p: &ProjectId,
+        issue: &NewIssue,
+    ) -> Result<Issue, IntegrationError> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.calls.push(ForgeCall::CreateIssue {
+            project_id: *p,
+            issue: issue.clone(),
+        });
+        if let Some(scripted) = state.create_issue_results.pop_front() {
+            return scripted;
+        }
+        let number = state
+            .issues
+            .keys()
+            .filter(|(project, _)| project == p)
+            .map(|(_, n)| *n)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let created = Issue {
+            id: IssueRef {
+                repo: RepoRef {
+                    owner: "owner".into(),
+                    name: "repo".into(),
+                },
+                number,
+            },
+            url: format!("https://forge.example.test/owner/repo/issues/{number}"),
+            title: issue.title.clone(),
+            body: issue.body.clone(),
+            state: IssueState::Open,
+            labels: issue.labels.clone(),
+            pull_request: false,
+        };
+        state.issues.insert((*p, number), created.clone());
+        Ok(created)
+    }
+
     async fn add_issue_comment(
         &self,
         p: &ProjectId,
@@ -1021,7 +1147,7 @@ mod tests {
     use super::*;
     use crate::ids::PersonaId;
     use crate::keys::TaskKey;
-    use crate::seams::{IssueRef, IssueState, RepoRef, ReviewThread};
+    use crate::seams::ReviewThread;
     use secrecy::ExposeSecret;
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr};
@@ -1206,9 +1332,31 @@ mod tests {
             body: "Steps to reproduce".into(),
             state: IssueState::Open,
             labels: vec!["bug".into()],
+            pull_request: false,
         };
         forge.insert_issue(project_id, issue.clone());
         assert_eq!(forge.get_issue(&project_id, 7).await.unwrap(), issue);
+
+        let new = NewIssue {
+            title: "New".into(),
+            body: "Body".into(),
+            labels: vec!["bug".into()],
+        };
+        let created = forge.create_issue(&project_id, &new).await.unwrap();
+        assert_eq!(created.id.number, 8);
+        let all = IssueFilter::default();
+        let page = forge.list_issues(&project_id, &all, 1, None).await.unwrap();
+        assert_eq!((page.issues, page.truncated), (vec![created], true));
+        let next = page.next_cursor.as_deref();
+        let rest = forge.list_issues(&project_id, &all, 1, next).await.unwrap();
+        assert_eq!((rest.issues, rest.next_cursor), (vec![issue], None));
+        let by_text = IssueFilter {
+            query: Some("Steps".into()),
+            ..all.clone()
+        };
+        let found = forge.list_issues(&project_id, &by_text, 5, None).await;
+        assert_eq!(found.unwrap().issues.len(), 1);
+        assert!(forge.list_issues(&project_id, &all, 0, None).await.is_err());
 
         let comment = forge
             .add_issue_comment(&project_id, 7, "Fixed in PR #1")
@@ -1284,7 +1432,7 @@ mod tests {
             conflict,
             Err(IntegrationError::Conflict("PR already open".into()))
         );
-        assert_eq!(forge.calls().len(), 8);
+        assert_eq!(forge.calls().len(), 13); // 8 PR and issue calls, create_issue, 4 list_issues
     }
 
     #[tokio::test]

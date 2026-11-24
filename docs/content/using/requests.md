@@ -12,6 +12,7 @@ timeline.
 | Question | the agent, with up to 5 suggested answers | tap a suggested answer or write one |
 | `network-access` approval | the gateway when a host is blocked, or the agent with a reason | approve for the task, the project or everywhere; deny; or **Deny always** ([Network access](network-access.md)) |
 | `push-check-exception` approval | the Git proxy when a push hits findings in *approval* mode | approve exactly these findings for this task, or deny ([Git proxy](../security/git-proxy.md#push-checks)) |
+| `create-issue` approval | the agent of a [chat](chats.md#file-and-list-issues), with a title, a body and labels | read the issue under **Preview** and **Markdown**, then approve or deny; approving creates exactly that issue |
 
 ## Blocking and non-blocking
 

@@ -3,13 +3,17 @@
 //! operations.
 
 /// One entry per REST endpoint of `api.rs`; the GraphQL mutations have no such description.
-const OPERATIONS: [&str; 10] = [
-    "pulls/get",             // GET /repos/{owner}/{repo}/pulls/{pull_number}
-    "pulls/create",          // POST /repos/{owner}/{repo}/pulls
-    "pulls/list",            // GET /repos/{owner}/{repo}/pulls (find-open)
-    "pulls/update",          // PATCH /repos/{owner}/{repo}/pulls/{pull_number}
-    "issues/get",            // GET /repos/{owner}/{repo}/issues/{issue_number}
-    "issues/create-comment", // POST /repos/{owner}/{repo}/issues/{issue_number}/comments
+const OPERATIONS: [&str; 14] = [
+    "pulls/get",                       // GET /repos/{owner}/{repo}/pulls/{pull_number}
+    "pulls/create",                    // POST /repos/{owner}/{repo}/pulls
+    "pulls/list",                      // GET /repos/{owner}/{repo}/pulls (find-open)
+    "pulls/update",                    // PATCH /repos/{owner}/{repo}/pulls/{pull_number}
+    "issues/get",                      // GET /repos/{owner}/{repo}/issues/{issue_number}
+    "issues/create-comment",           // POST /repos/{owner}/{repo}/issues/{issue_number}/comments
+    "issues/list-for-repo", // GET /repos/{owner}/{repo}/issues (issues.list without a query)
+    "issues/create",        // POST /repos/{owner}/{repo}/issues
+    "issues/list-labels-for-repo", // GET /repos/{owner}/{repo}/labels (label names of issues.create)
+    "search/issues-and-pull-requests", // GET /search/issues (issues.list with a query)
     "repos/get-collaborator-permission-level", // GET /repos/{owner}/{repo}/collaborators/{username}/permission
     "checks/list-for-ref",                     // GET /repos/{owner}/{repo}/commits/{ref}/check-runs
     "repos/get-combined-status-for-ref",       // GET /repos/{owner}/{repo}/commits/{ref}/status

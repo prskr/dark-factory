@@ -2,7 +2,8 @@
 //! `factory-tools`, design D5).
 
 use df_core::{
-    DependencyKind, ExistingBranch, Principal, TaskKey, matches_agent_branch, sanitize_title,
+    DependencyKind, ExistingBranch, IntegrationError, Principal, TaskKey, matches_agent_branch,
+    sanitize_title,
 };
 use df_db::tasks::child_task_id;
 use df_db::{
@@ -11,7 +12,7 @@ use df_db::{
 };
 use serde_json::{Value, json};
 
-use super::{Outcome, text_arg};
+use super::{Outcome, forge_error, text_arg};
 
 mod merge;
 use crate::ChannelContext;
@@ -56,12 +57,16 @@ pub(super) async fn create_task(
             Err(_invalid) => return Ok(Outcome::error(invalid_base_task(&base))),
         }
     }
+    let issue_number = match linked_issue(ctx, rc, args).await {
+        Ok(number) => number,
+        Err(problem) => return Ok(Outcome::error(problem)),
+    };
     let input = NewTask {
         project_id: rc.project.id,
         persona_id: df_core::PersonaId::from_uuid(persona),
         title: Some(title),
         description: prompt,
-        issue_number: None,
+        issue_number,
         created_by: agent(rc),
         parent_id: Some(rc.task.id),
         depends_on,
@@ -82,6 +87,39 @@ pub(super) async fn create_task(
         Err(limit @ DbError::DelegationLimit(_)) => Ok(Outcome::error(limit.to_string())),
         Err(held @ DbError::BranchHeld { .. }) => Ok(Outcome::error(held.to_string())),
         Err(e) => Err(e.into()),
+    }
+}
+
+/// The number to link the new task to: the `issue` argument, once the project's repository has
+/// it as an issue and not as a pull request. The `Err` is what the agent is told. The check is
+/// no lock: the issue can change afterwards, as with the number of the "New task" form.
+async fn linked_issue(
+    ctx: &ChannelContext,
+    rc: &RunContext,
+    args: &Value,
+) -> Result<Option<i64>, String> {
+    let Some(value) = args.get("issue") else {
+        return Ok(None);
+    };
+    // The schema accepts `42.0` as an integer, which is no number to link: never create the task
+    // unlinked without saying so.
+    let Some(number) = value.as_u64().filter(|n| *n >= 1) else {
+        return Err(format!(
+            "`issue` must be a positive whole number, not {value}"
+        ));
+    };
+    // An absurdly large number is not an issue either.
+    let stored =
+        i64::try_from(number).map_err(|_too_large| format!("issue #{number} does not exist"))?;
+    match ctx.forge.get_issue(&rc.project.id, number).await {
+        Ok(issue) if issue.pull_request => {
+            Err(format!("#{number} is a pull request, not an issue"))
+        }
+        Ok(_) => Ok(Some(stored)),
+        Err(IntegrationError::NotFound(_)) => Err(format!(
+            "issue #{number} does not exist in this project's repository"
+        )),
+        Err(e) => Err(forge_error(&e).text),
     }
 }
 
@@ -253,6 +291,8 @@ fn parse_dependencies(args: &Value) -> Result<Vec<NewDependency>, String> {
         .collect()
 }
 
+#[cfg(test)]
+mod issue_tests;
 #[cfg(test)]
 mod merge_tests;
 #[cfg(test)]

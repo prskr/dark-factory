@@ -512,6 +512,41 @@ pub async fn system_messages(pool: &PgPool, key: &str, reason: &str) -> Result<V
     .with_context(|| format!("{reason} messages of task {key}"))
 }
 
+/// The id of the newest `create-issue` request of task `key`.
+pub async fn create_issue_request(pool: &PgPool, key: &str) -> Result<Option<Uuid>> {
+    sqlx::query_scalar(
+        "SELECT r.id FROM agent_requests r JOIN tasks t ON t.id = r.task_id \
+         WHERE t.key = $1 AND r.approval_type = 'create-issue' ORDER BY r.created_at DESC LIMIT 1",
+    )
+    .bind(key)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("create-issue request of task {key}"))
+}
+
+/// The number of the issue the control plane created for the approved `create-issue` request `id`;
+/// `None` until the job recorded it.
+pub async fn created_issue_number(pool: &PgPool, id: Uuid) -> Result<Option<u64>> {
+    let number: Option<String> =
+        sqlx::query_scalar("SELECT decision ->> 'issue_number' FROM agent_requests WHERE id = $1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .with_context(|| format!("decision of request {id}"))?;
+    number
+        .map(|n| n.parse().with_context(|| format!("issue number `{n}`")))
+        .transpose()
+}
+
+/// The number of the issue task `key` is linked to.
+pub async fn linked_issue(pool: &PgPool, key: &str) -> Result<Option<i64>> {
+    sqlx::query_scalar("SELECT issue_number FROM tasks WHERE key = $1")
+        .bind(key)
+        .fetch_one(pool)
+        .await
+        .with_context(|| format!("linked issue of task {key}"))
+}
+
 /// The scopes of the `http-host` allowlist entries for exactly `host:port` that cover task `key`
 /// (`task` for an entry of the task itself).
 pub async fn http_host_scopes(

@@ -46,11 +46,12 @@ pub use keys::{KeyError, ProjectKey, TaskKey, is_chat_key};
 pub use lifecycle::{EventType, InstanceSubscription, LifecycleEventsConfig};
 pub use seams::{
     Author, AuthorRole, CiCheck, CiJobLog, CiState, CiStatus, Comment, CredentialRef, Feedback,
-    ForgeClient, IntegrationError, Issue, IssueRef, IssueState, ListedPullRequest, NewPullRequest,
-    PeerIdentity, PrComment, ProviderError, PullRequest, PullRequestFilter, PullRequestRef,
-    PullRequestState, PullRequestUpdate, RateLimit, RepoRef, Review, ReviewComment, ReviewThread,
-    ReviewVerdict, RunSandboxSpec, SandboxEvent, SandboxProvider, SecretError, SecretKeyRef,
-    SecretStore, TaskVolumeSpec, UpstreamError,
+    ForgeClient, IntegrationError, Issue, IssueFilter, IssuePage, IssueRef, IssueState,
+    IssueStateFilter, ListedPullRequest, NewIssue, NewPullRequest, PeerIdentity, PrComment,
+    ProviderError, PullRequest, PullRequestFilter, PullRequestRef, PullRequestState,
+    PullRequestUpdate, RateLimit, RepoRef, Review, ReviewComment, ReviewThread, ReviewVerdict,
+    RunSandboxSpec, SandboxEvent, SandboxProvider, SecretError, SecretKeyRef, SecretStore,
+    TaskVolumeSpec, UpstreamError,
 };
 pub use title::{
     FALLBACK_TITLE, TITLE_MAX_CHARS, TitleSource, placeholder_title, sanitize_title, title_too_long,

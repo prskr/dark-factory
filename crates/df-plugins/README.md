@@ -64,8 +64,8 @@ configuration, per-project inputs, bot account access and token scopes).
 
 `rate-limited` waits `retry-after` (1 s if absent) and retries; a `retry-after` above 30 s is returned
 without retrying. `transport` waits 1 s. Both are retried at most 3 times. All other errors are
-returned. `add-comment` is not idempotent; a retry can rarely create a duplicate comment (accepted by
-the contract).
+returned. `add-comment` and `issues.create` are not idempotent; a retry can rarely create a
+duplicate comment or issue (accepted by the contract).
 
 ## Development
 

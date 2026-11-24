@@ -7,8 +7,8 @@ use std::sync::Arc;
 use df_core::webhooks::ParsedEvent;
 use df_core::{
     AuthScheme, AuthorRole, CiJobLog, CiStatus, Comment, CredentialRef, Feedback, IntegrationError,
-    Issue, ListedPullRequest, NewPullRequest, PullRequest, PullRequestFilter, PullRequestUpdate,
-    RepoRef, SecretStore,
+    Issue, IssueFilter, IssuePage, ListedPullRequest, NewIssue, NewPullRequest, PullRequest,
+    PullRequestFilter, PullRequestUpdate, RepoRef, SecretStore,
 };
 use futures::future::BoxFuture;
 use secrecy::SecretString;
@@ -404,6 +404,48 @@ impl PluginForgeClient {
             Box::pin(async move {
                 let issues = plugin.darkfactory_integrations_issues();
                 issues.call_get(store, &id).await
+            })
+        })
+        .await
+        .map(convert::from_issue)
+    }
+
+    pub(crate) async fn list_issues(
+        &self,
+        target: &RepoTarget,
+        filter: &IssueFilter,
+        limit: u32,
+        cursor: Option<&str>,
+    ) -> Result<IssuePage, IntegrationError> {
+        let repo = convert::repo(&target.repo);
+        let filter = convert::issue_filter(filter);
+        self.call(target, |plugin: &Forge, store| {
+            let (repo, filter) = (repo.clone(), filter.clone());
+            let cursor = cursor.map(str::to_string);
+            Box::pin(async move {
+                let issues = plugin.darkfactory_integrations_issues();
+                issues
+                    .call_list(store, &repo, &filter, limit, cursor.as_deref())
+                    .await
+            })
+        })
+        .await
+        .map(convert::from_issue_page)
+    }
+
+    /// Not idempotent; only `rate-limited` and `transport` errors are retried, like every call.
+    pub(crate) async fn create_issue(
+        &self,
+        target: &RepoTarget,
+        issue: &NewIssue,
+    ) -> Result<Issue, IntegrationError> {
+        let repo = convert::repo(&target.repo);
+        let issue = convert::new_issue(issue);
+        self.call(target, |plugin: &Forge, store| {
+            let (repo, issue) = (repo.clone(), issue.clone());
+            Box::pin(async move {
+                let issues = plugin.darkfactory_integrations_issues();
+                issues.call_create(store, &repo, &issue).await
             })
         })
         .await

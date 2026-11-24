@@ -7,6 +7,7 @@ use serde_json::json;
 
 use crate::testkit::{SseReader, TestApp, add_event, form, insert_run, new_task, seed, text};
 
+mod create_issue;
 mod deny_always;
 
 const LIVE: Duration = Duration::from_secs(1);
