@@ -30,8 +30,8 @@ Automated with the fake ACP agent and a fake MCP server; step 1 and step 3 also 
 ```mermaid
 flowchart LR
   PM[iter4-permissions] --> SK[iter4-skills]
-  PM --> MC[iter4-mcp-catalog]
-  MC --> MG[iter4-mcp-gateway]
+  MG[iter4-mcp-gateway] --> MC[iter4-mcp-catalog]
+  PM --> MC
   PM --> AU[iter4-audit-view]
   HR[iter4-harness-registry]
   CO[iter4-cost-view]
@@ -41,13 +41,13 @@ flowchart LR
 |---|---|
 | `iter4-permissions` | ADR-0011: `admin` and `controller` roles, one `can(principal, action, resource)` check, role → permission mapping in the instance configuration, instance-management permissions for agents (deny / requires approval / allow) with a ceiling, `instance-operation` approval type, `harness-permission` approvals for selected `session/request_permission` categories. |
 | `iter4-harness-registry` | F12: harness registry instead of the fixed `claude-code` value, ACP registry presets, credential mapping to an inference provider or a Secret, default egress hosts per harness, "Generic ACP" with an adapter command; usage from the gateway (decision 13). |
-| `iter4-mcp-catalog` | ADR-0032, control plane: register upstream servers (URL, credential reference), tool discovery (on registration, on demand, periodically), catalog snapshots, instance filters (selection, globs, read-only only), new and changed tools flagged, grants per persona and restrictions per project, `tool-access` approval type, UI. Project-scoped stdio servers from `.mcp.json`: the `repository-mcp-server` approval activates an entry, the runtime starts it in the sandbox and passes it in `session/new` (decision 8). |
-| `iter4-mcp-gateway` | ADR-0032, [`design/egress.md`](../../design/egress.md) §10: MCP endpoint (Streamable HTTP) in the gateway, pod-IP identity, credential injection, tool set enforcement on `tools/list` and `tools/call`, `search_tools` / `load_server` for large sets, one call record per call; the runtime registers the endpoint in `session/new`. |
+| `iter4-mcp-gateway` | Initial end-to-end slice (proposed: `openspec/changes/iter4-mcp-gateway`). ADR-0032, [`design/egress.md`](../../design/egress.md) §10: register HTTP servers (URL, credential reference, scheme) as board member, fetch tools on demand and pin a human selection, enable servers per project; MCP endpoint (Streamable HTTP) in the gateway, pod-IP identity, credential injection, tool set enforcement on `tools/list` and `tools/call`, private-destination check for upstreams, one call record per call; the runtime registers the endpoint in `session/new`. |
+| `iter4-mcp-catalog` | Builds on `iter4-mcp-gateway`. ADR-0032, control plane: periodic discovery, catalog snapshots, instance filters (globs, read-only only), new and changed tools flagged automatically, grants per persona (with the per-persona tool permissions of `iter4-permissions`), `tool-access` approval type, in-cluster upstream opt-in for stdio → HTTP bridges. Project-scoped stdio servers from `.mcp.json`: the `repository-mcp-server` approval activates an entry, the runtime starts it in the sandbox and passes it in `session/new` (decision 8). `search_tools` / `load_server`: backlog. |
 | `iter4-skills` | F13: skill storage with versions, built-in skills from [`agent-playbook.md`](../agent-playbook.md), assignment per persona and project, delivery in `Assign`, the runtime writes them into the harness's skill directory on every run, a transcript warning for shadowed repository skills (decision 12), UI, skill changes as an agent instance operation. |
 | `iter4-audit-view` | Filterable `audit_log` list (actor, action, resource, time), push records and decided requests linked from their entries, desktop only (ADR-0035). |
 | `iter4-cost-view` | ADR-0021: pricing tables in the instance configuration, versioned by date, seeded with defaults (decision 14); cost per run, task, persona and project from harness and gateway usage; "what if" for subscription runs, actual cost for API-billed runs. |
 
-Suggested order: `iter4-permissions` first, because registering harnesses, MCP credentials and skills needs the `admin` role, and agent instance operations need the modes. `iter4-mcp-catalog` before `iter4-mcp-gateway` (the gateway only receives the result). `iter4-harness-registry` and `iter4-cost-view` are independent and can run in parallel.
+Suggested order: `iter4-permissions` first, because registering harnesses, MCP credentials and skills needs the `admin` role, and agent instance operations need the modes. `iter4-mcp-gateway` (board members register servers until the `admin` role exists) before `iter4-mcp-catalog`, which extends its pinned tool list into the full catalog. `iter4-harness-registry` and `iter4-cost-view` are independent and can run in parallel.
 
 ## 4. Decisions
 
