@@ -91,11 +91,11 @@ df-web = { path = "crates/df-web" }
 forge-common = { path = "plugins/forge-common" }
 futures = "0.3"
 getrandom = { version = "0.4", default-features = false, features = ["sys_rng"] }
-gix = { version = "0.90.0", default-features = false, features = ["sha1", "blocking-network-client"] }
+gix = { version = "0.91.0", default-features = false, features = ["sha1", "blocking-network-client"] }
 gix-error = "0.5.2"
-gix-pack = { version = "0.77.0", default-features = false, features = ["sha1", "streaming-input"] }
+gix-pack = { version = "0.78.0", default-features = false, features = ["sha1", "streaming-input"] }
 gix-packetline = "0.24.1"
-gix-transport = { version = "0.62.0", default-features = false, features = ["http-client"] }
+gix-transport = { version = "0.63.0", default-features = false, features = ["http-client"] }
 globset = { version = "0.4.15", default-features = false }
 hex = "0.4"
 hickory-resolver = { version = "0.26", default-features = false, features = ["tokio", "system-config"] }
