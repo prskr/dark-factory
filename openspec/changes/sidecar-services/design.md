@@ -18,7 +18,7 @@ Current state that shapes the approach:
 
 **Goals:**
 - A board member can add a Playwright MCP sidecar to a project. The agent of the next task run can drive a headless browser against an app it runs on `localhost`, and can store screenshots as artifacts.
-- The same mechanism serves a PostgreSQL (no MCP, no egress, no shared directory).
+- The same mechanism serves a PostgreSQL (no MCP, no egress, no shared directory; `PGDATA` in a subdirectory of the data path, because the `emptyDir` root belongs to root with group 1000 and `initdb` can't `chmod` it).
 - A broken sidecar ends the run fast with a reason that names it.
 - No new trust given to sidecars: no factory credential, no factory volume.
 
@@ -49,7 +49,7 @@ A sidecar belongs to a project. Fields:
 | `env` | no | name/value pairs; names are C identifiers; `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and their lower-case forms are reserved (D6) |
 | `resources` | CPU and memory request and limit required; ephemeral storage request and limit optional | Kubernetes quantities, request ≤ limit |
 | `start_probe` | no | `tcp` (port), `http` (port, path) or `none`; default `tcp` on the MCP port, else on the first port, else `none` |
-| `start_timeout_seconds` | no | 10–600, default 120 |
+| `start_timeout_seconds` | no | 10–300, default 120; the sum over the project ≤ half of `runs.connectTimeoutSeconds` (D4) |
 | `data_path` | no | absolute path; an `emptyDir` is mounted there |
 | `purpose` | no | plain text, at most 500 characters, shown to the agent |
 | `mcp` | no | `port` (one of `ports`), `path` (default `/mcp`); transport Streamable HTTP |
@@ -76,18 +76,29 @@ Alternative: plain extra containers in `containers`. Rejected: no start order, s
 
 ### D3. The run's snapshot
 
-At provisioning the orchestrator reads the project's sidecars and stores them on the run (`runs.sidecars JSONB`, empty array for none). `RunSandboxSpec.sidecars`, the system prompt and `Assign.sidecar_mcp_servers` all come from this snapshot. Reasons: a settings change between pod creation and `Assign` would otherwise give the agent instructions for sidecars its pod doesn't have, and the run detail can show what the run had.
+The orchestrator reads the project's sidecars and stores them on the run in the same transaction that creates the run row (`runs.sidecars JSONB NOT NULL`, empty array for none and for chat runs). Taking it at provisioning instead would make "not taken yet" and "no sidecars" look the same after an interrupted provisioning. `RunSandboxSpec.sidecars`, the system prompt and `Assign.sidecar_mcp_servers` all come from this snapshot. Reason: a settings change between pod creation and `Assign` would otherwise give the agent instructions for sidecars its pod doesn't have.
 
 ### D4. Start failures end the run early
 
-Today a pod that never gets its agent container running ends with `connect_timeout` after 600 s. With sidecars, the provider's pod watch also reads `status.initContainerStatuses` while the agent container has not started:
+Today a pod that never gets its agent container running ends with `connect_timeout` after 600 s (counted from run creation). With sidecars, the provider's pod watch also reads `status.initContainerStatuses` while the agent container has not started:
 
 | Sidecar state | `Gone` reason |
 |---|---|
 | waiting `ErrImagePull`, `ImagePullBackOff`, `InvalidImageName` | `sidecar <name>: image pull failed: <image>` |
-| `restartCount` ≥ 3, or waiting `CrashLoopBackOff` | `sidecar <name> failed to start: <last termination reason> (exit code <n>)`, or `start probe failed` when the kubelet killed it for the probe |
+| waiting `CreateContainerConfigError`, `CreateContainerError` | `sidecar <name> failed to start: <reason>: <message>` |
+| `restartCount` ≥ 1 | `sidecar <name> failed to start: <lastState.terminated.reason> (exit code <n>)` |
 
-The run ends `provisioning_failed` (not `sandbox_lost`): the definition, not the infrastructure, is usually at fault. Automatic resume applies as for other provisioning failures, so a broken definition fails the task after `runs.maxAutoResumes`. After the agent container started, sidecar restarts don't end the run; the log panel (D13) shows them.
+**One rule, first termination.** The kubelet shows a restartable init container as `CrashLoopBackOff` right after its first failure, so a "3 restarts" tolerance would have no effect. A sidecar that terminates once before the agent started ends the run. A database that crashes once during start is rare; the automatic resume covers it.
+
+**Probe cause from events.** A kill by the startup probe shows in the container status only as `Error` with exit code 137 or 143. The kubelet events (`Unhealthy` "Startup probe failed", `Killing` "failed startup probe") name the probe. The provider already watches events for image pulls (`provider/pull_events.rs`); it also maps these two events of an init container (`involvedObject.fieldPath` `spec.initContainers{<name>}`) and adds `; start probe failed` to the reason.
+
+**Pull events name the sidecar.** `map_image_pull_event` maps a kubelet pull failure event to `Gone` and the mapper keeps only the first `Gone` per run. It resolves the image of the event to a container of the pod; for a sidecar it uses the sidecar reason, so the name reaches the run whichever watch delivers first.
+
+**Timeout budget.** Sidecars start one after another, so the worst case before the agent starts is the pulls plus the sum of the start timeouts. Validation at save keeps that sum ≤ half of `runs.connectTimeoutSeconds` (300 s with the default), leaving the other half for pulls. A failing probe then ends the run with the sidecar's reason before the connect timeout. When an operator lowers the connect timeout later, existing definitions are not re-checked; the run may end `connect_timeout` instead (documented).
+
+**Outcome `sandbox_lost`.** The run ends `sandbox_lost` with the reason, like a project or harness image that can't be pulled today (`sandbox-provisioning`, "Sandbox events"; `run-orchestration`, "Timeouts and lost sandboxes"). No new outcome and no typed event are needed: the orchestrator stores the reason and does not parse it. Automatic resume applies, so a broken definition fails the task after `runs.maxAutoResumes`. Alternative: `provisioning_failed` for every start failure (sidecar, project, harness and runtime images), with a typed `StartFailed` event. Rejected for now: `sandbox.provisioning_failed` lifecycle events mean "no pod was created", and changing that is a separate change.
+
+After the agent container started, sidecar restarts don't end the run; the task page shows the restart count (D13).
 
 ### D5. MCP sidecars
 
@@ -110,7 +121,7 @@ message Assign {
 
 **Runtime:** registers each entry as `McpServer::Http` (name, url, no headers) after `factory` in both `session/new` and `session/load`. If the harness's `initialize` response doesn't advertise `mcpCapabilities.http`, the runtime registers only `factory` and emits a transcript warning `harness.sidecar_mcp_unsupported` naming the skipped servers. If DF-26 (MCP proxy, in progress) introduces a general list of HTTP MCP servers in `Assign`, the implementation uses that list with a sidecar entry instead of a separate field.
 
-**Iteration 4, decision 1 vs. decision 8:** decision 1 says third-party MCP servers are reached only through the gateway. Its reason is credentials and upstream servers outside the cluster: the gateway injects credentials and enforces tool sets. A sidecar MCP server runs in the pod, holds no factory credential and is defined by humans. That is the decision-8 family (project-scoped server in the sandbox, without factory credentials). Decision 8 activates `.mcp.json` entries with a `repository-mcp-server` approval because the repository is agent-influenced. UI-defined sidecars need no approval: a human with project-settings rights defines them. When sidecars come from the repository file, the `project-config` approval of ADR-0039 covers them. Iteration 4 decision 1 gets a note that in-pod servers without credentials are outside its scope.
+**Iteration 4, decision 1 vs. decision 8:** decision 1 says third-party MCP servers are reached only through the gateway. Its reason is credentials and upstream servers outside the cluster: the gateway injects credentials and enforces tool sets. A sidecar MCP server runs in the pod, holds no factory credential and is defined by humans. That is the decision-8 family (project-scoped server in the sandbox, without factory credentials). Decision 8 activates `.mcp.json` entries with a `repository-mcp-server` approval because the repository is agent-influenced. UI-defined sidecars need no approval: a human with project-settings rights defines them. When sidecars come from the repository file, the `project-config` approval of ADR-0039 covers them. Iteration 4 decision 1 and ADR-0032 (its source, "harnesses see two MCP servers") get a note that in-pod servers without credentials are outside their scope (task 9.2).
 
 **Tool permissions (later):** the planned per-persona tool permissions (with the DF-26 MCP proxy) filter `tools/list` and `tools/call` of the servers the harness gets. For a sidecar server, the runtime registers the proxy's endpoint instead of the sidecar URL, and the proxy applies the same filter, with the server key `sidecar/<name>`. This only controls what the harness is offered: the agent can always reach `localhost:<port>` from its shell, because the pod shares one network namespace. Tool permissions on sidecar servers are therefore guidance, not a boundary. The boundary is what the sidecar can do: no credentials, the task's egress allowlist (D6). The docs say so.
 
@@ -120,9 +131,10 @@ The pod's `NetworkPolicy` allows the gateway for every container of the pod; the
 
 Decision: **opt-in per sidecar**, `egress: none | proxy`.
 
-- `none` (default): no proxy variables. A PostgreSQL or a Playwright run against `localhost` needs nothing. Direct outbound connections are blocked by the network policy.
+- `none` (default): no proxy variables. A PostgreSQL or a Playwright run against `localhost` needs nothing. Direct connections are limited by the run's network policy, like the agent's: the control plane, the gateway and the project's cluster targets stay reachable (for example a shared database), the internet does not.
 - `proxy`: the sidecar gets the agent's `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and their lower-case forms (`agent_env` in `render.rs`, extracted for reuse). Connections go through the gateway with the task's allowlist, show in the task's egress log and raise `network-access` requests for denied hosts, exactly as for the agent. The egress log cannot tell the sidecar from the agent; the docs say so.
-- Chromium does not read the proxy variables reliably. The Playwright example passes `--proxy-server=$(HTTPS_PROXY)` in `args`; the spike (tasks 1.2) checks it.
+- Chromium does not read the proxy variables reliably. The Playwright example passes `--proxy-server=$(HTTPS_PROXY)` in `args`; the spike (task 1.2) checks it. This needs `egress: proxy`: with `none` the variable is not set and Kubernetes leaves `$(HTTPS_PROXY)` as literal text, so the docs show the argument only for `proxy`.
+- **Loopback bypass:** the agent's `NO_PROXY` today holds only the control plane IP, the Git host and the cluster targets. Clients that honour `HTTP_PROXY` and don't bypass loopback on their own would send `http://localhost:8931/mcp` (or the agent's `curl localhost:3000`) to the gateway, which refuses loopback. `NO_PROXY` gets `localhost,127.0.0.1,::1` for the agent and for `proxy` sidecars.
 
 Alternative: a separate allowlist per sidecar. Rejected: the gateway can't tell containers of one pod apart (one IP), so it would need a second proxy port or credentials per sidecar. Not worth it for the first step.
 
@@ -133,6 +145,7 @@ One `emptyDir` (disk, `sizeLimit` from `sandbox.sharedDirSizeLimit`, default `1G
 - Same path in both containers: a path the Playwright MCP server returns (`/tmp/shared/page-1.png`) is valid for the agent as is.
 - Below `/tmp`: Landlock already grants the harness full access to `/tmp`, and `write_artifact` with `path` already accepts files below `/tmp`. No change to `sandbox-filesystem-isolation` or `factory-mcp-server`. The spike checks that the Landlock rule on `/tmp` covers the mount below it (it should: Landlock rules follow the path hierarchy across mount points).
 - Both ways: the agent can also put files there for the browser (file uploads).
+- `write_artifact` accepts files up to 8 MiB. Screenshots and PDFs fit; Playwright traces and videos often don't. The how-to recommends screenshots and PDFs and says so.
 - `fsGroup: 1000` makes it writable for both.
 
 Alternative: `/data/shared`, as the task suggested. Rejected: `/data` is the task volume (or the read-only `emptyDir`), Landlock protects `/data` except `/data/repo` and `/data/home`, and the artifact roots exclude it. It would need changes in three places for no gain, and a mount inside the task volume suggests persistence it doesn't have.
@@ -149,6 +162,10 @@ What counts where:
 - Ephemeral storage: the kubelet counts the containers' writable layers, their logs and every disk `emptyDir` (sidecar data, shared directory, the read-only workspace's `/data`) against the pod's total; exceeding a container limit or an `emptyDir` `sizeLimit` evicts the pod (`sandbox_lost`, detail `Evicted`).
 - Kata: one VM per pod, which grows by every container's limits. A browser sidecar with `limits.memory: 2Gi` adds 2 GiB to the VM.
 
+**Quota pre-check.** A quota rejection ends a run `provisioning_failed` with detail `capacity` and requeues it without counting a resume. A pod that is larger than the quota on its own would loop forever. Before creating the pod, the provider lists the `ResourceQuota` objects of the sandbox namespace (new permission `list resourcequotas`) and compares the pod's totals with each `hard` value of `requests.cpu`, `requests.memory`, `limits.cpu`, `limits.memory`. A pod that exceeds one on its own is not created; the run ends `provisioning_failed` with a reason naming the resource and both values, not `capacity`, so automatic resume ends the task after `runs.maxAutoResumes`. Node size is not checked: a pod larger than every node stays `Pending` and ends `connect_timeout`, as today.
+
+**Concurrency.** Sidecars count against the same quota. With the chart defaults (`limits.memory` 64Gi, agent 4Gi) 16 sandboxes fit; with the Playwright example (+2Gi) only 10. The resources how-to says so.
+
 No instance-wide ceiling per sidecar in the first step: the quota is the ceiling (open question 3).
 
 Playwright guidance in the docs: requests `500m`/`1Gi`, limits `2`/`2Gi`, ephemeral storage `2Gi`; image size ~1–2 GB adds to cold start on every new node.
@@ -164,12 +181,12 @@ Playwright guidance in the docs: requests `500m`/`1Gi`, limits `2`/`2Gi`, epheme
 
 The sidecar is as untrusted as the sandbox: the agent controls it fully through its ports (Playwright's `browser_evaluate` runs any script in the browser).
 
-- **Container security context:** the same as the agent: user and group 1000 and `fsGroup` from the pod, `runAsNonRoot`, `allowPrivilegeEscalation: false`, capabilities `drop: [ALL]`, seccomp `RuntimeDefault`. Images that need root or a fixed other user don't run; the docs say so. `readOnlyRootFilesystem` is not set, as for the agent container (open question 4). Chromium needs `--no-sandbox` under these rules (no user namespaces, no setuid); the browser's own sandbox is replaced by the pod boundary.
+- **Container security context:** the same as the agent: user and group 1000 and `fsGroup` from the pod, `runAsNonRoot`, `allowPrivilegeEscalation: false`, capabilities `drop: [ALL]`, seccomp `RuntimeDefault`. An image built for root or another user still starts as user 1000; if its entrypoint can't cope, it exits and the run ends with that sidecar's reason (D4). The docs say so. `readOnlyRootFilesystem` is not set, as for the agent container (open question 4). Chromium needs `--no-sandbox` under these rules (no user namespaces, no setuid); the browser's own sandbox is replaced by the pod boundary.
 - **No factory volumes:** no `/opt/factory`, no harness image, no certificate (`/run/factory/tls`), no `/run/factory`, no task volume, no service account token. No Landlock inside the sidecar.
-- **What a sidecar can reach on `localhost`:** the runtime has no TCP listener (Context). The harness: Claude Code's ACP adapter has none; OpenCode's `opencode acp` may start an internal HTTP server on a loopback port. Task 1.3 lists the listening sockets of a run pod for both harnesses. If OpenCode listens without authentication, a sidecar could drive the harness; then the runtime must start OpenCode so that it doesn't listen, or the risk is documented before OpenCode personas may use sidecars.
+- **What a sidecar can reach on `localhost`:** the runtime has no TCP listener (Context). The harness: Claude Code's ACP adapter has none; OpenCode's `opencode acp` may start an internal HTTP server on a loopback port. Task 1.4 lists the listening sockets of a run pod for both harnesses. If OpenCode listens without authentication, a sidecar could drive the harness; then the runtime must start OpenCode so that it doesn't listen, or the risk is documented before OpenCode personas may use sidecars.
 - **Gateway identity:** the sidecar has the pod's IP, so it has the same identity as the agent at the egress proxy, the Git proxy (it can push to the task branch), the inference endpoint (it can call the model) and the planned MCP endpoint. It gains nothing the agent doesn't have, but a malicious image gets the task's powers. Mitigation: humans choose images, digest pinning, the F11 allowlist. Stated on the security page.
 - **Browser pages:** a page loaded through the proxy can send requests to `localhost` ports (the agent's dev server). Browser rules (CORS, Private Network Access) limit what it reads, not what it sends. The allowlist limits which sites load. Stated on the security page.
-- **Network policy:** unchanged. Ingress stays denied, so sidecar ports are reachable only inside the pod. Sidecars start before the per-run policy exists; the namespace's `default-deny-all` covers that window when the chart creates the namespace (as for the agent today).
+- **Network policy before the pod:** today `provision()` creates the pod first and then the policy, because the policy's owner reference needs the pod UID. Until now only the factory runtime runs in that window. With sidecars, a third-party image runs from the first second, and the chart's `default-deny-all` exists only when the chart creates the namespace. Decision: create the per-run policy (NetworkPolicy, or the Cilium policy in `cilium` mode) first, without owner, selecting the run-id label; then create the pod; then patch the owner reference in (the Role already has `patch`). Re-provisioning reuses the policy; teardown deletes it by name when it has no owner yet. This closes the window for all pods, not only those with sidecars, and needs no namespace precondition. Alternatives: a startup check for a default-deny policy (operator CNIs differ, hard to check reliably), or refusing sidecars without one (leaves the agent's window open). Ingress stays denied, so sidecar ports are reachable only inside the pod.
 
 ### D11. Read-only workspaces and data mode `task`
 
@@ -190,7 +207,7 @@ Line: name, ports, purpose, MCP server name if any, shared directory if any. Whe
 
 ### D13. Sidecar logs for humans
 
-`SandboxProvider::sidecar_logs(run_id, name, tail_lines)` reads `pods/log` with `container=<name>`, `tailLines=500`, `limitBytes=256 KiB`, and the container's state (running, waiting reason, restart count). The control plane's Role gets `get` on `pods/log` (**breaking** for operator-managed Roles; the startup check names it).
+`SandboxProvider::sidecar_logs(run_id, name, tail_lines)` reads `pods/log` with `container=<name>`, `tailLines=500`, `limitBytes=256 KiB`, and the container's state (running, waiting reason, restart count). The control plane's Role gets `get` on `pods/log` and `list` on `resourcequotas` (D8) (**breaking** for operator-managed Roles; the startup check names both). `RequiredPermission` in `df-k8s/src/startup.rs` has no subresource field yet; it gets `subresource: Option<&str>`, used in the SelfSubjectAccessReview, because `pods/log` as a resource name would never match the RBAC rule.
 
 UI: the task page's Overview shows a "Sidecars" list while the task's current run has a pod with sidecars: name, state, restarts and a "Log" action that opens a modal with the last lines (plain, escaped text, monospace) and a refresh button. Desktop only (ADR-0035). After the pod is gone the list says "Logs are gone with the sandbox". Logs can hold anything the agent made the sidecar print, so they are rendered as text only.
 
@@ -216,6 +233,8 @@ Only the Kubernetes provider exists today, so this change adds no code for it. `
 | Credentials also given to the agent's environment | Purpose text only | Keeps `Assign` env unchanged; backlog row |
 | Image allowlist applies (ADR-0039) | With F11 | Only needed for agent-influenced images (D9) |
 | Shared files not mentioned | `/tmp/shared` | Playwright output (D7) |
+| Pod first, then the per-run policy (current code) | Policy first, owner patched in | A sidecar image runs before the agent (D10) |
+| — | Quota pre-check before the pod | A pod larger than the quota would requeue forever (D8) |
 | MCP not mentioned | `mcp` field, `session/new` registration | Leading use case (D5) |
 
 §15 gets a short update pointing to this change at archive.
@@ -230,13 +249,16 @@ Only the Kubernetes provider exists today, so this change adds no code for it. `
 - [Egress log can't tell agent and sidecar apart] → Documented; a per-container identity is not possible with one pod IP.
 - [Tool permissions can't bind a sidecar MCP server] → D5; documented.
 - [Sidecar logs vanish with the pod] → Backlog row "Kept sidecar logs".
-- [`pods/log` in the Role breaks custom Roles] → Startup check names it; upgrade notes.
+- [`pods/log` and `resourcequotas` in the Role break custom Roles] → Startup check names them; upgrade notes.
+- [A sidecar that crashes once during start ends the run] → D4; automatic resume retries; the reason names the sidecar.
+- [An operator lowers `runs.connectTimeoutSeconds` below twice the sidecar start budget] → Runs end `connect_timeout`; documented in troubleshooting.
 
 ## Migration Plan
 
 - One migration: table `project_sidecars`, column `runs.sidecars JSONB NOT NULL DEFAULT '[]'`. Existing projects have no sidecars, so pods don't change.
-- Helm: `pods/log` in the Role, `sandbox.sharedDirSizeLimit` (default `1Gi`). Control plane rolls once.
-- Rollback: drop the sidecars of every project before downgrading; the old control plane ignores the new table and column.
+- Helm: `get pods/log` and `list resourcequotas` in the Role, `sandbox.sharedDirSizeLimit` (default `1Gi`). Control plane rolls once.
+- Policy-first provisioning applies to new runs after the upgrade; running sandboxes keep their policy.
+- Rollback: restore the pre-upgrade database backup, as `docs/content/operations/upgrades.md` describes. Migrations only go forward; an older control plane does not start on the newer schema.
 
 ## Open Questions
 
@@ -249,3 +271,5 @@ Product decisions for Peter Kurfer, each with my recommendation:
 5. **Who edits sidecars?** Recommendation: board members, like the project image; `admin` once `iter4-permissions` lands, because sidecars choose images.
 6. **Egress default:** `none` with opt-in `proxy` (D6)? Recommendation: yes.
 7. **Shared directory path** `/tmp/shared` instead of `/data/shared`? Recommendation: `/tmp/shared` (D7).
+8. **Network policy window:** create the per-run policy before the pod for every run (D10)? Recommendation: yes; it also closes today's window for the agent container and needs no namespace precondition.
+9. **Start failure outcome:** keep `sandbox_lost` (D4), or move every start failure (sidecar, project, harness, runtime image) to `provisioning_failed` with a typed event in a separate change? Recommendation: `sandbox_lost` now; the separate change only if the outcome name matters to users.

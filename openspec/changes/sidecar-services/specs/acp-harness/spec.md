@@ -8,8 +8,8 @@ The runtime SHALL register every entry of `Assign.sidecar_mcp_servers` as an HTT
 - **THEN** `session/new` lists the stdio server `factory` and the HTTP server `playwright` with URL `http://localhost:8931/mcp`
 
 #### Scenario: Resumed session
-- **WHEN** the same run resumes a session with `session/load`
-- **THEN** `session/load` lists the same two servers
+- **WHEN** run 2 of `DF-7` resumes the session of run 1 with `session/load` and run 2's `Assign.sidecar_mcp_servers` is [`playwright`, `http://localhost:8931/mcp`]
+- **THEN** `session/load` lists `factory` and `playwright` from run 2's `Assign`
 
 #### Scenario: Harness without HTTP MCP
 - **WHEN** the harness doesn't advertise HTTP MCP support

@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Sidecar definition
-Board members SHALL create, edit, reorder and delete up to 5 sidecars per project, each with name, image, command and args, ports, env, resources, start probe (`tcp`, `http` or `none`), start timeout (10–600 s, default 120), data path, purpose (at most 500 characters), MCP endpoint, egress mode (`none` or `proxy`) and shared directory (default off). Every change SHALL be audited. Agents SHALL have no way to create or change sidecars.
+Board members SHALL create, edit, reorder and delete up to 5 sidecars per project, each with name, image, command and args, ports, env, resources, start probe (`tcp`, `http` or `none`), start timeout, data path, purpose (at most 500 characters), MCP endpoint, egress mode (`none` or `proxy`) and shared directory (default off). Every change SHALL be audited. Agents SHALL have no way to create or change sidecars.
 
 #### Scenario: Playwright sidecar
 - **WHEN** a board member adds sidecar `playwright` to project `DF` with image `mcr.microsoft.com/playwright/mcp@sha256:…`, port 8931, MCP endpoint on 8931 with path `/mcp`, requests `500m`/`1Gi`, limits `2`/`2Gi`, egress `proxy` and shared directory on
@@ -45,11 +45,18 @@ A sidecar SHALL have a CPU request, a CPU limit, a memory request and a memory l
 - **WHEN** a board member adds env `HTTPS_PROXY` to a sidecar
 - **THEN** the form shows a validation error that the egress mode sets the proxy
 
+### Requirement: Sidecar start timeouts
+A start timeout SHALL be 10–300 s (default 120 s). The sum of the start timeouts of a project's sidecars SHALL be at most half of `runs.connectTimeoutSeconds`, so that a failing start ends the run before the connect timeout.
+
+#### Scenario: Timeouts above the budget
+- **WHEN** `runs.connectTimeoutSeconds` is 600 and project `DF` has sidecars with start timeouts 200 s and 60 s
+- **THEN** saving a change that sets the second one to 120 s fails with a validation error naming the budget of 300 s
+
 ### Requirement: Sidecars in task runs
-Every task run SHALL start with the sidecars its project had when the run was provisioned. The run SHALL keep that set: the pod, the system prompt and `Assign` SHALL use it, and later changes to the project's sidecars SHALL apply only to later runs. Chat runs SHALL start without sidecars.
+Every task run SHALL start with the sidecars its project had when the run was created. The run SHALL keep that set: the pod, the system prompt and `Assign` SHALL use it, and later changes to the project's sidecars SHALL apply only to later runs. Chat runs SHALL start without sidecars.
 
 #### Scenario: Change during a run
-- **WHEN** run 2 of `DF-7` was provisioned with sidecar `postgres` and a board member deletes `postgres` while the run is active
+- **WHEN** run 2 of `DF-7` was created with sidecar `postgres` and a board member deletes `postgres` while the run is active
 - **THEN** the pod keeps `postgres`, the run's system prompt still names it, and run 3 starts without it
 
 #### Scenario: Chat run
@@ -57,7 +64,7 @@ Every task run SHALL start with the sidecars its project had when the run was pr
 - **THEN** its pod has no sidecar and its system prompt names none
 
 ### Requirement: Start before the agent
-Each sidecar SHALL start before the agent container, in the project's order, and the agent container SHALL start only after every sidecar passed its start probe (with probe `none`: after it started). Without an explicit probe, the probe SHALL be a TCP check on the MCP port, else on the first port, else none. A sidecar SHALL be restarted when it exits while the run is active and SHALL stop when the agent container ends.
+Each sidecar SHALL start before the agent container, in the project's order, and the agent container SHALL start only after every sidecar passed its start probe (with probe `none`: after it started). Without an explicit probe, the probe SHALL be a TCP check on the MCP port, else on the first port, else none. After the agent container started, a sidecar SHALL be restarted when it exits, and the sidecars SHALL stop when the agent container ends.
 
 #### Scenario: Database ready before the runtime
 - **WHEN** run 1 of `DF-7` starts with sidecar `postgres` on port 5432 and default probe
@@ -65,43 +72,51 @@ Each sidecar SHALL start before the agent container, in the project's order, and
 
 #### Scenario: Sidecar crashes during the run
 - **WHEN** sidecar `playwright` exits with code 1 while the harness is in a turn
-- **THEN** the sidecar is restarted and the run continues
+- **THEN** the sidecar is restarted, the run continues, and the restart count on the task page increases
 
 #### Scenario: Run ends
 - **WHEN** the agent container of the run ends
 - **THEN** the pod's sidecars stop and the pod reaches a final phase
 
 ### Requirement: Sidecar start failures
-While the agent container has not started, a sidecar whose image can't be pulled, or that restarted 3 times or is in back-off, SHALL end the run `provisioning_failed` with a reason naming the sidecar and the image or the last termination reason and exit code, without waiting for the connect timeout. Automatic resume SHALL apply as for other provisioning failures.
+A sidecar start failure reported by the provider (`sandbox-provisioning`, "Sidecar events") SHALL end the run `sandbox_lost` with the provider's reason, without waiting for the connect timeout. Automatic resume SHALL apply as for any lost sandbox.
 
 #### Scenario: Wrong image
 - **WHEN** the image of sidecar `postgres` can't be pulled
-- **THEN** the run ends `provisioning_failed` with a reason `sidecar postgres: image pull failed: <image>` within 30 seconds of the kubelet reporting the failure
+- **THEN** the run ends `sandbox_lost` with reason `sidecar postgres: image pull failed: <image>` within 30 seconds of the kubelet reporting the failure
 
 #### Scenario: Probe never passes
-- **WHEN** sidecar `playwright` listens on 8930 but its probe checks 8931, and the kubelet restarted it 3 times
-- **THEN** the run ends `provisioning_failed` with a reason naming `playwright` and the failed start probe
+- **WHEN** sidecar `playwright` with start timeout 60 s listens on 8930 but its probe checks 8931
+- **THEN** about 60 s after the sidecar started, the kubelet kills it, and the run ends `sandbox_lost` with a reason naming `playwright` and the failed start probe, before the connect timeout
+
+#### Scenario: Entrypoint needs root
+- **WHEN** the entrypoint of sidecar `legacy` exits with code 1 because it doesn't run as root
+- **THEN** the run ends `sandbox_lost` with reason `sidecar legacy failed to start: Error (exit code 1)`
 
 ### Requirement: Sidecars at localhost
-Sidecar ports SHALL be reachable from the agent container at `localhost:<port>` without an allowlist entry, and SHALL NOT be reachable from outside the pod.
+Sidecar ports SHALL be reachable from the agent container at `localhost:<port>` without an allowlist entry and without passing the egress proxy, also for clients that honour the proxy variables, and SHALL NOT be reachable from outside the pod.
 
 #### Scenario: Agent connects to the database
 - **WHEN** the agent runs `psql postgres://dev:dev@localhost:5432/app` in a run with sidecar `postgres` on port 5432
 - **THEN** the connection succeeds and no egress log entry is written
 
+#### Scenario: HTTP client with proxy variables
+- **WHEN** the agent runs `curl http://localhost:8931/mcp` with the container's proxy variables
+- **THEN** the request reaches sidecar `playwright` directly and no egress log entry is written
+
 #### Scenario: Other pod
 - **WHEN** a pod of another run connects to the pod IP of `DF-7`'s run on port 5432
-- **THEN** the connection is refused by the network policy
+- **THEN** it doesn't connect, because the network policy drops the traffic
 
 ### Requirement: Sidecar data directory
-A sidecar with a data path SHALL get an empty directory there at every run start. When the sidecar has an ephemeral storage limit, the directory SHALL be limited to that size.
+A sidecar with a data path SHALL get an empty directory there at every run start, writable by user 1000.
 
 #### Scenario: Fresh database each run
-- **WHEN** run 2 of `DF-7` starts with sidecar `postgres` and data path `/var/lib/postgresql/data`
-- **THEN** the directory is empty, whatever run 1 wrote
+- **WHEN** run 2 of `DF-7` starts with sidecar `postgres`, data path `/var/lib/postgresql/data` and env `PGDATA=/var/lib/postgresql/data/pgdata`
+- **THEN** the directory is empty, whatever run 1 wrote, and PostgreSQL initializes its cluster in `pgdata`
 
 ### Requirement: Sidecar egress
-A sidecar with egress `none` SHALL get no proxy variables and SHALL have no direct outbound access. A sidecar with egress `proxy` SHALL get the same `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` values (and lower-case forms) as the agent container; its connections through the proxy SHALL follow the task's allowlist, appear in the task's egress log and raise `network-access` requests for denied hosts like the agent's.
+A sidecar with egress `proxy` SHALL reach external hosts through the egress proxy with the task's allowlist; its connections SHALL appear in the task's egress log and denied hosts SHALL raise `network-access` requests, as for the agent. A sidecar with egress `none` gets no proxy variables; its direct connections are limited by the run's network policy like the agent's (control plane, gateway, the project's cluster targets).
 
 #### Scenario: Browser opens an allowed site
 - **WHEN** sidecar `playwright` with egress `proxy` opens `https://docs.rs` and `docs.rs` is allowed for the task
@@ -112,11 +127,11 @@ A sidecar with egress `none` SHALL get no proxy variables and SHALL have no dire
 - **THEN** the connection is denied and a `network-access` request for `example.com` is raised for the task
 
 #### Scenario: No egress
-- **WHEN** sidecar `postgres` with egress `none` connects directly to an address outside the pod
-- **THEN** the connection is blocked and the container has no proxy variables
+- **WHEN** sidecar `postgres` with egress `none` connects directly to `1.1.1.1:443`
+- **THEN** the connection fails and the container has no proxy variables
 
 ### Requirement: Shared directory
-When a run has a sidecar with the shared directory on, the agent container and every such sidecar SHALL mount one empty directory at `/tmp/shared`, writable by both, limited to `sandbox.sharedDirSizeLimit` (default `1Gi`). Without such a sidecar the directory SHALL NOT be mounted.
+When a run has a sidecar with the shared directory on, the agent container and every such sidecar SHALL see the same empty directory at `/tmp/shared`, writable by both. Files in it SHALL be usable with `write_artifact` within its size limit (8 MiB per file).
 
 #### Scenario: Screenshot as artifact
 - **WHEN** sidecar `playwright` saves `/tmp/shared/login.png` and the harness calls `write_artifact` with `path: "/tmp/shared/login.png"`
@@ -127,7 +142,7 @@ When a run has a sidecar with the shared directory on, the agent container and e
 - **THEN** sidecar `playwright` can read `/tmp/shared/fixture.csv`
 
 ### Requirement: Sidecar isolation
-Sidecars SHALL run with the agent container's restrictions: user and group 1000, non-root, no privilege escalation, all capabilities dropped, seccomp `RuntimeDefault`. They SHALL NOT mount the runtime image, a harness image, the certificate volume, `/run/factory` or the task volume, and SHALL NOT share the process namespace with the agent container.
+A sidecar SHALL have no access to the runtime's files, the certificate or the task volume, and SHALL NOT see the agent container's processes, nor the agent the sidecar's. The pod shape that ensures it is in `sandbox-provisioning`, "Restricted sidecar containers".
 
 #### Scenario: No certificate in the sidecar
 - **WHEN** a process in sidecar `playwright` lists `/run/factory`
@@ -136,10 +151,6 @@ Sidecars SHALL run with the agent container's restrictions: user and group 1000,
 #### Scenario: Agent can't see sidecar processes
 - **WHEN** the agent lists processes in its container
 - **THEN** no process of a sidecar is shown
-
-#### Scenario: Image needs root
-- **WHEN** a sidecar image can only start as root
-- **THEN** it fails to start and the run ends `provisioning_failed` with a reason naming the sidecar
 
 ### Requirement: Sidecars in the run instructions
 The system prompt of a run with sidecars SHALL list each sidecar with name, ports, purpose, MCP server name (if it has an MCP endpoint) and `/tmp/shared` (if it mounts the shared directory), and SHALL say that they are reachable at `localhost` and that their ports are taken. A run without sidecars SHALL have no such part.
