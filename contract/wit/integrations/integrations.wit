@@ -285,11 +285,17 @@ interface pull-requests {
 
 /// Issues in an issue tracker.
 interface issues {
-    use types.{issue-ref, error};
+    use types.{repo-ref, issue-ref, error};
 
     enum issue-state {
         open,
         closed,
+    }
+
+    enum state-filter {
+        open,
+        closed,
+        all,
     }
 
     record issue {
@@ -301,6 +307,36 @@ interface issues {
         body: string,
         state: issue-state,
         labels: list<string>,
+        /// True if the number belongs to a pull request. `get` accepts both;
+        /// `list` and `create` return false.
+        pull-request: bool,
+    }
+
+    record issue-filter {
+        state: state-filter,
+        /// An issue must have all of them.
+        labels: list<string>,
+        /// Literal free text matched against title and body by the forge.
+        query: option<string>,
+    }
+
+    record issue-page {
+        /// Issues only, never pull requests. Newest first.
+        issues: list<issue>,
+        /// Opaque; pass it as `cursor` for the next page. `none` when no
+        /// further page can be read.
+        next-cursor: option<string>,
+        /// More matching issues exist than were returned (`limit` reached or
+        /// the plugin stopped at a forge listing limit).
+        truncated: bool,
+    }
+
+    record new-issue {
+        title: string,
+        /// Markdown.
+        body: string,
+        /// Label names; one that doesn't exist is `invalid-input`.
+        labels: list<string>,
     }
 
     record comment {
@@ -310,6 +346,15 @@ interface issues {
     }
 
     get: func(id: issue-ref) -> result<issue, error>;
+
+    /// Lists issues, never pull requests, newest first. At most `limit`
+    /// (0 is `invalid-input`). Concurrent changes can make a cursor skip or
+    /// repeat an issue.
+    %list: func(repo: repo-ref, filter: issue-filter, limit: u32, cursor: option<string>) -> result<issue-page, error>;
+
+    /// Creates an issue. Not idempotent: the host only retries when the error
+    /// is `rate-limited` or `transport` and accepts rare duplicates.
+    create: func(repo: repo-ref, issue: new-issue) -> result<issue, error>;
 
     /// Adds a Markdown comment. Not idempotent: the host only retries when
     /// the error is `rate-limited` or `transport` and accepts rare duplicates.

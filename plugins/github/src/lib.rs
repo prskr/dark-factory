@@ -24,7 +24,9 @@ mod webhook;
 use darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef};
 use darkfactory::integrations::webhook_signature;
 use exports::darkfactory::integrations::ci::{CiStatus, Guest as CiGuest, LogTail};
-use exports::darkfactory::integrations::issues::{Comment, Guest as IssuesGuest, Issue};
+use exports::darkfactory::integrations::issues::{
+    Comment, Guest as IssuesGuest, Issue, IssueFilter, IssuePage, NewIssue,
+};
 use exports::darkfactory::integrations::pull_requests::{
     AuthorRole, Feedback, Guest as PullRequestsGuest, ListedPullRequest, NewPullRequest,
     OpenFilter, PostedComment, PullRequest, PullRequestUpdate,
@@ -79,6 +81,19 @@ impl PullRequestsGuest for GitHubPlugin {
 impl IssuesGuest for GitHubPlugin {
     fn get(id: IssueRef) -> Result<Issue, Error> {
         instance()?.get_issue(&id)
+    }
+
+    fn list(
+        repo: RepoRef,
+        filter: IssueFilter,
+        limit: u32,
+        cursor: Option<String>,
+    ) -> Result<IssuePage, Error> {
+        instance()?.list_issues(&repo, &filter, limit, cursor.as_deref())
+    }
+
+    fn create(repo: RepoRef, issue: NewIssue) -> Result<Issue, Error> {
+        instance()?.create_issue(&repo, &issue)
     }
 
     fn add_comment(id: IssueRef, body: String) -> Result<Comment, Error> {

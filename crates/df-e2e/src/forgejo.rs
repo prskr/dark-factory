@@ -105,6 +105,19 @@ impl Forgejo {
             .context("issue number")
     }
 
+    /// Title and body of issue `number`.
+    pub async fn issue_text(&self, number: u64) -> Result<(String, String)> {
+        let issue: Value = self.json(&format!("issues/{number}")).await?;
+        let text = |key: &str| {
+            issue
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .with_context(|| format!("`{key}` of issue {number}"))
+        };
+        Ok((text("title")?, text("body")?))
+    }
+
     /// Comments of issue (or pull request) `number`.
     pub async fn comments(&self, number: u64) -> Result<Vec<Value>> {
         self.json(&format!("issues/{number}/comments")).await

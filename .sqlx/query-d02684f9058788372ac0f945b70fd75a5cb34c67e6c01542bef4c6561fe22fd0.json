@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE agent_requests SET decision = COALESCE(decision, '{}'::jsonb) || $2 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d02684f9058788372ac0f945b70fd75a5cb34c67e6c01542bef4c6561fe22fd0"
+}

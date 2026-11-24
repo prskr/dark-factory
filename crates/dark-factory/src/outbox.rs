@@ -1,5 +1,5 @@
 //! The outbox dispatcher and its handlers: the pull request forge actions (`pr.mark_draft`,
-//! `pr.sync`) and, with a signing key, the delivery of lifecycle events.
+//! `pr.sync`), the creation of approved issues (`issue.create`) and, with a signing key, the delivery of lifecycle events.
 
 use std::sync::Arc;
 
@@ -7,6 +7,7 @@ use df_core::ForgeClient;
 use df_core::config::SchedulingConfig;
 use df_db::outbox::{Dispatcher, OutboxHandler};
 use df_db::{Notifier, PgPool};
+use df_orchestrator::issues::IssueCreateHandler;
 use df_orchestrator::pr::mark_draft::MarkDraftHandler;
 use df_orchestrator::pr::sync::PrSyncHandler;
 use opentelemetry::metrics::Meter;
@@ -47,7 +48,8 @@ fn handlers(
             forge.clone(),
             retry_base,
         )),
-        Arc::new(PrSyncHandler::new(pool.clone(), forge, retry_base)),
+        Arc::new(PrSyncHandler::new(pool.clone(), forge.clone(), retry_base)),
+        Arc::new(IssueCreateHandler::new(pool.clone(), forge, retry_base)),
     ];
     if let Some(key) = delivery.signing_key {
         let clients = Clients::new(delivery.project_targets)?;
@@ -61,6 +63,7 @@ fn handlers(
 mod tests {
     use df_core::public_address::ProjectTargets;
     use df_core::testing::FakeForgeClient;
+    use df_db::create_issue::ISSUE_CREATE_KIND;
     use df_db::lifecycle_events::DELIVER_KIND;
     use df_db::tasks::{MARK_DRAFT_KIND, PR_SYNC_KIND};
 
@@ -90,8 +93,19 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(kinds(off), [MARK_DRAFT_KIND, PR_SYNC_KIND]);
-        assert_eq!(kinds(on), [MARK_DRAFT_KIND, PR_SYNC_KIND, DELIVER_KIND]);
+        assert_eq!(
+            kinds(off),
+            [MARK_DRAFT_KIND, PR_SYNC_KIND, ISSUE_CREATE_KIND]
+        );
+        assert_eq!(
+            kinds(on),
+            [
+                MARK_DRAFT_KIND,
+                PR_SYNC_KIND,
+                ISSUE_CREATE_KIND,
+                DELIVER_KIND
+            ]
+        );
     }
 
     #[tokio::test]
@@ -115,12 +129,12 @@ mod tests {
 
         assert_eq!(
             base(&SchedulingConfig::default()),
-            [std::time::Duration::from_secs(30); 2]
+            [std::time::Duration::from_secs(30); 3]
         );
         let fast = SchedulingConfig {
             forge_retry_base_seconds: 2,
             ..SchedulingConfig::default()
         };
-        assert_eq!(base(&fast), [std::time::Duration::from_secs(2); 2]);
+        assert_eq!(base(&fast), [std::time::Duration::from_secs(2); 3]);
     }
 }

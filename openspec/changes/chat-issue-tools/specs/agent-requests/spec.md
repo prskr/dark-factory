@@ -62,8 +62,12 @@ When the job ends, it SHALL queue one hidden message on the task with the new is
 
 #### Scenario: Unknown label
 - **WHEN** an approved request names a label the repository does not have
-- **THEN** no issue is created and the task receives a message with the forge's error
+- **THEN** no issue is created, the task receives a message with the forge's error, and the approved request card shows that error
 
 #### Scenario: Forge down at approval
 - **WHEN** a board member approves while the forge is unreachable
-- **THEN** the decision is stored and the job retries until the forge answers
+- **THEN** the decision is stored and the job retries for up to an hour
+
+#### Scenario: Forge down for over an hour
+- **WHEN** the forge stays unreachable for more than an hour after the approval
+- **THEN** the job gives up, the request records the last forge error, the task receives a hidden message with that error, and the approved request card shows it

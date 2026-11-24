@@ -8,8 +8,44 @@
 use anyhow::Result;
 use df_core::TaskStatus;
 use df_e2e::fixture;
+use df_e2e::fixture::World;
 use df_e2e::wait::{RUN_TIMEOUT, UI_TIMEOUT, eventually};
 use df_e2e::{data, db};
+
+/// `create_issue` raised a request: the issue exists only after a member approved it, exactly as
+/// shown, and the chat is told its number.
+async fn approve_the_requested_issue(world: &World, chat: &str) -> Result<()> {
+    let request = eventually("the create-issue request of the chat", UI_TIMEOUT, || {
+        db::create_issue_request(&world.pool, chat)
+    })
+    .await?;
+    world
+        .session
+        .approve_request(
+            &world.env,
+            &request.to_string(),
+            data::CHAT_ISSUE_TITLE,
+            None,
+        )
+        .await?;
+    let number = eventually("the created issue to be recorded", UI_TIMEOUT, || {
+        db::created_issue_number(&world.pool, request)
+    })
+    .await?;
+    let (title, body) = world.forgejo.issue_text(number).await?;
+    assert_eq!(title, data::CHAT_ISSUE_TITLE);
+    assert_eq!(body, data::CHAT_ISSUE_BODY);
+    let told =
+        db::system_messages(&world.pool, chat, df_core::system_reason::ISSUE_CREATED).await?;
+    assert!(
+        told.iter()
+            .any(|m| m.contains(&format!("Issue #{number} created"))),
+        "{told:?}"
+    );
+    // The approval was given in the inbox; the rest of the test works on the chat's page.
+    world.session.open_chat(&world.env, chat).await?;
+    Ok(())
+}
 
 /// Demo step "chats" of `docs/demo.md`; the script is `crates/fake-acp-agent/scripts/chat.yaml`.
 #[tokio::test]
@@ -39,6 +75,19 @@ async fn a_chat_delegates_is_archived_while_a_task_runs_and_wakes_when_unarchive
                 .expect_region_text("#transcript", "df:read-only", RUN_TIMEOUT)
                 .await?;
             world.wait_for_status(&chat, TaskStatus::Waiting).await?;
+
+            // `create_task` linked the review to issue 1 of the repository.
+            let seeded = i64::try_from(data::FORGE_ISSUE_NUMBER)?;
+            assert_eq!(db::linked_issue(&world.pool, &review).await?, Some(seeded));
+            assert_eq!(db::linked_issue(&world.pool, &implementation).await?, None);
+            // `list_issues` answered with a page (the newest 30 of a shared repository, so the
+            // seeded issue may be beyond it) and its paging fields.
+            assert!(
+                db::transcript_events_containing(&world.pool, &chat, "next_cursor: ").await? > 0,
+                "the list_issues result in the transcript"
+            );
+
+            approve_the_requested_issue(&world, &chat).await?;
 
             // The implementation runs until it is interrupted; archiving the chat leaves it alone.
             world

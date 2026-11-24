@@ -14,6 +14,7 @@ pub mod blobs;
 pub mod catalog;
 pub mod chat_views;
 pub mod chats;
+pub mod create_issue;
 pub mod egress;
 pub mod event_subscriptions;
 pub mod git_pushes;

@@ -61,13 +61,51 @@ A chat run differs from a task run:
   this: it talks to a board member, the checkout is read-only, work that needs a branch goes into
   tasks, and the chat is never completed.
 - **Tools.** A chat run is offered `set_task_title`, `report_progress`, `create_task`,
-  `list_personas`, `send_message`, `request_approval` and the [artifact](artifacts.md) tools. It is
-  not offered `complete_task`, `ask_question`, `update_pull_request`, the pull request and issue
-  tools; a call to one is answered with an error and changes nothing.
+  `list_personas`, `send_message`, `request_approval`, `list_issues`, `create_issue` and the
+  [artifact](artifacts.md) tools ([issue tools](#file-and-list-issues) are offered in chats only).
+  It is not offered `complete_task`, `ask_question`, `update_pull_request`, `comment_on_issue` and
+  the pull request tools; a call to one is answered with an error and changes nothing.
 - **Context.** When a run cannot resume the harness session of the run before and starts a new one
   with the summary of the transcript, the transcript shows a **context_compacted** notice (a bot
   icon, one line). Expand it to read the summary the session started with. Tasks show the same
   notice.
+
+## File and list issues
+
+Ask the persona what is open, or to file an issue. Both tools act on the project's own repository
+only; there is no repository argument.
+
+- `list_issues` returns the issues (never pull requests) with number, state, title, labels, URL and
+  the first 200 characters of the body. Filters: `state` (`open` by default, `closed`, `all`),
+  `labels` (all must match) and `query`, a literal text searched in titles and bodies (quotes in it
+  are dropped, search qualifiers have no effect). `limit` is 30 by default and at most 100. The
+  result carries `next_cursor` for the next page and `truncated` when more issues match than were
+  returned. Titles and bodies come from other people and are untrusted input for the agent.
+- `create_issue` posts nothing. It raises a [`create-issue` request](requests.md) with the exact
+  title, body and labels and returns at once; the agent keeps working.
+
+The request card shows the title in bold, the labels and the body in one box with two tabs:
+**Preview** (rendered as the forge shows it, selected first) and **Markdown** (the stored text,
+for link targets and HTML comments that rendering hides). Raw HTML in the body is shown as text. The
+text of a request cannot change; to change it the agent raises a new request. The comment field
+(**Note to the agent on denial**) is sent with a denial, in the decision message to the agent,
+and never goes to the issue.
+
+- **Approve** creates the issue from the stored text. The agent gets the decision message with the
+  title, and when the forge answered, a second message with the issue number and URL, or the
+  forge's error (for example a label the repository does not have). The decided card shows
+  "Approved by *name* · created issue #N" with the number linked to the issue.
+- **Deny** creates nothing; the agent gets the usual decision message with your note.
+- The forge is called after the decision is stored. A rate limit or an unreachable forge is retried
+  for up to an hour; if it still fails then, the last error is reported like any other: the agent
+  gets it in a message and the approved card says "Approved by *name* · the issue could not be
+  created: *error*". No issue number is recorded then; if the forge created the issue before the
+  connection failed, it exists without being reported. The agent can raise a new request, which can
+  then duplicate such an issue. A duplicate can also appear when an automatic retry follows a lost
+  forge answer, even if that retry succeeds and the card reports one issue.
+
+The agent links the new issue to a task by passing its number to `create_task` with `issue`
+([Delegation](delegation.md#link-an-issue)).
 
 ## Delegate work
 

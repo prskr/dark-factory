@@ -532,6 +532,7 @@ impl TestApp {
         df_db::requests::ApprovalTypes::default()
             .with(Arc::new(FakeApproval))
             .with(Arc::new(df_db::network_access::NetworkAccess))
+            .with(Arc::new(df_db::create_issue::CreateIssue))
     }
 
     /// A logged-in `board-member` session: the `Cookie` header value.

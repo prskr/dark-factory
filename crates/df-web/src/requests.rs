@@ -15,6 +15,7 @@ use axum::routing::{get, post};
 use axum::{Extension, Form, Router};
 use df_core::{RequestId, TaskId};
 use df_db::Notification;
+use df_db::create_issue::CREATE_ISSUE;
 use df_db::network_access::{NETWORK_ACCESS, deny_always as deny_host_always};
 use df_db::push_checks::{ExceptionFinding, PUSH_CHECK_EXCEPTION, PushCheck, request_findings};
 use df_db::requests::{
@@ -34,6 +35,8 @@ use crate::components::{Tone, chip};
 use crate::layout::{Nav, Shell, layout};
 use crate::markdown;
 use crate::responses::{internal_error, not_found};
+
+mod create_issue;
 
 /// Safety net against lost notifications.
 const POLL: Duration = Duration::from_secs(5);
@@ -147,6 +150,7 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
     let id = card_id(row.id);
     let target = format!("#{id}");
     let pending = row.state.is_pending();
+    let is_issue = row.approval_type.as_deref() == Some(CREATE_ISSUE);
     let kind_label = match row.kind {
         RequestKind::Question => "Question".to_string(),
         RequestKind::Approval => row.approval_type.clone().unwrap_or_default(),
@@ -161,12 +165,16 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
                 a href=(crate::layout::item_path(&card.task_key)) class="font-medium text-accent-text hover:underline" { (card.task_key) }
                 span class="min-w-0 truncate" { (card.task_title) }
             }
-            div class="md-body md-request min-w-0 break-words text-sm [&_p]:my-1" {
-                @match row.kind {
-                    RequestKind::Question => (markdown::render(row.question_text())),
-                    RequestKind::Approval => {
-                        @if !card.summary.is_empty() { p class="font-medium" { (card.summary) } }
-                        @if !row.reason.is_empty() { (markdown::render(&row.reason)) }
+            @if is_issue {
+                (create_issue::body(card, &id))
+            } @else {
+                div class="md-body md-request min-w-0 break-words text-sm [&_p]:my-1" {
+                    @match row.kind {
+                        RequestKind::Question => (markdown::render(row.question_text())),
+                        RequestKind::Approval => {
+                            @if !card.summary.is_empty() { p class="font-medium" { (card.summary) } }
+                            @if !row.reason.is_empty() { (markdown::render(&row.reason)) }
+                        }
                     }
                 }
             }
@@ -175,6 +183,8 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
             }
             @if pending {
                 (actions(card, &target))
+            } @else if is_issue {
+                p class="text-sm text-muted" { (create_issue::outcome(row)) }
             } @else {
                 p class="text-sm text-muted" { (outcome(row)) }
             }
@@ -317,8 +327,13 @@ fn actions(card: &CardData, target: &str) -> Markup {
                         }
                     }
                 }
+                @let placeholder = if row.approval_type.as_deref() == Some(CREATE_ISSUE) {
+                    create_issue::COMMENT_PLACEHOLDER
+                } else {
+                    "Comment (optional)"
+                };
                 input type="text" name="comment" maxlength="4000" autocomplete="off"
-                    aria-label="Comment (optional)" placeholder="Comment (optional)"
+                    aria-label=(placeholder) placeholder=(placeholder)
                     class=(INPUT_CLASS);
                 div class="flex flex-wrap gap-2" {
                     // htmx 4 does not inherit target and swap from the form.

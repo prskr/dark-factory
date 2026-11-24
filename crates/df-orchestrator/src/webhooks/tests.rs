@@ -264,6 +264,67 @@ async fn webhook_mention_on_a_linked_issue_reaches_every_open_task() {
     assert_eq!(queued(&env, env.task.id).await, 1);
 }
 
+/// A task created by the agent of `env.task` with `issue` linked, as `create_task` does.
+async fn agent_created_child(env: &Env, issue: i64) -> TaskId {
+    let (task, _) = df_db::create_task(
+        &env.ctx.pool,
+        df_db::NewTask {
+            project_id: env.project_id,
+            persona_id: env.persona_id,
+            title: Some("Child".into()),
+            description: "Do it.".into(),
+            issue_number: Some(issue),
+            created_by: Principal::agent(env.persona_id, "Linus", None, env.task.id),
+            parent_id: Some(env.task.id),
+            depends_on: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+    task.id
+}
+
+fn mention_on_issue(number: u64, actor: &str) -> ParsedEvent {
+    parsed(WebhookEvent::CommentCreated {
+        number,
+        is_pull_request: false,
+        actor: actor.into(),
+        mentions: vec![FakeForgeClient::DEFAULT_BOT_LOGIN.into()],
+    })
+}
+
+#[tokio::test]
+async fn a_mention_on_the_issue_of_an_agent_created_task_wakes_it_for_a_member() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool).await;
+    let child = agent_created_child(&env, 7).await;
+    env.forge.set_author_role("alice", AuthorRole::Member);
+    set_wake(&env, "members").await;
+
+    applier(&env)
+        .apply(&[mention_on_issue(7, "alice")])
+        .await
+        .unwrap();
+
+    assert_eq!(queued(&env, child).await, 1);
+    assert_eq!(queued(&env, env.task.id).await, 0, "issue 42 is not 7");
+}
+
+#[tokio::test]
+async fn an_outsider_does_not_wake_an_agent_created_task_under_the_members_policy() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool).await;
+    let child = agent_created_child(&env, 7).await;
+    set_wake(&env, "members").await;
+
+    applier(&env)
+        .apply(&[mention_on_issue(7, "mallory")])
+        .await
+        .unwrap();
+
+    assert_eq!(queued(&env, child).await, 0);
+}
+
 #[tokio::test]
 async fn webhook_event_of_another_repository_is_ignored_and_logged() {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;

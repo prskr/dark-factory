@@ -9,8 +9,8 @@ use df_core::routing::RoutingTable;
 use df_core::webhooks::ParsedEvent;
 use df_core::{
     AuthorRole, CiJobLog, CiStatus, Comment, CredentialRef, Feedback, ForgeClient,
-    IntegrationError, Issue, ListedPullRequest, NewPullRequest, ProjectId, PullRequest,
-    PullRequestFilter, PullRequestUpdate,
+    IntegrationError, Issue, IssueFilter, IssuePage, ListedPullRequest, NewIssue, NewPullRequest,
+    ProjectId, PullRequest, PullRequestFilter, PullRequestUpdate,
 };
 
 use crate::forge::{PluginForgeClient, RepoTarget, WebhookError};
@@ -234,6 +234,26 @@ impl ForgeClient for ForgeRouter {
     async fn get_issue(&self, p: &ProjectId, number: u64) -> Result<Issue, IntegrationError> {
         let (client, target) = self.resolve(p).await?;
         client.get_issue(&target, number).await
+    }
+
+    async fn list_issues(
+        &self,
+        p: &ProjectId,
+        filter: &IssueFilter,
+        limit: u32,
+        cursor: Option<&str>,
+    ) -> Result<IssuePage, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.list_issues(&target, filter, limit, cursor).await
+    }
+
+    async fn create_issue(
+        &self,
+        p: &ProjectId,
+        issue: &NewIssue,
+    ) -> Result<Issue, IntegrationError> {
+        let (client, target) = self.resolve(p).await?;
+        client.create_issue(&target, issue).await
     }
 
     async fn add_issue_comment(

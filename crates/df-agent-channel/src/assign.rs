@@ -98,16 +98,25 @@ pub const CHAT_TOOLS: &[&str] = &[
     "write_artifact",
     "list_artifacts",
     "read_artifact",
+    "list_issues",
+    "create_issue",
 ];
+
+/// Tools offered and accepted only in a chat. Removed, with the two checks that read it
+/// (`tool_descriptors_for` and `tools::try_execute`), when per-persona tool permissions land.
+pub const CHAT_ONLY_TOOLS: &[&str] = &["list_issues", "create_issue"];
 
 /// The factory tools v2 as sent in `Assign.tools`.
 pub fn tool_descriptors() -> Vec<ToolDescriptor> {
     tool_descriptors_where(|_| true)
 }
 
-/// The tools of a run: all of them, or only [`CHAT_TOOLS`] for a chat.
+/// The tools of a run: all but [`CHAT_ONLY_TOOLS`], or only [`CHAT_TOOLS`] for a chat.
 fn tool_descriptors_for(kind: df_core::TaskKind) -> Vec<ToolDescriptor> {
-    tool_descriptors_where(|name| kind == df_core::TaskKind::Task || CHAT_TOOLS.contains(&name))
+    tool_descriptors_where(|name| match kind {
+        df_core::TaskKind::Task => !CHAT_ONLY_TOOLS.contains(&name),
+        df_core::TaskKind::Chat => CHAT_TOOLS.contains(&name),
+    })
 }
 
 fn tool_descriptors_where(offered: impl Fn(&str) -> bool) -> Vec<ToolDescriptor> {

@@ -196,7 +196,7 @@ async fn issue_is_read() -> anyhow::Result<()> {
     Mock::given(method("GET"))
         .and(path("/api/v1/repos/o/r/issues/3"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "html_url": "http://i/3", "title": "Login broken", "body": "Details",
+            "number": 3, "html_url": "http://i/3", "title": "Login broken", "body": "Details",
             "state": "open", "labels": [{"name": "bug"}]
         })))
         .mount(&server)

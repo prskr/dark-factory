@@ -55,7 +55,7 @@ Dark Factory is a Rust workspace (`Cargo.toml`, members `crates/*` and `plugins/
 - `crates/df-gateway`, `crates/df-gateway-control` – the egress gateway (data plane, no database; feature `test-util` exposes `link::PlainConnector`) and the control plane's side of its links (policy service, records, log relay; uses `df-db`)
 - `crates/df-sandbox-contract` – what control plane and sandbox runtime share about the sandbox: path constants, path globs, `LandlockMode`
 - `crates/df-tls` – mTLS acceptor with certificate reload, peer identity from client certificates; feature `test-util` (`TestPki`)
-- `crates/df-orchestrator` – control-plane orchestration: run scheduler, run end and sandbox teardown, run context loading, pull request lifecycle, forge webhook application, task volume retention (`OrchestratorContext`; feature `test-util` exposes `testing::Env`); never depends on `df-agent-channel`
+- `crates/df-orchestrator` – control-plane orchestration: run scheduler, run end and sandbox teardown, run context loading, pull request lifecycle, issue creation for approved `create-issue` requests (`issue.create` outbox job), forge webhook application, task volume retention (`OrchestratorContext`; feature `test-util` exposes `testing::Env`); never depends on `df-agent-channel`
 - `crates/df-agent-channel` – the agent port: mTLS gRPC server, agent sessions, the `Assign` message, factory tools, run metrics; builds on `df-orchestrator` (`ChannelContext` wraps `OrchestratorContext`; feature `test-util` exposes the test server and runtime client)
 - `crates/factory-agent` – the sandbox runtime that runs a coding harness over ACP and talks to the control plane (see `crates/factory-agent/docs/`)
 - `crates/fake-acp-agent` – scripted ACP agent used in tests

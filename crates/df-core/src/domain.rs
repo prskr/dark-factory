@@ -596,18 +596,22 @@ pub mod system_reason {
     pub const WEBHOOK: &str = "webhook";
     /// The message a parent gets when a subtask ends.
     pub const CHILD_ENDED: &str = "task.child_ended";
+    /// The message a task gets when the issue of an approved `create-issue` request exists, or
+    /// could not be created.
+    pub const ISSUE_CREATED: &str = "issue.created";
 
     /// The name shown for a system reason that is not in [`NAMES`].
     pub const FALLBACK_NAME: &str = "Dark Factory";
 
     /// Every reason above with the author name shown for it.
-    pub const NAMES: [(&str, &str); 6] = [
+    pub const NAMES: [(&str, &str); 7] = [
         (TASK_ASSIGNED, "Task assignment"),
         (RUN_RESUMED, "Resume"),
         (REQUEST_DECIDED, "Request decision"),
         (PUSH_REJECTED, "Push check"),
         (WEBHOOK, "Forge events"),
         (CHILD_ENDED, "Subtask update"),
+        (ISSUE_CREATED, "Issue"),
     ];
 }
 

@@ -6,7 +6,7 @@ use serde::{Deserialize, de::DeserializeOwned};
 
 use crate::darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef};
 use crate::error;
-use crate::exports::darkfactory::integrations::issues::{Comment, Issue, IssueState};
+use crate::exports::darkfactory::integrations::issues::{Comment, Issue};
 use crate::exports::darkfactory::integrations::pull_requests::{
     ListedPullRequest, NewPullRequest, PullRequest, PullRequestState, PullRequestUpdate,
 };
@@ -17,6 +17,7 @@ use forge_common::open_filter::{Candidate, OpenFilter};
 
 mod ci;
 mod feedback;
+mod issues;
 mod merge;
 
 const PAGE_SIZE: usize = 50;
@@ -259,18 +260,7 @@ impl<T: Transport, L: Log> Forgejo<T, L> {
             format!("{}/issues/{}", repo_path(&id.repo), id.number),
             None,
         )?;
-        Ok(Issue {
-            id: id.clone(),
-            url: issue.html_url,
-            title: issue.title,
-            body: issue.body,
-            state: if issue.state == "closed" {
-                IssueState::Closed
-            } else {
-                IssueState::Open
-            },
-            labels: issue.labels.into_iter().map(|l| l.name).collect(),
-        })
+        Ok(issues::issue_of(&id.repo, issue))
     }
 
     pub fn add_comment(&self, id: &IssueRef, body: &str) -> Result<Comment, Error> {
@@ -452,13 +442,16 @@ struct ApiLabel {
 
 #[derive(Deserialize)]
 struct ApiIssue {
+    number: u64,
     html_url: String,
     title: String,
     #[serde(default)]
     body: String,
     state: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     labels: Vec<ApiLabel>,
+    /// Present (not null) for a pull request.
+    pull_request: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -473,6 +466,7 @@ mod tests {
     use std::collections::VecDeque;
 
     use super::*;
+    use crate::exports::darkfactory::integrations::issues::IssueState;
     use forge_common::log::StderrLog;
 
     /// Replays canned responses and records the requests.
@@ -836,7 +830,7 @@ mod tests {
         let fake = fake(vec![
             json(
                 200,
-                serde_json::json!({"html_url": "u", "title": "T", "body": "B", "state": "closed",
+                serde_json::json!({"number": 3, "html_url": "u", "title": "T", "body": "B", "state": "closed",
                     "labels": [{"name": "bug"}]}),
             ),
             json(201, serde_json::json!({"id": 99, "html_url": "c"})),

@@ -24,6 +24,7 @@ use sqlx::PgPool;
 
 pub mod base_branch;
 pub mod error;
+pub mod issues;
 pub mod pr;
 pub mod retention;
 pub mod run_context;

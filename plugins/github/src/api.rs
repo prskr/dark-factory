@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::darkfactory::integrations::types::{Error, IssueRef, PullRequestRef, RepoRef};
 use crate::error;
-use crate::exports::darkfactory::integrations::issues::{Comment, Issue, IssueState};
+use crate::exports::darkfactory::integrations::issues::{Comment, Issue};
 use crate::exports::darkfactory::integrations::pull_requests::{
     ListedPullRequest, NewPullRequest, PullRequest, PullRequestState, PullRequestUpdate,
 };
@@ -26,6 +26,7 @@ const DRAFTS_UNSUPPORTED: &str = "Draft pull requests are not supported";
 
 mod ci;
 mod feedback;
+mod issues;
 mod merge;
 
 pub use forge_common::http::Method;
@@ -253,18 +254,7 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
     pub fn get_issue(&self, id: &IssueRef) -> Result<Issue, Error> {
         let path = format!("{}/issues/{}", repo_path(&id.repo), id.number);
         let issue: ApiIssue = self.rest(Method::Get, &path, None)?;
-        Ok(Issue {
-            id: id.clone(),
-            url: issue.html_url,
-            title: issue.title,
-            body: issue.body.unwrap_or_default(),
-            state: if issue.state == "closed" {
-                IssueState::Closed
-            } else {
-                IssueState::Open
-            },
-            labels: issue.labels.into_iter().map(|l| l.name).collect(),
-        })
+        Ok(issues::issue_of(&id.repo, issue))
     }
 
     /// Comments on an issue or, by its number, a pull request.
@@ -535,12 +525,15 @@ struct ApiLabel {
 
 #[derive(Deserialize)]
 struct ApiIssue {
+    number: u64,
     html_url: String,
     title: String,
     body: Option<String>,
     state: String,
     #[serde(default)]
     labels: Vec<ApiLabel>,
+    /// Present for a pull request.
+    pull_request: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]

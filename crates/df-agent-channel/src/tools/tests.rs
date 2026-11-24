@@ -54,7 +54,31 @@ fn forge_error_for_a_refused_request_shows_the_forge_message_and_the_access_hint
 
 #[test]
 fn embedded_schemas_compile() {
-    assert_eq!(VALIDATORS.len(), 19);
+    assert_eq!(VALIDATORS.len(), 21);
+}
+
+#[tokio::test]
+async fn request_approval_does_not_raise_a_create_issue_request_and_names_create_issue() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let (env, rc) = setup(pool.clone()).await;
+    let args = serde_json::json!({
+        "type": "create-issue",
+        "payload": {"title": "T", "body": "B"},
+        "reason": "r",
+    });
+
+    // The schema's `type` enum refuses it first; the handler holds the rule on its own, because
+    // `create_issue` is the tool that carries the chat-only gate.
+    let outcome = request_approval(&env.ctx, &rc, &args).await.unwrap();
+    let through_the_tool = execute(&env.ctx, &rc, call("request_approval", args)).await;
+
+    assert!(outcome.is_error);
+    assert!(outcome.text.contains("create_issue"), "{}", outcome.text);
+    assert!(through_the_tool.is_error);
+    let stored = df_db::requests::list_for_task(&pool, rc.task.id)
+        .await
+        .unwrap();
+    assert!(stored.is_empty());
 }
 
 #[tokio::test]
@@ -291,6 +315,22 @@ impl ForgeClient for ObservingForge {
         &self,
         _: &df_core::ProjectId,
         _: u64,
+    ) -> Result<df_core::Issue, IntegrationError> {
+        panic!("not used")
+    }
+    async fn list_issues(
+        &self,
+        _: &df_core::ProjectId,
+        _: &df_core::IssueFilter,
+        _: u32,
+        _: Option<&str>,
+    ) -> Result<df_core::IssuePage, IntegrationError> {
+        panic!("not used")
+    }
+    async fn create_issue(
+        &self,
+        _: &df_core::ProjectId,
+        _: &df_core::NewIssue,
     ) -> Result<df_core::Issue, IntegrationError> {
         panic!("not used")
     }

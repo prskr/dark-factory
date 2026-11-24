@@ -7,6 +7,7 @@ use serde_json::json;
 
 use super::*;
 use crate::darkfactory::integrations::types::{RateLimit, UpstreamError};
+use crate::exports::darkfactory::integrations::issues::IssueState;
 use crate::settings::DraftMode;
 
 const PR_URL: &str = "https://api.github.com/repos/o/r/pulls/7";

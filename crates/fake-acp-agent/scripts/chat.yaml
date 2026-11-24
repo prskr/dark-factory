@@ -4,8 +4,9 @@
 # turns). Every turn plays the same `when` blocks, because a woken chat may be a live or a resumed
 # session.
 #
-# 1. `[chat]` sets the topic, creates the implementation and a review that depends on its
-#    completion, and tries to push from its read-only checkout (the Git proxy rejects it; the
+# 1. `[chat]` sets the topic, lists the open issues, asks for an issue (`create_issue`, created
+#    when a board member approves), creates the implementation and a review that depends on its
+#    completion and is linked to issue 1 of the repository, and tries to push from its read-only checkout (the Git proxy rejects it; the
 #    output is in the transcript).
 # 2. `[chat-impl]` starts and stays in its turn until a board member interrupts it; the message
 #    `[chat-finish]` that follows completes the task.
@@ -24,6 +25,17 @@ sessions:
                   title: Helm chart plan
             - mcp:
                 server: factory
+                tool: list_issues
+                args: {}
+            - mcp:
+                server: factory
+                tool: create_issue
+                args:
+                  title: E2E chat issue
+                  body: "Filed from the e2e chat.\n\nSee [the docs](https://example.org/docs)."
+                  labels: []
+            - mcp:
+                server: factory
                 tool: create_task
                 args:
                   persona: e2e
@@ -38,6 +50,7 @@ sessions:
                   persona: e2e
                   title: Chat review
                   prompt: "[chat-review] Review the chart."
+                  issue: 1
                   depends_on:
                     - task: "${impl}"
                       kind: completion

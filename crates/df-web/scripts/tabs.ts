@@ -12,22 +12,23 @@
 // `adopt()`: sets `role="tabpanel"` and `aria-labelledby` on the panels the tabs control.
 //
 // `init()`: keeps the open tab in view when the tab row scrolls (phones), on init and on every
-// change.
+// change. `scroll` (third argument, default true) turns that off for tabs inside a card on a long
+// page, where scrolling the tab into view would move the page.
 //
 // Methods: `reveal()` scrolls the open tab into view. `move(event)` on the tab list: arrow keys go
 // to the previous or next tab (wrapping), Home and End to the first or last; the focused tab opens
 // (WAI-ARIA tabs pattern, automatic activation). Other keys are left alone.
 document.addEventListener('alpine:init', () => {
-  Alpine.data('tabs', (initial: string, syncUrl = false) => ({
+  Alpine.data('tabs', (initial: string, syncUrl = false, scroll = true) => ({
     tab: initial,
 
     init(): void {
       if (syncUrl) this.writeUrl();
       this.$watch('tab', () => {
-        this.reveal();
+        if (scroll) this.reveal();
         if (syncUrl) this.writeUrl();
       });
-      this.reveal();
+      if (scroll) this.reveal();
     },
 
     tabIds(): string[] {
