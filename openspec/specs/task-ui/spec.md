@@ -237,6 +237,13 @@ The transcript SHALL read as a conversation: human messages aligned to the right
 - **WHEN** a board member opens a tool call
 - **THEN** the chevron points the other way and the input and output of the call are shown
 
+### Requirement: Agent message author
+The author of an agent message in the transcript SHALL be the persona's display name with its `@handle`, and its avatar the persona's generated avatar.
+
+#### Scenario: Persona as author
+- **WHEN** the agent of a task with persona `reviewer` ("Code Reviewer") sends a message
+- **THEN** the message shows author "Code Reviewer @reviewer" and the avatar "CR"
+
 ### Requirement: Queued message stack
 Undelivered messages of the task SHALL be shown as a stack directly above the message input, oldest first, with their queue time, not in the transcript. The stack SHALL have a header "N queued · <persona> reads them at the next turn" (for a `failed` or `completed` task: "N queued · sent with the next run"). It SHALL show at most three rows and scroll inside itself, so the message input keeps its position. A delivered message SHALL leave the stack and appear in the transcript as a normal message.
 
@@ -734,3 +741,14 @@ A queued webhook message SHALL be shown in the queued message stack as the one-l
 #### Scenario: Review waiting for the next turn
 - **WHEN** `alice` requests changes on PR #12 while the agent of `DF-1` is in a turn
 - **THEN** the stack shows a row "Forge events: alice requested changes on PR #12"
+
+### Requirement: Persona on task rows and in the task details
+Each task list row SHALL show the task persona's avatar before the time, with the display name as its label. In the task details, the persona value SHALL show the avatar, the display name and the `@handle`, and no longer the harness. The persona value keeps linking to `/personas`.
+
+#### Scenario: Task row
+- **WHEN** task `DF-21` with persona `linus` ("Linus") is listed
+- **THEN** its row shows the avatar "L" labelled "Linus"
+
+#### Scenario: Task details
+- **WHEN** a board member opens `DF-21`
+- **THEN** the persona value shows the avatar "L", "Linus" and "@linus" and links to `/personas`
