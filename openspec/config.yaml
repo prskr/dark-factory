@@ -34,6 +34,7 @@ schema: spec-driven
 context: |
   Load skill `domain-modeling` before you plan a change, and use the terms of `product/GLOSSARY.md` in every artifact.
   While planning, write each new or changed term into `product/GLOSSARY.md` once it is resolved, and record each decision that is hard to reverse, surprising without context and the result of a real trade-off as an ADR in `docs/adr/` (indexed in `docs/adr/README.md`).
+  Every configuration key, file path and external behavior (a forge's API, namespace or verification flow) an artifact names is verified before it is written: keys and paths in the code, external behavior in its source or against the e2e environment. What cannot be verified while planning is marked "(unverified)" in the artifact and gets a task that verifies it first.
 
 rules:
   proposal:

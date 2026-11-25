@@ -79,12 +79,14 @@ If a pre-commit hook fails, fix the cause and commit again.
 ```
 STATUS: DONE | BLOCKED
 COMMIT: <sha or none>
-TASKS: <n>/<m> complete; completed this round: <list>
+TASKS: <n>/<m> complete per `openspec instructions apply --change <name> --json` after your commit; completed this round: <list>
 FIXED: <finding IDs, fix rounds only>; NOT FIXED: <ID: reason>
 CHECKS: fmt <ok|fail>, clippy <ok|fail>, machete <ok|fail>, tests <crates: pass/fail counts>
 CONTAINER TESTS: ran with <socket> | skipped (no socket): <test list>
 BLOCKED: <question or design problem, with options>   (only when BLOCKED)
 NOTES: <deviations from the spec or the fix list, and why>
 ```
+
+Every behavior claim in the report (a status code, a message text, what is stored, sent or audited) names the test that asserts it, or says "untested".
 
 Keep it under 300 words. No summaries of the code you wrote; the reviewers read the diff. Always end with this report, also after a long background command or a resumed round: the orchestrator only sees your final message.
