@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: ask_question
-`ask_question` SHALL raise a question for humans on the run's task with `text`, a required `kind` (`single_choice`, `multi_choice` or `text`), the kind's arguments (`options`, `allow_other`, `min_selected`, `max_selected`) and `blocking` (default false), and return the request id and state. It SHALL NOT accept `suggested_answers`. A blocking call SHALL return a result with `await_input_after_turn: true`.
+`ask_question` SHALL raise a question for humans on the run's task with `text`, a required `kind` (`single_choice`, `multi_choice` or `text`), the kind's arguments (`options`, `allow_other`, `min_selected`, `max_selected`) and `blocking` (default true), and return the request id and state. It SHALL NOT accept `suggested_answers`. A blocking call SHALL return a result with `await_input_after_turn: true`.
 
 #### Scenario: Non-blocking question
 - **WHEN** the agent calls `ask_question` with text "Should I also update the docs?", kind `text` and `blocking: false`
@@ -9,6 +9,10 @@
 
 #### Scenario: Blocking question
 - **WHEN** the agent calls `ask_question` with kind `text` and `blocking: true`
+- **THEN** the result has `await_input_after_turn: true`
+
+#### Scenario: Blocking by default
+- **WHEN** the agent calls `ask_question` with kind `text` and without `blocking`
 - **THEN** the result has `await_input_after_turn: true`
 
 #### Scenario: Single-choice question
@@ -55,8 +59,8 @@ When an identical pending question is returned instead of a new one, the result 
 - **THEN** the result has the pending question's id, `merged: true`, and the question stays a text question
 
 ### Requirement: ask_question describes the answer
-The description of `ask_question` SHALL say when to use each kind, that option ids come back in the answer, and that the answer arrives as a message with a JSON block holding the structured answer.
+The description of `ask_question` SHALL say when to use each kind, that option ids come back in the answer, that the answer arrives as a message with a JSON block holding the structured answer, and that questions block by default and `blocking: false` is for questions the agent can work around.
 
 #### Scenario: Description read by the agent
 - **WHEN** a task run connects
-- **THEN** the description of `ask_question` in `Assign.tools` names the three kinds and the JSON answer block
+- **THEN** the description of `ask_question` in `Assign.tools` names the three kinds, the JSON answer block and that questions block by default

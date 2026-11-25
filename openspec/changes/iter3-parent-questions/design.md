@@ -14,6 +14,7 @@
   - the task transitions ([ADR-0055](../../../docs/adr/0055-task-transitions-through-one-transition-function.md)): the pure `df_core::task_transition::transition(&TaskSnapshot, TaskEvent) -> Transition { status, effects }` and the applier `df_db::apply_task_event`, which locks the task and executes the effects in the caller's transaction. A Completion, Done, failure or cancellation wakes the parent through the `NotifyParent` effect;
   - the child-ended message, which quotes agent output under a line naming its source.
 - **From `iter3-chats`**: `CHAT_TOOLS` and the dispatch check for chat runs; archive and unarchive as the `Archived` and `Unarchived` task events.
+- **From `question-kinds`** (implemented first): a question has a kind (`single_choice`, `multi_choice`, `text`) with options; answers are a `QuestionAnswer` checked by `QuestionSpec::check` inside `decide`; the decision message carries a JSON block; `blocking` defaults to true.
 - **Final task statuses**: `completed` (Done), `cancelled` and `failed`. `in_review` is a Completion and isn't final.
 
 ## Goals / Non-Goals
@@ -88,23 +89,25 @@ The author is `System { reason: "question.asked" }`, with one visible text block
 
 ```
 DF-21 "Implement login" asks you a question (request 3f2a…). It is waiting for your answer.
-Suggested answers: yes | no
-Answer with answer_question.
+Kind: single_choice, Other allowed. Options: yes: Yes, keep it | no: No, remove it
+Answer with answer_question (selected: option ids, other: your own text).
 
 Question from the agent of DF-21:
 > Keep the old API?
 ```
 
-Without `blocking`, the second sentence reads "It continues meanwhile." The quoted text is untrusted, as is any agent output.
+The kind line follows `question-kinds`: `single_choice` or `multi_choice` with the options as `id: label` and, for multiple choice, the limits ("choose 1 to 3"); `text` reads "Kind: text. Answer with answer_question (text: Markdown)." With `blocking: false` the second sentence reads "It continues meanwhile." The quoted text, labels and descriptions are untrusted, as is any agent output.
 
 ### D5: Answering
 
 - **`answer_question` handler:**
   1. Loads the request.
   2. Returns `NotAddressed` unless `addressee_task_id` equals the run's task and `readdressed_at IS NULL`.
-  3. Calls `decide` with the run's agent principal, `roles = []` and `Decision::Answer`.
-  4. Maps the errors:
+  3. Builds a `QuestionAnswer` (`question-kinds` D2) from `selected`, `other` and `text`: `other` present means Other was chosen; `_other` is not used in the tool.
+  4. Calls `decide` with the run's agent principal, `roles = []` and `Decision::Answer(answer)`; `decide` runs `QuestionSpec::check`, as for a human.
+  5. Maps the errors:
      - `AlreadyDecided`: the result names the decider, or the close reason, from the stored row.
+     - `InvalidAnswer`: the result names the field and the message of `check` ("Choose one option.").
      - `NotFound`, `NotAddressed`: say so.
 - **`decide`** stays the single path, called with the agent principal. The addressee check lives in the tool handler, since the web routes already allow any board member to answer any question (Q4).
 - **`decision_message`** names every principal: humans by display name, agents as `<task key> (<persona name>)`. The persona name is the principal's `display_name`; the task key is looked up by `task_id`.
@@ -114,7 +117,7 @@ Without `blocking`, the second sentence reads "It continues meanwhile." The quot
 
 `answer_question` is added to `CHAT_TOOLS`. `ask_question` stays excluded.
 
-`answer_question` goes into `contract/mcp/factory-tools.v2.json` (tool set v2 allows additions), next to `ask_question`'s new `to` property (`enum: ["parent","human"]`, optional).
+`answer_question` goes into `contract/mcp/factory-tools.v2.json` (tool set v2 allows additions), next to `ask_question`'s new `to` property (`enum: ["parent","human"]`, optional). Its input: `request_id` (required), `selected` (array of option ids, at most 10), `other` (string, at most 1,000 characters) and `text` (string, at most 4,000 characters), all optional in the schema; which ones apply depends on the question's kind and is checked by `QuestionSpec::check`.
 
 ### D7: Web
 

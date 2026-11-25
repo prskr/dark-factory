@@ -52,7 +52,7 @@
 | `allow_other` | choice | optional, default `true` |
 | `min_selected` | multi | optional, default 1; `0 ≤ min ≤ reachable` |
 | `max_selected` | multi | optional, default: no limit; `max ≥ 1`, `min ≤ max ≤ reachable` |
-| `blocking` | all | unchanged |
+| `blocking` | all | optional, **default `true`** (was `false`), D1a |
 
 `reachable` is the number of options, plus 1 when `allow_other` is true.
 
@@ -67,6 +67,15 @@
 - 2 to 10 options: one option is not a choice; more than 10 radios on a phone is a form, not a question.
 - The result keeps `id` and `state` and adds `merged` (Q9).
 - The tool description tells the agent which kind to use: a choice when the options are known, `text` for open answers, and that asking the same text again returns the pending question even with other options.
+
+### D1a: Blocking by default
+
+Asked by Peter on PR #360: agents rarely set `blocking: true`, even when they cannot sensibly continue, so they guess and the answer arrives after the work is done. The default becomes `true`:
+
+- A call without `blocking` ends the turn after it and the run waits for the answer (keep-alive window, then `blocked`), as `blocking: true` does today.
+- `blocking: false` stays for questions the agent can work around ("nice to know", a fallback it can revisit). The tool description and `product/agent-playbook.md` say: "Questions block by default. Set blocking=false only when you can continue with a fallback and revisit it later."
+- Cost: an agent asking a minor question stops its work until a human answers or the keep-alive window ends. Accepted: a stopped run costs less than work built on a guess, and a run that ends as `blocked` resumes with the answer.
+- `request_approval` keeps `blocking` default `false`: approvals are often raised while the agent can do other work (a host it may need later). Not part of #334. Q11.
 
 ### D2: Types and validation in `df-core`
 
@@ -247,7 +256,7 @@ Both changes are proposed and not built. They overlap in five places:
 | `question.asked` message (iter3 D4) | lists "Suggested answers: yes \| no" | — | lists the kind, the options as `id: label` and the limits |
 | `request-inbox` scenario "Question to the parent on the task page" | "offers the suggested answers and a free-text answer" | input by kind | "offers the input of its kind" |
 
-This proposal does not edit the `iter3-parent-questions` artifacts: the planning task for this PR limits it to its own change directory. Whichever change is implemented second applies the last column, in the PR that implements it: to its own artifacts and code, and to the other change's synced spec texts; the parent-answers scenario "yes" becomes a choice of the option `yes`. Q10.
+Decided by Peter (PR #360, Q10): `question-kinds` is implemented first, and this PR updates the `iter3-parent-questions` artifacts to the last column (proposal, design D4, D5 and D6, the three spec deltas, tasks). Its MODIFIED blocks of "ask_question" and "Decisions" are written on top of this change, including `blocking` default `true`; the parent-answers scenario chooses the option `yes`.
 
 ## Risks / Trade-offs
 
@@ -266,15 +275,19 @@ This proposal does not edit the `iter3-parent-questions` artifacts: the planning
 
 ## Open Questions
 
-Each with a recommendation; product decisions for Peter.
+### Decided (Peter, PR #360, 2026-11-25)
 
-- **Q1. Break `ask_question` or keep `suggested_answers`?** Recommendation: break (D1). One way to offer options, structured answers always.
-- **Q2. "Other" next to options: default on, default off, or never?** Recommendation: default on (`allow_other: true`), the agent may turn it off.
-- **Q3. Single choice: radio plus "Answer", or submit on tap?** Recommendation: radio plus "Answer" (D6).
-- **Q4. Limits:** 2 to 10 options, labels 200 characters, descriptions 300, "Other" 1,000, text answer 4,000. Recommendation: these.
-- **Q5. `ask_question` in chats now?** Recommendation: no (D9); revisit when chats are used on phones.
-- **Q6. Answer delivery: JSON block in the decision message, or a tool to read the answer?** Recommendation: JSON block (D5).
-- **Q7. `multi_choice` default `min_selected`: 1 or 0?** Recommendation: 1; an agent that accepts "none" sets 0 explicitly.
-- **Q8. Arguments of another kind: reject or ignore neutral values?** Recommendation: ignore `null`, empty `options` and `allow_other: false` where they don't apply; reject real values (D1).
-- **Q9. Same text asked again with another kind or other options: say so?** Recommendation: keep merging by text and return `merged: true` with a sentence that the pending question is unchanged (D1).
-- **Q10. Update `iter3-parent-questions` in this PR?** Recommendation: no; D11 lists the merged form, and the change implemented second applies it.
+- **Q2.** "Other" means "type your own answer", as in Claude Code: on by default (`allow_other: true`), the agent may turn it off.
+- **Q3.** Single choice: radio plus "Answer" (D6).
+- **Q4.** Limits: 2 to 10 options, labels 200 characters, descriptions 300, "Other" 1,000, text answer 4,000.
+- **Q6.** The answer reaches the agent as a JSON block in the decision message (D5).
+- **Q9.** Same text asked again: merging stays by text; the result says `merged: true` (D1).
+- **Q10.** `question-kinds` is implemented first; this PR updates `iter3-parent-questions` (D11).
+
+### Still open (explained on PR #360)
+
+- **Q1. Break `ask_question`?** "Break" means: `suggested_answers` is removed and `kind` is required, with no compatibility path. An agent that calls the old form gets an error result that names `kind` and `options` and tries again; agents read the tool schema at every run start, so nothing outside the control plane must change. Stored questions are migrated (D4). Recommendation: break.
+- **Q5. `ask_question` in chats?** Today chats can't call it (`chats` spec: not offered). A chat agent asks in its normal reply and the human answers in the chat. Recommendation: keep it so (D9); backlog row for choices in chats.
+- **Q7. Default `min_selected` of multiple choice.** "Multiple choice" here means checkboxes: the human *may* choose several, not *must*. With a minimum of 2, "Which platforms are affected?" could not be answered with one platform. Recommendation: 1; the agent sets a higher minimum when it needs one.
+- **Q8. Extra arguments that don't fit the kind.** Models often fill every field of a tool schema, for example `options: []` or `min_selected: null` on a text question. Reject that call (the agent must retry) or ignore such empty values? Recommendation: ignore empty values, reject real ones (`options` with items on a text question) (D1).
+- **Q11. `blocking` default `true`** (Peter's suggestion, D1a). Recommendation: yes for `ask_question`; `request_approval` keeps `false`.

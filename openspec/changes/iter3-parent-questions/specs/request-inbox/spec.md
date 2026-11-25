@@ -39,7 +39,7 @@ The task detail SHALL show each request of the task as a card on the timeline at
 
 #### Scenario: Question to the parent on the task page
 - **WHEN** a board member opens `DF-21` while its question to `DF-20` is pending
-- **THEN** the card says it was asked to `DF-20` and its persona, and offers the suggested answers and a free-text answer
+- **THEN** the card says it was asked to `DF-20` and its persona, and offers the input of its kind and "Answer"
 
 #### Scenario: Answered by the parent's agent
 - **WHEN** a board member opens `DF-21` after the agent of `DF-20` answered its question

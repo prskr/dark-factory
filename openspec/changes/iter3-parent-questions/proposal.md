@@ -13,10 +13,10 @@ A question can only go to a human (iteration-2 decision 8). With delegation (`it
   - A pending question is readdressed to humans in place when its parent becomes Done, cancelled or failed, or is archived. The question's card on the asking task's timeline says why. Unarchiving doesn't move it back.
   - Archiving a chat is not blocked by questions addressed to it.
 - **Delivery to the parent**:
-  - The parent gets a queued message from the system principal (reason `question.asked`) naming the child, the request id, the suggested answers and whether the child waits. The question text is quoted as untrusted child output.
+  - The parent gets a queued message from the system principal (reason `question.asked`) naming the child, the request id, the question kind with its options and limits, and whether the child waits. The question text is quoted as untrusted child output.
   - The message wakes the parent like any queued message. On an archived chat it waits until unarchiving (ADR-0053).
 - **`answer_question`** (factory tool, also offered to chat runs):
-  - Takes `request_id` and `answer`.
+  - Takes `request_id` and the structured answer of `question-kinds`: `selected` option ids and `other` for a choice question, `text` for a text question. The answer is checked by the same rules as a human's; an invalid one is a tool error that names the field.
   - Only the run of the addressed parent may answer, and only while the question is pending. Otherwise the call is a tool error ("already answered by …", "closed: task completed", "not addressed to this task").
   - The answer is recorded with the parent's agent principal and delivered to the child with the existing `request.decided` message.
   - Chat runs still get no `ask_question`; a chat agent asks its human in the conversation.
@@ -69,4 +69,5 @@ None.
 - **Docs**: ADR-0043, ADR-0038 and ADR-0053 amended, glossary term Question, `iteration-3.md` (written); `product/agent-playbook.md` (when to ask the parent, relaying).
 - **Depends on**:
   - `iter3-task-dependencies`: `parent_id`, the task transitions (`transition`, `apply_task_event`), the quoting format of the child-ended message;
-  - `iter3-chats`: `CHAT_TOOLS`, archiving, the chat page link.
+  - `iter3-chats`: `CHAT_TOOLS`, archiving, the chat page link;
+  - `question-kinds` (implemented first, decided by Peter on PR #360): question kinds, `QuestionAnswer` and its check, the decision message with the JSON block, `blocking` defaulting to true, the question card.
