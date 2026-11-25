@@ -35,7 +35,7 @@ Versions SHALL increase monotonically; a gateway receiving a version gap or reco
 - **THEN** the gateway keeps its policy, reconnects to any replica and receives a full snapshot
 
 ### Requirement: Git routes in the snapshot
-Each sandbox entry of the policy snapshot SHALL carry the run's Git route (project repository URL, base, task and WIP branch, commit identity, forge credential reference). The snapshot SHALL carry the referenced forge credentials once each. Gateways SHALL keep credentials in memory only and never log them.
+Each sandbox entry of the policy snapshot SHALL carry the run's Git route (project repository URL, base, task and WIP branch, commit identity, the current public signing key of the run's persona, forge credential reference). The snapshot SHALL carry the referenced forge credentials once each. Gateways SHALL keep credentials in memory only and never log them. The snapshot SHALL never carry a private signing key.
 
 #### Scenario: Run with a Git route
 - **WHEN** a gateway receives a snapshot while run R of `DF-7` is active
@@ -44,6 +44,14 @@ Each sandbox entry of the policy snapshot SHALL carry the run's Git route (proje
 #### Scenario: Credential rotated
 - **WHEN** the Kubernetes Secret behind a project's forge credential changes
 - **THEN** gateways receive the new value with the next snapshot, within one minute
+
+#### Scenario: Signing key rotated
+- **WHEN** a board member rotates the key of the persona of run R
+- **THEN** the rotation publishes `egress_policy`, and gateways receive R's Git route with the new public key with the next snapshot, within one minute
+
+#### Scenario: Push during key propagation
+- **WHEN** run R pushes a commit signed with the new key before its gateway received the new snapshot
+- **THEN** the push is rejected with `df:signature` and detail "signed by another key", and the same push passes once the gateway has the new snapshot
 
 ### Requirement: Push policies and exceptions in the snapshot
 The policy snapshot SHALL carry each active run's project push policy, including its hidden path globs, and the run's task exceptions, and SHALL be updated within one second after a policy change or an approved exception.
