@@ -64,10 +64,12 @@ impl ServerHandler for McpBridgeServer {
                 let mcp_tools = tools.into_iter().map(wire_to_mcp_tool).collect();
                 Ok(ListToolsResult::with_all_items(mcp_tools))
             }
-            other @ RuntimeResponse::McpCallTool { .. } => Err(McpError::internal_error(
-                format!("unexpected runtime socket response: {other:?}"),
-                None,
-            )),
+            other @ (RuntimeResponse::McpCallTool { .. } | RuntimeResponse::GitSign { .. }) => {
+                Err(McpError::internal_error(
+                    format!("unexpected runtime socket response: {other:?}"),
+                    None,
+                ))
+            }
         }
     }
 
@@ -127,10 +129,12 @@ impl ServerHandler for McpBridgeServer {
 
                 Ok(CallToolResponse::Complete(res))
             }
-            other @ RuntimeResponse::McpListTools { .. } => Err(McpError::internal_error(
-                format!("unexpected runtime socket response: {other:?}"),
-                None,
-            )),
+            other @ (RuntimeResponse::McpListTools { .. } | RuntimeResponse::GitSign { .. }) => {
+                Err(McpError::internal_error(
+                    format!("unexpected runtime socket response: {other:?}"),
+                    None,
+                ))
+            }
         }
     }
 }

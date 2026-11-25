@@ -119,6 +119,7 @@ async fn seed_writes_the_demo_data() -> Result<()> {
     for (key, script) in [
         (data::SECRET_PROJECT_KEY, data::SECRET_SCRIPT),
         (data::PROTECTED_PROJECT_KEY, data::PROTECTED_SCRIPT),
+        (data::UNSIGNED_PROJECT_KEY, data::UNSIGNED_SCRIPT),
         (data::DELEGATION_PROJECT_KEY, data::DELEGATION_SCRIPT),
         (
             data::EXISTING_BRANCH_PROJECT_KEY,

@@ -15,6 +15,7 @@ pub mod config;
 pub mod connection;
 pub mod fs_util;
 pub mod git;
+pub mod git_sign;
 pub mod harness;
 pub mod hidden_paths;
 pub mod mcp;
@@ -24,6 +25,7 @@ pub mod runner;
 pub mod runtime_handler;
 pub mod runtime_socket;
 pub mod sandbox;
+pub mod sign_relay;
 pub mod transcript;
 pub mod workspace;
 
@@ -68,7 +70,7 @@ fn main() -> ExitCode {
 
 #[expect(
     clippy::print_stderr,
-    reason = "the mcp subcommand reports errors on stderr"
+    reason = "the mcp and git-sign subcommands report errors on stderr"
 )]
 async fn run_command(cli: Cli) -> ExitCode {
     rustls::crypto::ring::default_provider()
@@ -79,6 +81,17 @@ async fn run_command(cli: Cli) -> ExitCode {
         Command::Mcp { socket } => {
             if let Err(e) = mcp::run_mcp_stdio_server(&socket).await {
                 eprintln!("mcp server error: {e}");
+                return ExitCode::FAILURE;
+            }
+            ExitCode::SUCCESS
+        }
+        Command::GitSign { args } => {
+            let socket = std::env::var_os(config::ENV_RUNTIME_SOCK).map_or_else(
+                || PathBuf::from(df_sandbox_contract::paths::SANDBOX_RUNTIME_SOCK),
+                PathBuf::from,
+            );
+            if let Err(e) = git_sign::run(&socket, &args).await {
+                eprintln!("df-git-sign: {e}");
                 return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS

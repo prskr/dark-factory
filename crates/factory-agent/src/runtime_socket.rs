@@ -25,6 +25,13 @@ pub enum RuntimeRequest {
         name: String,
         arguments_json: String,
     },
+    /// The signing shim asks for a signature of a commit (`git-sign`, design D1 of
+    /// `persona-commit-signing`).
+    #[serde(rename = "git_sign")]
+    GitSign {
+        /// The commit object to sign, base64 (it is not necessarily UTF-8).
+        payload: String,
+    },
 }
 
 /// Wire representation of a `ToolDescriptor` exchanged over the runtime socket.
@@ -109,6 +116,12 @@ pub enum RuntimeResponse {
         end_run_after_turn: bool,
         error_message: Option<String>,
     },
+    /// Exactly one of the fields is set: the armored signature, or why nothing was signed.
+    #[serde(rename = "git_sign")]
+    GitSign {
+        signature: Option<String>,
+        refused_reason: Option<String>,
+    },
 }
 
 /// Writes a length-prefixed JSON frame.
@@ -162,6 +175,11 @@ pub trait RuntimeHandler: Send + Sync + 'static {
         _name: &str,
         _arguments_json: &str,
     ) -> Result<df_proto::agent::v1::ToolCallResult, String> {
+        Err("not implemented".to_string())
+    }
+
+    /// The armored signature of `payload`, or the reason it was not signed.
+    async fn handle_git_sign(&self, _payload: &[u8]) -> Result<String, String> {
         Err("not implemented".to_string())
     }
 }
@@ -290,7 +308,32 @@ async fn serve_connection(mut stream: UnixStream, handler: Arc<dyn RuntimeHandle
                     }
                 }
             },
+            RuntimeRequest::GitSign { payload } => {
+                let resp = git_sign_response(&*handler, &payload).await;
+                if write_frame(&mut stream, &resp).await.is_err() {
+                    break;
+                }
+            }
         }
+    }
+}
+
+/// Answers a `git_sign` request: the signature, or the reason for the refusal.
+async fn git_sign_response(handler: &dyn RuntimeHandler, payload: &str) -> RuntimeResponse {
+    use base64::Engine;
+    let signed = match base64::engine::general_purpose::STANDARD.decode(payload) {
+        Ok(bytes) => handler.handle_git_sign(&bytes).await,
+        Err(e) => Err(format!("the payload is not base64: {e}")),
+    };
+    match signed {
+        Ok(signature) => RuntimeResponse::GitSign {
+            signature: Some(signature),
+            refused_reason: None,
+        },
+        Err(reason) => RuntimeResponse::GitSign {
+            signature: None,
+            refused_reason: Some(reason),
+        },
     }
 }
 

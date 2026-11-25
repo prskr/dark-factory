@@ -42,6 +42,7 @@ impl PushChecks for PolicyChecks {
             policy,
             identity: Identity {
                 email: &push.route.commit_email,
+                signing_public_key: &push.route.signing_public_key,
             },
             secrets: RuleMatcher {
                 rules: &self.rules,

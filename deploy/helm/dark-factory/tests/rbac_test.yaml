@@ -294,7 +294,7 @@ tests:
               resources: ["events"]
               verbs: ["get", "list", "watch"]
 
-  - it: lets the instance Role create secrets but not change them while a webhook secret is generated
+  - it: lets the instance Role create and update secrets for the generated webhook secrets and the persona signing keys
     template: rbac.yaml
     documentIndex: 4
     asserts:
@@ -311,26 +311,23 @@ tests:
               verbs: ["get"]
             - apiGroups: [""]
               resources: ["secrets"]
-              verbs: ["create"]
+              verbs: ["create", "update"]
 
-  - it: lets the instance Role only get secrets when every plugin references an existing webhook secret
+  - it: still lets the instance Role create and update secrets when every plugin references an existing webhook secret
     template: rbac.yaml
     documentIndex: 4
     set:
       plugins.forgejo.webhookSecret.existingSecret: forge-webhooks
       plugins.github.webhookSecret.existingSecret: forge-webhooks
     asserts:
-      - equal:
+      - contains:
           path: rules
-          value:
-            - apiGroups: ["coordination.k8s.io"]
-              resources: ["leases"]
-              verbs: ["get", "create", "update"]
-            - apiGroups: [""]
-              resources: ["secrets", "services"]
-              verbs: ["get"]
+          content:
+            apiGroups: [""]
+            resources: ["secrets"]
+            verbs: ["create", "update"]
 
-  - it: grants create on secrets for a null webhook secret
+  - it: grants create and update on secrets for a null webhook secret
     template: rbac.yaml
     documentIndex: 4
     set:
@@ -342,4 +339,4 @@ tests:
           content:
             apiGroups: [""]
             resources: ["secrets"]
-            verbs: ["create"]
+            verbs: ["create", "update"]

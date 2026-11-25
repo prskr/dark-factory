@@ -10,6 +10,8 @@ pub mod records;
 pub mod refs;
 pub mod secret_rules;
 pub mod server;
+#[cfg(test)]
+mod signed_commits;
 pub mod spool;
 pub mod upstream;
 pub mod view;

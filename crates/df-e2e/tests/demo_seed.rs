@@ -317,14 +317,14 @@ async fn demo_profile_leaves_the_e2e_fixtures_unchanged() -> Result<()> {
         anyhow::Ok(rows)
     };
     let before = fixtures(pool.clone()).await?;
-    assert_eq!(before.len(), 18 + 1 + 2);
+    assert_eq!(before.len(), 19 + 1 + 2);
 
     demo::run(&pool).await?;
 
     assert_eq!(fixtures(pool.clone()).await?, before);
     assert_eq!(
         scalar(&pool, "SELECT count(*) FROM projects").await?,
-        18 + 3
+        19 + 3
     );
     Ok(())
 }

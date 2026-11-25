@@ -6,7 +6,7 @@ use crate::testing::{Env, task_resume_state};
 use df_core::config::RunsConfig;
 use df_core::run_transition::cancel_deadline;
 use df_core::testing::SandboxCall;
-use df_core::{ProviderError, TaskStatus};
+use df_core::{ProviderError, SecretStore, TaskStatus};
 use df_db::runs::{get_run, list_overdue_runs};
 use jiff_sqlx::ToSqlx;
 use sqlx::PgPool;
@@ -70,6 +70,59 @@ async fn new_task_gets_a_run_and_a_sandbox() {
     assert_eq!(spec.image, "registry.example.org/df/project:latest");
     assert_eq!(spec.harness.as_deref(), Some("claude-code"));
     assert_eq!(spec.labels["dark-factory.io/task-key"], "DF-1");
+}
+
+#[tokio::test]
+async fn a_persona_without_a_signing_key_gets_one_before_its_sandbox_is_provisioned() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let key_secret = df_core::signing_key::secret_ref(env.persona_id);
+    assert!(env.secrets.get(&key_secret).await.is_err(), "no key yet");
+
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
+        .await
+        .unwrap();
+
+    assert_eq!(env.secrets.created().len(), 1);
+    assert_eq!(env.secrets.created()[0].0, key_secret);
+    let fingerprint: Option<String> =
+        sqlx::query_scalar("SELECT signing_fingerprint FROM personas WHERE id = $1")
+            .bind(env.persona_id.as_uuid())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(fingerprint.is_some_and(|f| f.starts_with("SHA256:")));
+    assert!(
+        env.provider
+            .calls()
+            .iter()
+            .any(|c| matches!(c, SandboxCall::Provision(_)))
+    );
+}
+
+#[tokio::test]
+async fn a_run_fails_to_provision_when_the_signing_key_cannot_be_created() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let key_secret = df_core::signing_key::secret_ref(env.persona_id);
+    env.secrets.insert_error(
+        key_secret.name,
+        key_secret.key,
+        df_core::SecretError::Backend("forbidden".into()),
+    );
+
+    tick(&Scheduler::new(env.ctx.clone()), Timestamp::now())
+        .await
+        .unwrap();
+
+    let run = only_run(&pool).await;
+    assert_eq!(run.outcome, Some(RunOutcome::ProvisioningFailed));
+    assert!(
+        !env.provider
+            .calls()
+            .iter()
+            .any(|c| matches!(c, SandboxCall::Provision(_)))
+    );
 }
 
 async fn volume_deleted_at(pool: &PgPool, env: &Env) -> Option<Timestamp> {

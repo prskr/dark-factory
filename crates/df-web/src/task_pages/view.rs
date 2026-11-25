@@ -20,7 +20,7 @@ use crate::components::{
     dialog_with, field_error, filter_chip, form_error, icon, icon_menu, persona_avatar,
     phone_profile_menu, search_menu, section, status_badge, tone_badge,
 };
-use crate::components::{ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
+use crate::components::{DIALOG_CLASS, ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
 use crate::layout::{Shell, item_path};
 use crate::transcript::block_parts;
 use crate::transcript::webhook::summary;
@@ -30,8 +30,6 @@ const CHIP_SELECT: &str =
 /// The persona picker of the composer sits in the card without a border of its own.
 const PERSONA_SELECT: &str =
     "min-h-11 rounded-full bg-transparent px-3 text-sm text-ink lg:min-h-8";
-/// A native modal `<dialog>`, centered from `md` and anchored to the bottom on a phone.
-const DIALOG_CLASS: &str = "fixed inset-x-0 bottom-0 m-0 mt-auto w-full max-w-none overflow-visible bg-transparent p-3 text-ink backdrop:bg-black/50 md:inset-0 md:m-auto md:h-fit md:max-w-md md:p-0";
 /// Ctrl/Cmd+Enter in the message box: Save while editing a queued message, otherwise the Send
 /// button that `#composer-action` holds at that moment.
 const SEND_SHORTCUT: &str = "(editing ? $refs.save : document.querySelector('#composer-action [aria-label=Send]'))?.click()";

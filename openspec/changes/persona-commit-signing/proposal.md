@@ -12,6 +12,7 @@ After `persona-identity`, a commit's author tells which persona made it, but any
 - The signing service signs only commit objects whose author and committer equal the run's persona identity. It writes one audit entry per signature.
 - New push check `df:signature`: every checked task-branch commit must carry a valid SSH signature by the run's persona's current key. The check is always on and always `reject`. WIP snapshots are neither signed nor checked.
 - After a rotation, commits signed with the old key but not yet pushed are rejected. The rejection feedback tells the agent how to re-sign them.
+- Forgejo only trusts SSH keys verified with a signature over a Forgejo token. When the instance loads the `forgejo` plugin, the persona page offers "Verify key on Forgejo": a board member pastes the token and Forgejo's domain (prefilled from the host the `forgejo` plugin is routed for), and the control plane signs it with the persona's key. The key never leaves the control plane.
 
 Out of scope:
 - Registering keys and emails on the forge automatically through the plugin: roadmap backlog.
@@ -29,15 +30,16 @@ Out of scope:
 - `git-hardening`: the runtime-owned `.git/config` gains the signing keys.
 - `push-checks`: new always-on check `df:signature`.
 - `egress-policy-distribution`: a sandbox entry's Git route carries the persona's current public signing key.
+- `configuration-management`: the persona form shows its fields in the groups "Identity", "Agent" and "Commits".
 
 ## Impact
 
 - **Contract**: the agent stream gets `SignRequest`/`SignResponse` (`contract/proto/darkfactory/agent/v1/agent.proto`), `Assign.workspace` gets `signing_public_key`, and `GitRoute` gets `signing_public_key` (`gateway.proto`). The runtime socket protocol gets a sign call.
 - **Control plane**: key management through `SecretStore` (`df-k8s`), a signing service in `df-agent-channel`, the public key column and rotation in `df-db`.
 - **Gateway**: signature verification in `df-gateway/src/git/policy_checks.rs`.
-- **factory-agent**: the shim binary (`/opt/factory/bin/df-git-sign`), the sign relay, and the `.git/config` keys. The runtime image gets the shim.
-- **Web**: the signing key section and the rotate action on the persona page.
+- **factory-agent**: the shim script (`/opt/factory/df-git-sign`), the sign relay, and the `.git/config` keys. The runtime image gets the shim.
+- **Web**: the signing key section, the rotate action, and "Verify key on Forgejo" (only with the `forgejo` plugin) on the persona page.
 - **Dependencies**: `ssh-key` (RustCrypto: OpenSSH key encoding, SSHSIG sign and verify, on top of `ed25519-dalek`, which is already in the graph). `docs/architecture.md` is updated.
 - **Helm**: the control plane's RBAC needs `create`/`update` on Secrets with the persona key label (`get_or_create` already exists for instance secrets).
-- **Docs**: a how-to "Verify persona commits on the forge" (Forgejo and GitHub: register the key and the email on the bot account), `docs/content/security/git-proxy.md` (`df:signature`), `docs/content/operations/backup.md` (the persona key Secrets), `design/agent-run.md` §12 and §7.1, `product/context.md` F7, and the roadmap.
+- **Docs**: a how-to "Verify persona commits on the forge" (Forgejo and GitHub: register the key and the email on the bot account; on Forgejo also verify the key through the persona page), `docs/content/security/git-proxy.md` (`df:signature`), `docs/content/operations/backup.md` (the persona key Secrets), `design/agent-run.md` §12 and §7.1, `product/context.md` F7, and the roadmap.
 - **Depends on**: `persona-identity`.

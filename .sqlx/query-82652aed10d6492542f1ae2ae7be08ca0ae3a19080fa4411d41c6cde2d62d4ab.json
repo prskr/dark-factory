@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, handle, display_name, commit_email, description, system_prompt,\n                        harness, model, model_provider_id\n                 FROM personas WHERE id = $1 FOR UPDATE",
+  "query": "SELECT id, handle, display_name, commit_email, description, system_prompt, harness, model,\n                model_provider_id, signing_public_key, signing_fingerprint\n         FROM personas WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -101,6 +101,28 @@
             "name": "model_provider_id"
           }
         }
+      },
+      {
+        "ordinal": 9,
+        "name": "signing_public_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "signing_public_key"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "signing_fingerprint",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "signing_fingerprint"
+          }
+        }
       }
     ],
     "parameters": {
@@ -117,8 +139,10 @@
       false,
       false,
       false,
-      false
+      false,
+      true,
+      true
     ]
   },
-  "hash": "83353c93cc659c38cb055d6530737ea8c1dcd27a9bc773f61dab771c98ceab31"
+  "hash": "82652aed10d6492542f1ae2ae7be08ca0ae3a19080fa4411d41c6cde2d62d4ab"
 }

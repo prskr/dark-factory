@@ -13,6 +13,7 @@ use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
+use crate::persona_keys::PublicSigningKey;
 use crate::pool::DbError;
 use crate::push_checks::{PushPolicy, save_push_policy};
 
@@ -119,6 +120,47 @@ pub struct PersonaRecord {
     pub harness: String,
     pub model: String,
     pub model_provider_id: Uuid,
+    /// The public half of the signing key; `None` until the key exists.
+    pub signing_key: Option<PublicSigningKey>,
+}
+
+/// The columns of a persona row: the signing key is two nullable columns.
+struct PersonaRow {
+    id: Uuid,
+    handle: String,
+    display_name: String,
+    commit_email: String,
+    description: String,
+    system_prompt: String,
+    harness: String,
+    model: String,
+    model_provider_id: Uuid,
+    signing_public_key: Option<String>,
+    signing_fingerprint: Option<String>,
+}
+
+impl From<PersonaRow> for PersonaRecord {
+    fn from(row: PersonaRow) -> Self {
+        let signing_key = match (row.signing_public_key, row.signing_fingerprint) {
+            (Some(public_key), Some(fingerprint)) => Some(PublicSigningKey {
+                public_key,
+                fingerprint,
+            }),
+            _ => None,
+        };
+        Self {
+            id: row.id,
+            handle: row.handle,
+            display_name: row.display_name,
+            commit_email: row.commit_email,
+            description: row.description,
+            system_prompt: row.system_prompt,
+            harness: row.harness,
+            model: row.model,
+            model_provider_id: row.model_provider_id,
+            signing_key,
+        }
+    }
 }
 
 struct CredentialRow {
@@ -272,13 +314,16 @@ pub async fn get_project(
 
 pub async fn list_personas(pool: &PgPool) -> Result<Vec<PersonaRecord>, DbError> {
     Ok(sqlx::query_as!(
-        PersonaRecord,
+        PersonaRow,
         "SELECT id, handle, display_name, commit_email, description, system_prompt, harness, model,
-                model_provider_id
+                model_provider_id, signing_public_key, signing_fingerprint
          FROM personas ORDER BY handle"
     )
     .fetch_all(pool)
-    .await?)
+    .await?
+    .into_iter()
+    .map(PersonaRecord::from)
+    .collect())
 }
 
 pub async fn get_persona(
@@ -286,14 +331,15 @@ pub async fn get_persona(
     id: Uuid,
 ) -> Result<Option<PersonaRecord>, DbError> {
     Ok(sqlx::query_as!(
-        PersonaRecord,
+        PersonaRow,
         "SELECT id, handle, display_name, commit_email, description, system_prompt, harness, model,
-                model_provider_id
+                model_provider_id, signing_public_key, signing_fingerprint
          FROM personas WHERE id = $1",
         id
     )
     .fetch_optional(executor)
-    .await?)
+    .await?
+    .map(PersonaRecord::from))
 }
 
 /// The id of the persona with `handle`.
@@ -534,14 +580,16 @@ pub async fn save_persona(
     let before: Option<PersonaRecord> = match id {
         Some(id) => Some(
             sqlx::query_as!(
-                PersonaRecord,
+                PersonaRow,
                 "SELECT id, handle, display_name, commit_email, description, system_prompt,
-                        harness, model, model_provider_id
+                        harness, model, model_provider_id, signing_public_key,
+                        signing_fingerprint
                  FROM personas WHERE id = $1 FOR UPDATE",
                 id
             )
             .fetch_optional(&mut *tx)
             .await?
+            .map(PersonaRecord::from)
             .ok_or_else(|| DbError::NotFound(format!("persona `{id}`")))?,
         ),
         None => None,

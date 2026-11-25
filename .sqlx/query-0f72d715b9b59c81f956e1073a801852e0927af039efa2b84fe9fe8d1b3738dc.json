@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!\" FROM runs r JOIN tasks t ON t.id = r.task_id\n           WHERE t.persona_id = $1 AND r.state <> ALL($2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0f72d715b9b59c81f956e1073a801852e0927af039efa2b84fe9fe8d1b3738dc"
+}

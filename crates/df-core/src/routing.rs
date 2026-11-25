@@ -237,6 +237,27 @@ impl ForgeRoutes {
         }
     }
 
+    /// Whether a plugin of this kind is loaded (`ForgeKind::from_plugin` of its name).
+    pub fn loads(&self, kind: &ForgeKind) -> bool {
+        self.loaded
+            .iter()
+            .any(|name| &ForgeKind::from_plugin(name) == kind)
+    }
+
+    /// The host name (no port) of the first loaded plugin of this kind that claims a host: the
+    /// host of its `apiUrl`, else the claimed host. `None` without one (a default plugin has no
+    /// host of its own).
+    pub fn host_of(&self, kind: &ForgeKind) -> Option<String> {
+        let (claimed, route) = self.table.hosts().find(|(_, route)| {
+            self.loaded.contains(&route.plugin) && &ForgeKind::from_plugin(&route.plugin) == kind
+        })?;
+        let url = route
+            .api_url
+            .as_deref()
+            .map_or_else(|| format!("http://{claimed}"), str::to_owned);
+        Url::parse(&url).ok()?.host_str().map(str::to_owned)
+    }
+
     /// The plugin routed for the host of `repo_url`, as the forge router would pick it.
     pub fn forge_for_repo_url(&self, repo_url: &str) -> ForgeServing {
         let Ok(Resolved { plugin, host, .. }) = self.table.resolve(repo_url) else {
@@ -563,7 +584,7 @@ mod tests {
     #[test]
     fn api_url_with_userinfo_query_or_fragment_is_rejected_without_echoing_it() {
         for api_url in [
-            "https://user:secret@api.github.com",
+            "https://user:secret@api.github.com", // kingfisher:ignore (test input)
             "https://api.github.com?secret=1",
             "https://api.github.com#secret",
             "not a url secret",
@@ -688,7 +709,7 @@ mod tests {
     #[test]
     fn repo_url_with_userinfo_query_or_fragment_is_rejected() {
         for raw in [
-            "https://user:token@github.com/o/r",
+            "https://user:token@github.com/o/r", // kingfisher:ignore (test input)
             "https://token@github.com/o/r",
             "https://github.com/o/r?token=1",
             "https://github.com/o/r#token",
@@ -701,7 +722,7 @@ mod tests {
     fn resolve_rejects_userinfo_without_echoing_it() {
         let table = table(vec![("github", plugin(vec![host("github.com")]))]).unwrap();
         let err = table
-            .resolve("https://user:token@github.com/o/r")
+            .resolve("https://user:token@github.com/o/r") // kingfisher:ignore (test input)
             .unwrap_err();
         assert_eq!(err, ResolveError::InvalidUrl);
         let message = err.to_string();
@@ -739,6 +760,75 @@ mod tests {
         assert_eq!(api("https://git.example.org/o/r"), None, "no apiUrl");
         assert_eq!(api("https://other.example.com/o/r.git"), None, "unrouted");
         assert_eq!(api("not a url"), None, "unparsable");
+    }
+
+    fn routes_of(plugins: Vec<(&str, PluginConfig)>, loaded: &[&str]) -> ForgeRoutes {
+        ForgeRoutes::new(
+            table(plugins).unwrap(),
+            loaded.iter().map(|name| (*name).to_string()),
+        )
+    }
+
+    #[test]
+    fn of_several_claimed_hosts_the_alphabetically_first_is_the_plugins_host() {
+        let routes = routes_of(
+            vec![(
+                "forgejo",
+                plugin(vec![host("z.example.org"), host("a.example.org")]),
+            )],
+            &["forgejo"],
+        );
+
+        assert_eq!(
+            routes.host_of(&ForgeKind::Forgejo).as_deref(),
+            Some("a.example.org")
+        );
+    }
+
+    #[test]
+    fn the_host_of_a_loaded_plugin_is_the_api_url_host_else_the_claimed_host_without_port() {
+        let forgejo = ForgeKind::Forgejo;
+        let with_api = routes_of(
+            vec![(
+                "forgejo",
+                plugin(vec![claim(
+                    "git.example.org",
+                    "https://api.example.net:8443/v1",
+                )]),
+            )],
+            &["forgejo"],
+        );
+        let claimed_only = routes_of(
+            vec![("forgejo", plugin(vec![host("Git.Example.org:3000")]))],
+            &["forgejo"],
+        );
+
+        assert_eq!(
+            with_api.host_of(&forgejo).as_deref(),
+            Some("api.example.net")
+        );
+        assert_eq!(
+            claimed_only.host_of(&forgejo).as_deref(),
+            Some("git.example.org")
+        );
+    }
+
+    #[test]
+    fn a_default_plugin_an_unloaded_plugin_and_another_kind_have_no_host() {
+        let forgejo = ForgeKind::Forgejo;
+        let default_plugin = routes_of(vec![("forgejo", plugin(vec![]))], &["forgejo"]);
+        let not_loaded = routes_of(
+            vec![("forgejo", plugin(vec![host("git.example.org")]))],
+            &[],
+        );
+        let github_only = routes_of(
+            vec![("github", plugin(vec![host("github.com")]))],
+            &["github"],
+        );
+
+        assert_eq!(default_plugin.host_of(&forgejo), None);
+        assert_eq!(not_loaded.host_of(&forgejo), None);
+        assert_eq!(github_only.host_of(&forgejo), None);
     }
 
     #[test]
@@ -909,7 +999,7 @@ mod tests {
             "https://github.com/only-owner",
             "https://github.com/a/b/c",
             "https://git hub.com/acme/web",
-            "https://user:token@github.com/acme/web",
+            "https://user:token@github.com/acme/web", // kingfisher:ignore (test input)
             "https://github.com/acme/web?x=1",
         ] {
             assert_eq!(

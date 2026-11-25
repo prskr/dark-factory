@@ -42,6 +42,24 @@ To go back, restore the database backup taken before the upgrade, then roll back
 
 ## Release-specific steps
 
+### Commit signing
+
+Every persona gets an Ed25519 signing key, and the Git proxy rejects task-branch commits that are
+not signed with it (`df:signature`, [Git proxy](../security/git-proxy.md)).
+
+- **Let active runs finish before the upgrade, or restart them afterwards.** The sandbox of a run
+  that is active during the upgrade runs the old runtime image without the signing shim, so its
+  pushes fail `df:signature`. A run that ends (or is stopped and resumed) starts again with the new
+  runtime.
+- The control plane's `Role` in the instance namespace gets `create` and `update` on Secrets: it
+  creates `df-persona-key-<id>` and replaces it on a rotation. The chart renders this; a
+  `Role` that you manage yourself needs the two verbs.
+- Keys are created when a persona is saved and before the first run of a persona without one, so
+  existing personas need no step. Register each persona's public key and commit email on the
+  forge's bot account to have the forge show its commits as verified
+  ([Verify persona commits on the forge](../using/verify-persona-commits.md)). Back up the new
+  Secrets ([Backup and restore](backup.md)).
+
 ### Sandbox values moved, no sandbox LimitRange
 
 The chart no longer renders a `LimitRange` in the sandbox namespace. The size of sandbox pods is

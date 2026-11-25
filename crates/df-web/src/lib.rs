@@ -105,6 +105,9 @@ pub struct WebState {
     /// The webhook endpoints of the forge plugins: the settings page shows their state and
     /// reveals the secret to admins.
     pub webhooks: Arc<dyn webhooks::WebhookReceiver>,
+    /// The Kubernetes Secrets of the persona signing keys: saving a persona creates its key,
+    /// rotating replaces it.
+    pub secrets: Arc<dyn df_core::SecretStore>,
 }
 
 /// `/healthz`, `/readyz`, `/assets/*` and `/lifecycle-events/public-key`; no login required.

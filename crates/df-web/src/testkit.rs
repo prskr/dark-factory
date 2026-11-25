@@ -219,6 +219,8 @@ pub(crate) struct TestApp {
     pub forge: df_core::testing::FakeForgeClient,
     /// The sandbox provider the handlers call; records the calls.
     pub provider: df_core::testing::FakeSandboxProvider,
+    /// The Secrets of the persona signing keys.
+    pub secrets: df_core::testing::FakeSecretStore,
     /// The clock of the auth middleware; follows the system clock until a test freezes it.
     pub clock: Arc<TestClock>,
     _dir: tempfile::TempDir,
@@ -487,6 +489,7 @@ impl TestApp {
         let public_url = extras.public_url.clone();
         let forge = df_core::testing::FakeForgeClient::new();
         let provider = df_core::testing::FakeSandboxProvider::new();
+        let secrets = df_core::testing::FakeSecretStore::new();
         let clock = Arc::new(TestClock::default());
         let state = WebState {
             clock: clock.clone(),
@@ -515,6 +518,7 @@ impl TestApp {
             project_targets: extras.project_targets,
             public_url: public_url.as_deref().map(|u| url::Url::parse(u).unwrap()),
             webhooks: Arc::new(extras.webhooks),
+            secrets: Arc::new(secrets.clone()),
         };
         Self {
             router: router(state),
@@ -522,6 +526,7 @@ impl TestApp {
             idp,
             forge,
             provider,
+            secrets,
             clock,
             _dir: dir,
         }

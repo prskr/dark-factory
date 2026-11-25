@@ -378,6 +378,7 @@ where
             forge: forge.clone(),
             provider: provider.clone(),
             webhooks: forge::webhooks(&forge, &pool),
+            secrets: secrets.clone(),
         },
         EgressDeps { flows, services },
         approval_types.clone(),
@@ -731,6 +732,7 @@ fn web_router(
         project_targets: delivery.project_targets,
         public_url: Some(public_url),
         webhooks: webhook_receiver,
+        secrets: backends.secrets,
     })
     .merge(webhooks))
 }
@@ -741,12 +743,14 @@ fn web_code_theme(cfg: &InstanceConfig) -> anyhow::Result<df_web::markdown::Code
         .context("invalid `web.codeTheme`")
 }
 
-/// The forges and the sandbox provider the task pages act on, and the webhook receiver.
+/// The forges and the sandbox provider the task pages act on, the Secret store of the persona
+/// signing keys and the webhook receiver.
 struct WebBackends {
     forges: df_core::routing::ForgeRoutes,
     forge: Arc<dyn df_core::ForgeClient>,
     provider: Arc<dyn df_core::SandboxProvider>,
     webhooks: df_web::webhooks::Webhooks,
+    secrets: Arc<dyn df_core::SecretStore>,
 }
 
 /// What the egress pages need from the outside.
@@ -1183,6 +1187,7 @@ mod tests {
                 Arc::new(AcceptingWebhooks),
                 &opentelemetry::global::meter("test"),
             ),
+            secrets: Arc::new(df_core::testing::FakeSecretStore::new()),
         }
     }
 

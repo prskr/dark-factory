@@ -17,6 +17,9 @@ pub enum OrchestratorError {
     Volume(#[from] df_db::volumes::VolumeError),
     #[error(transparent)]
     Secret(#[from] SecretError),
+    /// The signing key of the run's persona could not be created.
+    #[error("signing key: {0}")]
+    SigningKey(#[from] df_db::persona_keys::KeyError),
     #[error(transparent)]
     Integration(#[from] IntegrationError),
     /// The forge refused to create the branch of a base task; the run fails with this reason.

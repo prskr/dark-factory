@@ -36,6 +36,10 @@ pub const MAX_REJECTION_MESSAGES: i32 = 3;
 /// Findings a `push.rejected` message lists.
 const MAX_LISTED_FINDINGS: usize = 20;
 
+/// What the agent does about `df:signature` findings: commits are signed when they are made, so
+/// the listed ones are made again.
+const RE_SIGN_HINT: &str = "To re-sign the listed commits, rewrite them so that git signs them again, for example `git rebase --exec 'git commit --amend --no-edit' <base>` with the branch your task is based on as <base>.";
+
 /// Reason of a `push-check-exception` request.
 const EXCEPTION_REASON: &str = "Approving lets exactly these findings pass for this task.";
 
@@ -268,6 +272,7 @@ pub enum PushCheck {
     BlobTooLarge,
     MergeCommit,
     HiddenPath,
+    Signature,
 }
 
 impl PushCheck {
@@ -280,6 +285,7 @@ impl PushCheck {
             Self::BlobTooLarge => "blob-too-large",
             Self::MergeCommit => "merge-commit",
             Self::HiddenPath => "hidden-path",
+            Self::Signature => "signature",
         }
     }
 }
@@ -293,6 +299,7 @@ impl From<PushCheck> for pb::PushCheck {
             PushCheck::BlobTooLarge => Self::BlobTooLarge,
             PushCheck::MergeCommit => Self::MergeCommit,
             PushCheck::HiddenPath => Self::HiddenPath,
+            PushCheck::Signature => Self::Signature,
         }
     }
 }
@@ -659,6 +666,12 @@ fn feedback(task_branch: &str, findings: &[&PushFinding], approval: Approval) ->
         Approval::TooManyPending => "These findings need a human's approval, but no request was raised because the task has too many pending requests. Remove them from your unpushed commits (amend or rebase them), or wait until a human answered the pending requests; the runtime pushes again after your next turn.",
         Approval::NotPossible => "These findings cannot be approved. Remove them from your unpushed commits (amend or rebase them); the runtime pushes again after your next turn.",
     }.to_string());
+    if findings
+        .iter()
+        .any(|finding| finding.check == PushCheck::Signature)
+    {
+        lines.push(RE_SIGN_HINT.to_string());
+    }
     lines.join("\n")
 }
 

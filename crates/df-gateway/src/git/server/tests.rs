@@ -62,6 +62,7 @@ fn route(credential_ref: &str) -> GitRoute {
         commit_email: "factory@example.com".into(),
         rewrite_policy: 0,
         read_only: false,
+        signing_public_key: String::new(),
     }
 }
 

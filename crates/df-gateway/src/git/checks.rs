@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 
+use df_core::signing_key::{VerifyError, verify};
 use df_proto::gateway::v1::{CheckMode, MaskedSecret, PushCheck, PushPolicy};
 use df_sandbox_contract::glob::{GlobError, hidden_glob_set, protected_glob};
 use globset::{GlobMatcher, GlobSet, GlobSetBuilder};
@@ -22,6 +23,7 @@ pub enum Check {
     BlobTooLarge,
     MergeCommit,
     HiddenPath,
+    Signature,
 }
 
 impl From<Check> for PushCheck {
@@ -33,6 +35,7 @@ impl From<Check> for PushCheck {
             Check::BlobTooLarge => Self::BlobTooLarge,
             Check::MergeCommit => Self::MergeCommit,
             Check::HiddenPath => Self::HiddenPath,
+            Check::Signature => Self::Signature,
         }
     }
 }
@@ -72,10 +75,12 @@ pub enum Target {
     Wip,
 }
 
-/// The commit identity the agent's commits must carry.
+/// The persona identity the agent's commits must carry and the key they must be signed with.
 #[derive(Debug, Clone, Copy)]
 pub struct Identity<'a> {
     pub email: &'a str,
+    /// The persona's current public signing key (OpenSSH format).
+    pub signing_public_key: &'a str,
 }
 
 /// One finding of a check. Never contains a matched secret.
@@ -197,6 +202,7 @@ pub fn check_push(
     let mut findings = Vec::new();
     if target == Target::TaskBranch {
         findings.extend(identity_findings(view, identity));
+        findings.extend(signature_findings(view, identity));
         if policy.linear_history {
             findings.extend(merge_findings(view));
         }
@@ -270,6 +276,36 @@ fn identity_findings<'a>(
             path: String::new(),
             line: None,
             detail: format!("commit {} {}", commit.id, roles.join(", ")),
+            secret: None,
+        })
+    })
+}
+
+/// A commit without a valid SSH signature (namespace `git`) of the persona's current key.
+fn signature_findings<'a>(
+    view: &'a PushView,
+    identity: &'a Identity<'_>,
+) -> impl Iterator<Item = Finding> + 'a {
+    view.commits.iter().filter_map(|commit| {
+        let problem = match &commit.signed.signature {
+            None => "missing signature",
+            Some(signature) => match verify(
+                identity.signing_public_key,
+                &commit.signed.payload,
+                signature,
+            ) {
+                Ok(()) => return None,
+                Err(VerifyError::OtherKey) => "signed by another key",
+                Err(VerifyError::Invalid) => "invalid signature",
+            },
+        };
+        Some(Finding {
+            check: Check::Signature,
+            mode: Mode::Reject,
+            fingerprint: None,
+            path: String::new(),
+            line: None,
+            detail: format!("commit {} {problem}", commit.id),
             secret: None,
         })
     })

@@ -524,6 +524,18 @@ impl Session {
 
     /// Persists the batch, acks it, then runs its effects. `false` ends the session.
     async fn handle_batch(&mut self, batch: Vec<AgentMessage>) -> Result<bool, Status> {
+        // Sign requests are not part of the persisted sequence (`seq` 0, never acknowledged).
+        let (sign_requests, batch): (Vec<_>, Vec<_>) = batch
+            .into_iter()
+            .partition(|msg| matches!(msg.body, Some(agent_message::Body::SignRequest(_))));
+        for msg in sign_requests {
+            if let Some(agent_message::Body::SignRequest(request)) = msg.body {
+                self.spawn_sign(request);
+            }
+        }
+        if batch.is_empty() {
+            return Ok(true);
+        }
         // Read once, before the batch is persisted: a `RunReport` in this very batch must not
         // refuse the tool calls that precede it.
         let run = persist_state(&self.ctx.pool, self.rc.run.id)
@@ -558,6 +570,18 @@ impl Session {
             )));
         }
         Ok(true)
+    }
+
+    /// Answers a sign request off the stream loop. Nothing is stored or sent again: the runtime
+    /// fails the request after 10 s without an answer (design D2 of `persona-commit-signing`).
+    fn spawn_sign(&mut self, request: df_proto::agent::v1::SignRequest) {
+        let (ctx, rc, out) = (self.ctx.clone(), self.rc.clone(), self.out.clone());
+        self.tasks.spawn(async move {
+            let response = crate::signing::respond(&ctx, &rc, request).await;
+            out.send(Ok(control(control_message::Body::SignResponse(response))))
+                .await
+                .ok(); // the runtime fails the request when the stream is gone
+        });
     }
 
     /// `active`: the run had not ended when the batch arrived. Tool calls of an ended run are
@@ -741,7 +765,8 @@ impl<'l> BatchApply<'l> {
         body: agent_message::Body,
     ) -> Result<(), ChannelError> {
         match body {
-            agent_message::Body::Hello(_) => {}
+            // Answered before the batch is persisted (`handle_batch`).
+            agent_message::Body::Hello(_) | agent_message::Body::SignRequest(_) => {}
             agent_message::Body::PhaseChanged(change) => {
                 self.idle_changed |= apply_phase(tx, rc, change.phase()).await?;
             }

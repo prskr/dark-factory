@@ -6,6 +6,7 @@ use df_proto::gateway::v1::{CheckMode, GitRoute, PushCheck, PushPolicy};
 use super::*;
 use crate::git::refs::{ObjectId, Reason, RefCommand};
 use crate::git::secret_rules::BlobSource;
+use crate::git::signed_commits::{PERSONA_KEY, signed_by};
 use crate::git::view::{AddedBlob, AddedCommit, PathChange, PushView, TaskRefs, ViewError};
 use crate::upstream::BoxError;
 use df_proto::push_reasons::{CHECK_FAILED, PUSH_TOO_LARGE};
@@ -14,6 +15,11 @@ const AGENT: &str = "agent@factory.test";
 const TASK: &str = "refs/heads/factory/task/DF-7";
 const WIP: &str = "refs/heads/factory/wip/DF-7";
 static NOT_INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// A commit object signed by the persona.
+fn signed(n: u8) -> df_core::signing_key::SplitCommit {
+    signed_by(&PERSONA_KEY, n)
+}
 
 /// The objects of a push: a view per pushed tip and blob contents by id.
 #[derive(Default)]
@@ -86,6 +92,7 @@ fn route() -> GitRoute {
         task_branch: TASK.to_owned(),
         wip_branch: WIP.to_owned(),
         commit_email: AGENT.to_owned(),
+        signing_public_key: PERSONA_KEY.public_key(),
         ..GitRoute::default()
     }
 }
@@ -117,6 +124,7 @@ fn commit_as(email: &str, n: u8, blob: u8, paths: &[&str]) -> AddedCommit {
         parents: vec![id(n - 1)],
         author_email: email.to_owned(),
         committer_email: email.to_owned(),
+        signed: signed(n),
         changes: paths
             .iter()
             .map(|path| PathChange {
@@ -580,6 +588,88 @@ fn a_commit_as_the_runs_persona_passes_the_identity_check() {
 
     assert_eq!(reason_texts(&outcome), [None]);
     assert!(outcome.findings.is_empty());
+}
+
+/// A view of one agent commit that changes nothing, signed by the persona.
+fn signed_commit(n: u8) -> PushView {
+    PushView {
+        commits: vec![commit_as(AGENT, n, 50, &[])],
+        blobs: Vec::new(),
+    }
+}
+
+/// A view of one agent commit that changes nothing and has no signature.
+fn unsigned(n: u8) -> PushView {
+    let mut view = signed_commit(n);
+    view.commits[0].signed.signature = None;
+    view
+}
+
+#[test]
+fn an_unsigned_commit_on_the_task_branch_is_rejected_with_df_signature() {
+    let objects = FakeObjects::default().with(&tip(1), unsigned(1));
+
+    let outcome = run(
+        &[command(TASK, tip(1))],
+        Some(&default_policy()),
+        &[],
+        &objects,
+    );
+
+    assert_eq!(
+        reason_texts(&outcome),
+        [Some(format!(
+            "df:signature (commit {} missing signature)",
+            id(1)
+        ))]
+    );
+    assert!(
+        !outcome.approval_requested,
+        "a signature cannot be approved"
+    );
+}
+
+#[test]
+fn the_push_of_a_signed_commit_passes_and_the_wip_push_needs_no_signature() {
+    let objects = FakeObjects::default()
+        .with(&tip(1), signed_commit(1))
+        .with(&tip(2), unsigned(2));
+
+    let outcome = run(
+        &[command(TASK, tip(1)), command(WIP, tip(2))],
+        Some(&default_policy()),
+        &[],
+        &objects,
+    );
+
+    assert_eq!(reason_texts(&outcome), [None, None]);
+}
+
+#[test]
+fn a_route_without_a_signing_key_rejects_every_commit() {
+    let route = GitRoute {
+        signing_public_key: String::new(),
+        ..route()
+    };
+    let objects = FakeObjects::default().with(&tip(1), signed_commit(1));
+    let commands = [command(TASK, tip(1))];
+    let push = CheckedPush {
+        route: &route,
+        policy: Some(&default_policy()),
+        exceptions: &[],
+        commands: &commands,
+        interrupt: &NOT_INTERRUPTED,
+    };
+
+    let outcome = checks().check(&push, &objects);
+
+    assert_eq!(
+        reason_texts(&outcome),
+        [Some(format!(
+            "df:signature (commit {} invalid signature)",
+            id(1)
+        ))]
+    );
 }
 
 #[test]

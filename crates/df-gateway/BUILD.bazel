@@ -206,6 +206,7 @@ rust_test(
         normal_dev = True,
     ) + [
         ":df_gateway",
+        "//crates/df-core:df_core",
         "//crates/df-proto:df_proto",
         "//crates/df-telemetry:df_telemetry_test_util",
     ],

@@ -38,6 +38,7 @@ nix.workspace = true
 [dev-dependencies]
 df-telemetry = { workspace = true, features = ["clap", "test-util"] }
 rcgen.workspace = true
+ssh-key.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tokio-stream = { workspace = true, features = ["net"] }

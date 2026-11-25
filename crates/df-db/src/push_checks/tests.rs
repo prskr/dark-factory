@@ -207,7 +207,7 @@ fn finding(check: PushCheck, mode: CheckMode, path: &str, detail: &str) -> PushF
         PushCheck::ProtectedPath | PushCheck::HiddenPath => {
             (None, Some(format!("path:{path}")), None)
         }
-        PushCheck::Identity | PushCheck::MergeCommit => (None, None, None),
+        PushCheck::Identity | PushCheck::MergeCommit | PushCheck::Signature => (None, None, None),
     };
     PushFinding {
         ref_name: TASK_BRANCH.into(),
@@ -528,6 +528,61 @@ async fn a_rejected_push_queues_feedback_with_the_masked_findings() {
     );
     assert!(text.contains("factory/task/DF-1"), "{text}");
     assert!(text.contains("cannot be approved"), "{text}");
+}
+
+#[tokio::test]
+async fn a_rejected_signature_check_tells_the_agent_how_to_re_sign() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let seed = seed(&pool).await;
+
+    record(
+        &pool,
+        &push(
+            &seed,
+            PushVerdict::Rejected,
+            vec![finding(
+                PushCheck::Signature,
+                CheckMode::Reject,
+                "",
+                "commit 0a1b missing signature",
+            )],
+        ),
+    )
+    .await;
+
+    let [text] = &feedback_texts(&pool, seed.task).await[..] else {
+        panic!("not exactly one message");
+    };
+    assert!(
+        text.contains("- df:signature (commit 0a1b missing signature)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("git rebase --exec 'git commit --amend --no-edit' <base>"),
+        "{text}"
+    );
+    assert!(text.contains("cannot be approved"), "{text}");
+}
+
+#[tokio::test]
+async fn other_rejected_checks_give_no_re_sign_hint() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let seed = seed(&pool).await;
+
+    record(
+        &pool,
+        &push(
+            &seed,
+            PushVerdict::Rejected,
+            vec![secret(CheckMode::Reject)],
+        ),
+    )
+    .await;
+
+    let [text] = &feedback_texts(&pool, seed.task).await[..] else {
+        panic!("not exactly one message");
+    };
+    assert!(!text.contains("--amend"), "{text}");
 }
 
 #[tokio::test]

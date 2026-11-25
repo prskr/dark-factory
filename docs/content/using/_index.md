@@ -40,3 +40,4 @@ Set up in this order:
 8. [Existing branches](existing-branches.md): tasks on a branch that exists, attached pull requests and rebases.
 9. [Build a feature in iterations](build-a-feature.md): a feature agent that merges its iterations' pull requests into its own branch.
 10. [Plan work in a chat](chats.md): talk to a persona, let it hand work to tasks, archive the conversation.
+11. [Verify persona commits on the forge](verify-persona-commits.md): register a persona's signing key and email on the bot account, rotate the key.

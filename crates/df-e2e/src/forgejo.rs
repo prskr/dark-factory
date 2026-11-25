@@ -329,6 +329,57 @@ impl Forgejo {
         Ok(())
     }
 
+    /// Adds email address `email` to the authenticated user (activated, as the suite's Forgejo does
+    /// not confirm addresses); an address the user has already is fine.
+    pub async fn add_email(&self, email: &str) -> Result<()> {
+        let body = serde_json::json!({ "emails": [email] });
+        self.call(reqwest::Method::POST, "user/emails", Some(&body), &[422])
+            .await?;
+        Ok(())
+    }
+
+    /// Registers SSH key `key` (OpenSSH format) under `title` on the authenticated user as a new,
+    /// unverified key: a key the user has with the same material is deleted first.
+    pub async fn replace_ssh_key(&self, title: &str, key: &str) -> Result<()> {
+        let material = key.split_whitespace().nth(1).context("key material")?;
+        let keys: Vec<Value> = self
+            .call(reqwest::Method::GET, "user/keys", None, &[])
+            .await?
+            .json()
+            .await
+            .context("decode GET user/keys")?;
+        for old in keys.iter().filter(|k| {
+            k["key"]
+                .as_str()
+                .is_some_and(|existing| existing.contains(material))
+        }) {
+            let id = old["id"].as_u64().context("key id")?;
+            self.call(
+                reqwest::Method::DELETE,
+                &format!("user/keys/{id}"),
+                None,
+                &[],
+            )
+            .await?;
+        }
+        let body = serde_json::json!({ "title": title, "key": key });
+        self.call(reqwest::Method::POST, "user/keys", Some(&body), &[])
+            .await?;
+        Ok(())
+    }
+
+    /// The token the authenticated user signs to verify an SSH key (the one the "Verify" dialog of
+    /// the key settings shows).
+    pub async fn key_verification_token(&self) -> Result<String> {
+        let token = self
+            .call(reqwest::Method::GET, "user/gpg_key_token", None, &[])
+            .await?
+            .text()
+            .await
+            .context("read the verification token")?;
+        Ok(token.trim().to_owned())
+    }
+
     /// Deletes access token `token_name` of `user` (authenticated as that user); a missing token
     /// is fine.
     pub async fn delete_token(&self, user: &str, token_name: &str) -> Result<()> {

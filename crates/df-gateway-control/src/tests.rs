@@ -61,6 +61,23 @@ impl SecretStore for TestSecrets {
     ) -> Result<SecretString, SecretError> {
         self.get(reference).await
     }
+
+    async fn get_or_create_with(
+        &self,
+        reference: &SecretKeyRef,
+        _labels: &BTreeMap<String, String>,
+        _value: &SecretString,
+    ) -> Result<SecretString, SecretError> {
+        self.get(reference).await
+    }
+
+    async fn replace(
+        &self,
+        reference: &SecretKeyRef,
+        _value: &SecretString,
+    ) -> Result<(), SecretError> {
+        Err(SecretError::NotFound(reference.clone()))
+    }
 }
 
 pub(crate) fn git_settings() -> GitSettings {
@@ -419,6 +436,37 @@ async fn the_git_route_carries_the_identity_the_run_started_with_after_a_persona
 }
 
 #[tokio::test]
+async fn the_git_route_carries_the_current_public_signing_key_of_the_persona_after_a_rotation()
+-> Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let seed = seed(&pool).await?;
+    insert_run(&pool, seed.task, 1, "running", Some("10.1.0.7")).await?;
+    let route_key = |update: PolicyUpdate| {
+        update.snapshot.unwrap().sandboxes[0]
+            .git
+            .as_ref()
+            .unwrap()
+            .signing_public_key
+            .clone()
+    };
+    let key_of = |public: &str| {
+        sqlx::query("UPDATE personas SET signing_public_key = $1, signing_fingerprint = 'SHA256:x'")
+            .bind(public.to_owned())
+    };
+
+    key_of("ssh-ed25519 AAAAold").execute(&pool).await?;
+    let before = snapshot::build(&pool, &TestSecrets::new("t"), &git_settings()).await?;
+    key_of("ssh-ed25519 AAAAnew").execute(&pool).await?;
+    let after = snapshot::build(&pool, &TestSecrets::new("t"), &git_settings()).await?;
+
+    // The snapshot never carries private key material.
+    assert!(!format!("{after:?}").contains("PRIVATE KEY"));
+    assert_eq!(route_key(before), "ssh-ed25519 AAAAold");
+    assert_eq!(route_key(after), "ssh-ed25519 AAAAnew");
+    Ok(())
+}
+
+#[tokio::test]
 async fn snapshot_has_the_inference_route_of_an_active_run_and_the_current_provider_credential()
 -> Result<()> {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
@@ -477,6 +525,23 @@ impl SecretStore for SecretsExcept {
         _labels: &BTreeMap<String, String>,
     ) -> Result<SecretString, SecretError> {
         self.get(reference).await
+    }
+
+    async fn get_or_create_with(
+        &self,
+        reference: &SecretKeyRef,
+        _labels: &BTreeMap<String, String>,
+        _value: &SecretString,
+    ) -> Result<SecretString, SecretError> {
+        self.get(reference).await
+    }
+
+    async fn replace(
+        &self,
+        reference: &SecretKeyRef,
+        _value: &SecretString,
+    ) -> Result<(), SecretError> {
+        Err(SecretError::NotFound(reference.clone()))
     }
 }
 
@@ -1178,12 +1243,18 @@ async fn a_saved_push_policy_reaches_the_snapshot_and_the_next_push_check() -> R
         .ok_or_else(|| anyhow::anyhow!("no push policy for DF"))?;
     let id = |n: u8| gix::ObjectId::from_bytes_or_panic(&[n; 20]);
     let email = "linus@example.org".to_owned();
+    let key = df_core::signing_key::SigningKey::generate()?;
+    let public_key = key.public_key();
     let view = PushView {
         commits: vec![AddedCommit {
             id: id(2),
             parents: vec![id(1)],
             author_email: email.clone(),
             committer_email: email.clone(),
+            signed: df_core::signing_key::SplitCommit {
+                payload: b"commit".to_vec(),
+                signature: Some(key.sign(b"commit")?.into_bytes()),
+            },
             changes: vec![PathChange {
                 path: "deploy/values.yaml".into(),
                 old: Some(id(10)),
@@ -1195,7 +1266,10 @@ async fn a_saved_push_policy_reaches_the_snapshot_and_the_next_push_check() -> R
     let findings = check_push(
         &view,
         &CheckPolicy::new(pushed)?,
-        &Identity { email: &email },
+        &Identity {
+            email: &email,
+            signing_public_key: &public_key,
+        },
         Target::TaskBranch,
         &NoSecrets,
     )?;

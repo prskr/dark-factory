@@ -122,7 +122,7 @@ for arch in amd64 arm64; do
     exit 1
   fi
   rt_entries="$(list_oci_layer_entries_for_arch "$RUNTIME_IMAGE_DIR" "$arch" | sed 's|^\./||' | grep -v '^$' | sort)"
-  expected_rt="$(printf "factory-agent\ngitconfig\nhooks-empty/\n" | sort)"
+  expected_rt="$(printf "df-git-sign\nfactory-agent\ngitconfig\nhooks-empty/\n" | sort)"
   if [[ "$rt_entries" != "$expected_rt" ]]; then
     echo "Unexpected runtime_image ($arch) entries:" >&2
     echo "Got:" >&2
@@ -133,6 +133,9 @@ for arch in amd64 arm64; do
   fi
   extract_local_layers_for_arch "$RUNTIME_IMAGE_DIR" "$arch" "$WORK_DIR/rt-$arch"
   verify_static_elf "$WORK_DIR/rt-$arch/factory-agent" "$expected_elf_arch"
+  # The signing shim git runs as gpg.ssh.program: executable, hands over to the runtime binary.
+  [[ -x "$WORK_DIR/rt-$arch/df-git-sign" ]]
+  grep -q '^exec /opt/factory/factory-agent git-sign "\$@"$' "$WORK_DIR/rt-$arch/df-git-sign"
 
   echo "=== 4. Verifying test_project_image ($arch) structure and static ELF ==="
   tp_entries="$(list_oci_layer_entries_for_arch "$TEST_PROJECT_IMAGE_DIR" "$arch")"

@@ -134,6 +134,9 @@ pub struct ActiveRun {
     pub rewrite_policy: RewritePolicy,
     /// The persona identity the run commits with, frozen at the run's start.
     pub commit_identity: df_core::CommitIdentity,
+    /// The persona's current public signing key (OpenSSH format), read live; `None` while it has
+    /// no key.
+    pub signing_public_key: Option<String>,
     /// The project's forge credential, if it has one.
     pub forge_credential: Option<CredentialRef>,
 }
@@ -228,11 +231,13 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
                   p.key AS project_key, t.persona_id, p.repo_url,
                   eb.branch AS "base_branch!", t.branch AS task_branch,
                   p.branch_rewrite_policy, r.commit_name, r.commit_email,
+                  pe.signing_public_key,
                   c.id AS "credential_id?", c.name AS "credential_name?",
                   c.secret_name AS "secret_name?", c.secret_key AS "secret_key?"
            FROM runs r
            JOIN tasks t ON t.id = r.task_id
            JOIN projects p ON p.id = t.project_id
+           JOIN personas pe ON pe.id = t.persona_id
            -- The effective base branch, as `tasks::base_branch` resolves it.
            CROSS JOIN LATERAL (
                WITH RECURSIVE chain AS (
@@ -291,6 +296,7 @@ pub async fn active_runs(pool: &PgPool) -> Result<Vec<ActiveRun>, DbError> {
                     name: row.commit_name,
                     email: row.commit_email,
                 },
+                signing_public_key: row.signing_public_key,
             })
         })
         .collect()

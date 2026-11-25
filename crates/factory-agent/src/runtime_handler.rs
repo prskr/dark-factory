@@ -141,6 +141,15 @@ impl RuntimeHandler for DriverRuntimeHandler {
             Err(format!("tool call timed out after {TOOL_CALL_TIMEOUT:?}"))
         }
     }
+
+    async fn handle_git_sign(&self, payload: &[u8]) -> Result<String, String> {
+        crate::sign_relay::request_signature(
+            &self.outbound_tx,
+            payload,
+            crate::sign_relay::SIGN_TIMEOUT,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]

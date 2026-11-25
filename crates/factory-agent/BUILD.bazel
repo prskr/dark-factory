@@ -14,6 +14,7 @@ extract_cargo_lints(
 exports_files([
     "Cargo.toml",
     "docs/configuration.md",
+    "image/df-git-sign",
     "image/gitconfig",
 ])
 
@@ -76,6 +77,19 @@ rust_test(
     edition = "2024",
     env = {"DF_TEST_BIN": "$(rootpath :factory-agent)"},
     lint_config = ":lints",
+)
+
+rust_test(
+    name = "signing_integration_test",
+    srcs = ["tests/signing_integration.rs"],
+    data = [":factory-agent"],
+    edition = "2024",
+    env = {"DF_TEST_BIN": "$(rootpath :factory-agent)"},
+    lint_config = ":lints",
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
 )
 
 # Needs a kernel with Landlock ABI 6; fails with a message naming that requirement without it.

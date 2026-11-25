@@ -628,6 +628,112 @@ impl Session {
             .context("wait for the approval to be recorded")
     }
 
+    /// Signs `token` with the key of the persona `display_name` through "Verify key on Forgejo" of
+    /// its edit dialog; returns the armored signature the dialog shows.
+    pub async fn sign_forgejo_token(
+        &self,
+        env: &E2eEnv,
+        display_name: &str,
+        domain: &str,
+        token: &str,
+    ) -> Result<String> {
+        let page = &self.page;
+        page.goto(&format!("{}/personas", env.base_url), None)
+            .await
+            .context("open the personas")?;
+        // `.first()`: the list has the button once per layout (desktop and phone).
+        page.locator(format!(
+            "button[aria-label='Edit persona {display_name}']:visible"
+        ))
+        .first()
+        .click(None)
+        .await
+        .context("edit the persona")?;
+        button(page, "Verify key on Forgejo")
+            .click(None)
+            .await
+            .context("open the verify dialog")?;
+        page.locator("#forge-token")
+            .fill(token, None)
+            .await
+            .context("enter the token")?;
+        page.locator("#forge-domain")
+            .fill(domain, None)
+            .await
+            .context("enter the Forgejo domain")?;
+        button(page, "Sign token")
+            .click(None)
+            .await
+            .context("sign the token")?;
+        expect(page.locator("#forge-signature"))
+            .with_timeout(UI_TIMEOUT)
+            .to_be_visible()
+            .await
+            .context("the dialog shows the signature")?;
+        page.locator("#forge-signature")
+            .input_value(None)
+            .await
+            .context("read the signature")
+    }
+
+    /// Signs in to Forgejo's web UI (`web_url`) as `user` in this session's browser.
+    pub async fn forgejo_login(&self, web_url: &str, user: &str, password: &str) -> Result<()> {
+        let page = &self.page;
+        page.goto(&format!("{web_url}/user/login"), None)
+            .await
+            .context("open the Forgejo sign-in")?;
+        page.locator("#user_name")
+            .fill(user, None)
+            .await
+            .context("enter the Forgejo user")?;
+        page.locator("#password")
+            .fill(password, None)
+            .await
+            .context("enter the Forgejo password")?;
+        page.locator("form[action='/user/login'] button.primary")
+            .click(None)
+            .await
+            .context("sign in to Forgejo")?;
+        expect(page.locator("#navbar"))
+            .with_timeout(UI_TIMEOUT)
+            .to_be_visible()
+            .await
+            .context("Forgejo signed in")
+    }
+
+    /// Hands `signature` (over the token Forgejo shows for the key) to the verification form of
+    /// the key with `fingerprint`, as the signed-in Forgejo user; waits for Forgejo's success
+    /// message.
+    pub async fn forgejo_verify_key(
+        &self,
+        web_url: &str,
+        fingerprint: &str,
+        signature: &str,
+    ) -> Result<()> {
+        let page = &self.page;
+        let url = reqwest::Url::parse_with_params(
+            &format!("{web_url}/user/settings/keys"),
+            &[("verify_ssh", fingerprint)],
+        )
+        .context("the verification URL")?;
+        page.goto(url.as_str(), None)
+            .await
+            .context("open the key verification")?;
+        page.locator("#ssh-key-signature")
+            .fill(signature, None)
+            .await
+            .context("enter the signature")?;
+        page.locator("form:has(#ssh-key-signature) button.primary")
+            .click(None)
+            .await
+            .context("submit the signature")?;
+        expect(page.locator(".flash-success"))
+            .with_timeout(UI_TIMEOUT)
+            .to_be_visible()
+            .await
+            .context("Forgejo reports the key as verified")
+    }
+
     /// Sends `message` to the open task.
     pub async fn send_message(&self, message: &str) -> Result<()> {
         self.page

@@ -35,6 +35,9 @@ These are compiled in and not configurable.
 | Setting | Value | Effect |
 |---------|-------|--------|
 | Agent `core.hooksPath` | `/opt/factory/hooks-empty` | Read-only empty hooks directory from the image. |
+| Commit signing | `gpg.format=ssh`, `gpg.ssh.program=/opt/factory/df-git-sign`, `commit.gpgSign=true`, `user.signingKey=key::<Assign.workspace.signing_public_key>` | Written to `.git/config` by the runtime on every rewrite, after the entries of instance and project scope, which cannot set them. Without a `signing_public_key` in `Assign` nothing is configured and the gateway rejects the unsigned commits (`df:signature`). The WIP snapshot (`git commit-tree`) is never signed. |
+| Sign request | 10 s | Wait for the `SignResponse` of a `git_sign` request; then the shim fails and the commit fails. A request is neither stored in the outbox nor sent again after a reconnect. |
+| Shim wait for the runtime | 12 s | Wait of `factory-agent git-sign` for the runtime's answer to its `git_sign` request, slightly longer than the sign request so that the runtime's reason arrives first; then the shim fails with "signing is unavailable" and the commit fails. |
 | Outbox size | 256 MiB, segments of 16 MiB | Soft cap: senders wait when it is full; a message already taken from the queue is still stored at shutdown. |
 | Wait for `Assign` | 10 min | `run` exits with status 1 when the control plane sends no `Assign`. |
 | Handshake steps | 15 s each | Connect, stream open and `HelloAck`; then backoff and retry. |
@@ -43,6 +46,19 @@ These are compiled in and not configurable.
 | Git retries | 3, after 1 s, 5 s and 15 s | Clone, fetch and push that fail transiently are retried (see "Git retries" below). |
 | Factory tool call | 30 min | Wait for a `ToolCallResult`; then the tool call returns an error. |
 | Harness exit grace | 5 s | Time to exit after the ACP connection closed, then it is killed. |
+
+## Commit signing shim
+
+`factory-agent git-sign` is the `gpg.ssh.program` of the workspace. The runtime image holds it as
+the script `/opt/factory/df-git-sign` (`exec /opt/factory/factory-agent git-sign "$@"`), because git
+starts the program without a shell and needs one path. Git calls it like `ssh-keygen`:
+`-Y sign -n git -f <keyfile> [-U] <datafile>`. The command ignores the key, sends the data file over
+the runtime socket (`DF_RUNTIME_SOCK`, default `/run/factory/runtime.sock`) as a `git_sign`
+request and writes the armored signature it gets to `<datafile>.sig`. Any other mode (`verify`,
+`find-principals`, ...), another namespace or a refusal of the control plane exits with status 1 and
+the reason on stderr, which `git commit` prints. The runtime relays the request as `SignRequest` on
+the agent stream and answers with the matching `SignResponse`; the control plane signs only commits
+of the run's persona identity (`design/agent-run.md` §12).
 
 ## Startup and shutdown behavior
 

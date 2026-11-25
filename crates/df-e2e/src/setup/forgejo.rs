@@ -48,6 +48,12 @@ pub async fn run(
     let reviewer_token = prepare_user(&admin, base_url, &reviewer).await?;
 
     let owner = Forgejo::with_password(base_url, bot.name, bot.password)?;
+    // The persona's commit email belongs to the bot account; the key is registered by the test
+    // that checks the "Verified" badge, because Dark Factory generates it.
+    owner
+        .add_email(data::PERSONA_EMAIL)
+        .await
+        .context("commit email of the persona")?;
     for repository in data::FORGE_REPOSITORIES {
         prepare_repository(&owner, repository, webhook_url).await?;
     }

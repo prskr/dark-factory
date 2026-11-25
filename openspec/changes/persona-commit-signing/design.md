@@ -28,7 +28,7 @@ Motivation: see `proposal.md`. Requirements: see `specs/`.
 
 ### D1: The shim is a factory-agent subcommand on the runtime socket
 
-- `gpg.ssh.program` points to `/opt/factory/bin/df-git-sign`, a read-only two-line script that runs `exec /opt/factory/bin/factory-agent git-sign "$@"`. Git invokes the program without a shell, so it must be a single path.
+- `gpg.ssh.program` points to `/opt/factory/df-git-sign`, a read-only two-line script that runs `exec /opt/factory/factory-agent git-sign "$@"` (the runtime image has no `bin/` directory). Git invokes the program without a shell, so it must be a single path.
 - `git-sign` implements only `-Y sign -n git -f <keyfile> [-U] <datafile>`: it reads the payload file, sends `{"type":"git_sign","payload":…}` over `DF_RUNTIME_SOCK`, and writes `<datafile>.sig` (an armored SSHSIG). The payload path is the last positional argument. It ignores `-f` and `-U` (git adds `-U` for a literal `key::` signing key). Any other `-Y` mode, or a namespace other than `git`, exits non-zero with a message on stderr.
 - The runtime relays the request as `SignRequest { request_id, payload }` on the agent stream and waits up to 10 s for the matching `SignResponse { request_id, oneof { signature, refused_reason } }`. A disconnect or timeout makes the shim fail, so the commit fails (spec "Control plane unreachable").
 - `user.signingKey` is set to `key::<public key>` from `Assign.workspace.signing_public_key`. Git needs a value. A stale key after a rotation does no harm, because the shim ignores it.
@@ -46,7 +46,7 @@ A sign request has no side effect except an audit entry, so it is not replayed a
 - The service checks, in order:
   1. the run is active;
   2. the payload is at most 1 MiB;
-  3. the payload parses as a commit (gix-object);
+  3. the payload parses as a commit (a header parser: first line `tree <id>`, exactly one `author` and one `committer`);
   4. author and committer equal the run's frozen identity.
 - Then it signs SHA-512 SSHSIG with namespace `git` and writes the audit entry `commit.sign` (persona, run, task, fingerprint, tree id).
 - `ponytail:` one Kubernetes API read per signature. Add a cache with Secret watch only if signing latency shows up in commit times (agents commit a few times per turn).
@@ -78,6 +78,18 @@ For each checked commit, the gateway:
 - The check runs after `df:identity`, in the same pass. It shares that check's "always reject" path and the rejection feedback, which gets the re-sign hint.
 - `GitRoute.signing_public_key` is read live from the persona, not frozen on the run, so a rotation takes effect with the next snapshot (spec "Signing key rotated"). Rotation publishes `egress_policy`, so the window is the snapshot propagation delay. In it a gateway still checks against the old key: a push signed with the new key is rejected with "signed by another key" and passes on retry once the snapshot arrives. Accepting old-key signatures in that window is acceptable, because both keys are the persona's and never leave the control plane.
 - WIP snapshots are recognized by the target ref (`GitRoute.wip_branch` from the snapshot), never by commit content. Commits that are only on the WIP branch do not count as upstream, so a task-branch push checks their signatures.
+
+### D7: Forgejo key verification from the persona page
+
+Forgejo checks commit signatures only against SSH keys marked verified, and verifying a key needs a signature over a Forgejo token made with the private key. GitHub needs no such step. So the persona page offers "Verify key on Forgejo" (spec "Key verification on Forgejo").
+
+- Gate: shown and served only when the instance configuration loads the forge plugin `forgejo` (`ForgeKind::from_plugin`), read at request time. GitHub-only instances never see it.
+- The web handler reads the persona key through `SecretStore`, like `SecretSigner`, and signs the trimmed token with the entered Forgejo domain as namespace. The namespace is never `git`, so the signature can never pass as a commit signature. Board-member role required; audit `persona.signing_key.forge_verify` with the domain.
+- Checked against Forgejo 15: the namespace is Forgejo's `DOMAIN` setting (its Verify dialog shows `echo -n '<token>' | ssh-keygen -Y sign -n <domain> -f key`); `gitea` and `git` are rejected. The token is signed without a trailing newline and is valid for 1 minute. Forgejo has no API to verify an SSH key: it is a form POST to `/user/settings/keys` with `type=verify_ssh`; the token comes from `GET /api/v1/user/gpg_key_token`.
+- The dialog's "Forgejo domain" is prefilled with the host of the `forgejo` route whose claimed host comes first alphabetically (`plugins.forgejo.hosts`; the routing table is sorted): its `apiUrl` host, else the claimed host, which equals `DOMAIN` in the usual setup. There is no instance-level `base-url`; the plugin's `base-url` is set per project. A default plugin without `hosts` leaves the field empty, and the board member types the domain. It stays editable for a Forgejo whose public domain differs from the URL the control plane uses.
+- After a rotation the new key must be registered and verified again; the how-to says so.
+- Alternative: a plugin (WIT) capability "verify key". Rejected: one forge-specific dialog does not justify a contract change. Automatic registration through the plugin stays on the backlog.
+- Alternative: operators read the key from the Secret with `kubectl` and sign by hand. Rejected: the key leaves the cluster, and the steps are error-prone.
 
 ### Sequence
 

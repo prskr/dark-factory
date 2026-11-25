@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT handle, signing_public_key, signing_fingerprint\n         FROM personas WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "handle",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "handle"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "signing_public_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "signing_public_key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "signing_fingerprint",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "personas",
+            "name": "signing_fingerprint"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "23c94a503022a56a272af98988e7000743e3456ca555eae0178887b15e753ad2"
+}

@@ -23,6 +23,7 @@ pub mod error;
 pub mod metrics;
 pub mod server;
 pub mod session;
+pub mod signing;
 pub mod summary;
 pub mod tools;
 

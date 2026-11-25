@@ -40,6 +40,13 @@ pub enum Command {
         )]
         socket: std::path::PathBuf,
     },
+    /// The `gpg.ssh.program` of the workspace (started by `df-git-sign`): signs a commit through
+    /// the runtime socket, called like `ssh-keygen -Y sign -n git -f <key> <file>`.
+    GitSign {
+        /// The arguments git passes, unchanged.
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        args: Vec<std::ffi::OsString>,
+    },
     /// Applies the harness's Landlock domain to itself, then replaces itself with the command.
     /// Started by `run`; exits with 125 when the domain can't be applied.
     Sandbox {

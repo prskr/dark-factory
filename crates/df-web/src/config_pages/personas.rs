@@ -14,17 +14,19 @@ use df_core::persona::{parse_display_name, parse_email, parse_handle};
 use df_db::DbError;
 use df_db::catalog::{Actor, PersonaField, PersonaInput, PersonaRecord};
 use df_db::model_providers::ModelProviderRecord;
+use df_db::persona_keys::sync_signing_key;
 use maud::{Markup, html};
 use serde::Deserialize;
 use uuid::Uuid;
 
+use super::signing_key::{Rotation, SigningKeySection, commits_group};
 use super::{
     FormTarget, conflict, create_button, edit_button, form_footer, form_grid, full_row,
     list_header, list_page, modal, required, saved,
 };
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::components::forms::{INPUT_CLASS, field, select_field_with_hint};
+use crate::components::forms::{INPUT_CLASS, field, form_group, select_field_with_hint};
 use crate::components::{
     AvatarSize, FormErrors, empty_panel, form_error, harness_label, persona_avatar,
     persona_avatar_preview, text_field, textarea_field,
@@ -39,6 +41,14 @@ pub(super) fn routes() -> Router<WebState> {
         .route("/personas/refresh", post(persona_refresh))
         .route("/personas/{id}", post(persona_update))
         .route("/personas/{id}/edit", get(persona_edit))
+        .route(
+            "/personas/{id}/rotate-key",
+            post(super::signing_key::rotate),
+        )
+        .route(
+            "/personas/{id}/verify-key",
+            post(super::signing_key::verify_forgejo),
+        )
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -250,41 +260,54 @@ fn refreshing_select(
     )
 }
 
+/// The form in the groups "Identity", "Agent" and "Commits" (design boards of
+/// `persona-commit-signing`). `signing` is what the group "Commits" shows of the signing key.
 fn persona_form(
     target: FormTarget,
     values: &PersonaForm,
     errors: &FormErrors,
     providers: &[ModelProviderRecord],
+    signing: &SigningKeySection,
     submit: &str,
+) -> Markup {
+    html! {
+        form id="form" class="space-y-4" hx-post=(target.action()) hx-target="#form" hx-swap="outerHTML"
+            x-data={"personaAvatar(" (serde_json::json!(values.display_name)) ")"} "x-on:input"="track($event)" {
+            (target.id_field())
+            (form_error(errors))
+            div class="space-y-5" {
+                (form_group("Identity", identity_fields(target.id, values, errors)))
+                (form_group("Agent", agent_fields(values, errors, providers)))
+                (commits_group(&values.commit_email, errors, signing))
+            }
+            (form_footer(submit))
+        }
+    }
+}
+
+/// System prompt, harness, model provider and model.
+fn agent_fields(
+    values: &PersonaForm,
+    errors: &FormErrors,
+    providers: &[ModelProviderRecord],
 ) -> Markup {
     let harness_name = values.harness();
     let harnesses: Vec<(String, String)> = PROFILES
         .iter()
         .map(|profile| (profile.name.to_string(), profile.name.to_string()))
         .collect();
-    let provider = values.provider(providers);
-    let models = model_options(provider, harness_name);
-    html! {
-        form id="form" class="space-y-4" hx-post=(target.action()) hx-target="#form" hx-swap="outerHTML"
-            x-data={"personaAvatar(" (serde_json::json!(values.display_name)) ")"} "x-on:input"="track($event)" {
-            (target.id_field())
-            (form_error(errors))
-            (form_grid(html! {
-                (full_row(identity_fields(target.id, values, errors)))
-                (full_row(description_field(&values.description, errors)))
-                (full_row(textarea_field("System prompt", "system_prompt", &values.system_prompt, 8, errors)))
-                (refreshing_select("Harness", "harness", &harnesses, harness_name, None, errors))
-                (refreshing_select("Model provider", "model_provider_id", &with_empty(super::providers::compatible_options(providers, harness_name)),
-                    &values.model_provider_id, Some("Only providers that offer a wire API of the harness."), errors))
-                (full_row(select_field_with_hint("Model", "model", &models, &values.model, Some("Choose…"),
-                    Some("Required. Only models of the provider whose wire API the harness can use."), errors)))
-            }))
-            (form_footer(submit))
-        }
-    }
+    let models = model_options(values.provider(providers), harness_name);
+    form_grid(html! {
+        (full_row(textarea_field("System prompt", "system_prompt", &values.system_prompt, 8, errors)))
+        (refreshing_select("Harness", "harness", &harnesses, harness_name, None, errors))
+        (refreshing_select("Model provider", "model_provider_id", &with_empty(super::providers::compatible_options(providers, harness_name)),
+            &values.model_provider_id, Some("Only providers that offer a wire API of the harness."), errors))
+        (full_row(select_field_with_hint("Model", "model", &models, &values.model, Some("Choose…"),
+            Some("Required. Only models of the provider whose wire API the harness can use."), errors)))
+    })
 }
 
-/// The avatar preview left of display name and handle, and the commit email below. The preview
+/// The avatar preview left of display name and handle, and the description below. The preview
 /// is neutral until the persona is saved.
 fn identity_fields(id: Option<Uuid>, values: &PersonaForm, errors: &FormErrors) -> Markup {
     html! {
@@ -297,13 +320,7 @@ fn identity_fields(id: Option<Uuid>, values: &PersonaForm, errors: &FormErrors) 
                     (handle_field(&values.handle, errors))
                 }
             }
-            (text_field(
-                "Commit email",
-                "commit_email",
-                &values.commit_email,
-                errors,
-                Some("Author and committer of this persona's commits. Edits apply to runs started after saving."),
-            ))
+            (description_field(&values.description, errors))
         }
     }
 }
@@ -427,6 +444,7 @@ async fn persona_new(State(state): State<WebState>, headers: HeaderMap) -> Respo
             &PersonaForm::default(),
             &FormErrors::default(),
             &providers,
+            &SigningKeySection::default(),
             "Create persona",
         ),
     )
@@ -448,6 +466,11 @@ async fn persona_edit(
         Ok((None, _)) => return not_found("The persona"),
         Err(e) => return internal_error(&e),
     };
+    let signing =
+        match SigningKeySection::load_or_error_page(&state, Some(id), Rotation::None).await {
+            Ok(signing) => signing,
+            Err(response) => return *response,
+        };
     modal(
         "Edit persona",
         persona_form(
@@ -455,6 +478,7 @@ async fn persona_edit(
             &persona_values(&persona),
             &FormErrors::default(),
             &providers,
+            &signing,
             "Save persona",
         ),
     )
@@ -469,11 +493,17 @@ async fn persona_refresh(State(state): State<WebState>, Form(form): Form<Persona
     };
     let form = form.normalized(&providers);
     let target = FormTarget::posted("/personas", &form.entity_id);
+    let signing =
+        match SigningKeySection::load_or_error_page(&state, target.id, Rotation::None).await {
+            Ok(signing) => signing,
+            Err(response) => return *response,
+        };
     persona_form(
         target,
         &form,
         &FormErrors::default(),
         &providers,
+        &signing,
         submit_label(target),
     )
     .into_response()
@@ -514,7 +544,8 @@ async fn save_persona(
                 roles: &user.roles,
             };
             match df_db::catalog::save_persona(&state.pool, actor, id, &input).await {
-                Ok(_) => {
+                Ok(persona) => {
+                    ensure_signing_key(&state, persona.id).await;
                     return match personas_markup(&state).await {
                         Ok(region) => saved(region),
                         Err(response) => *response,
@@ -530,13 +561,27 @@ async fn save_persona(
         Err(errors) => errors,
     };
     let target = FormTarget::new("/personas", id);
+    let signing = match SigningKeySection::load_or_error_page(&state, id, Rotation::None).await {
+        Ok(signing) => signing,
+        Err(response) => return *response,
+    };
     invalid(persona_form(
         target,
         &form,
         &errors,
         &providers,
+        &signing,
         submit_label(target),
     ))
+}
+
+/// Creates the signing key of a saved persona, or makes the columns agree with its Secret
+/// (`sync_signing_key`). A failure is logged and does not undo the save: the key is created
+/// before the persona's first run at the latest.
+async fn ensure_signing_key(state: &WebState, id: Uuid) {
+    if let Err(error) = sync_signing_key(&state.pool, state.secrets.as_ref(), id).await {
+        tracing::error!(%error, persona = %id, "creating the signing key of a saved persona failed");
+    }
 }
 
 /// The form errors of a failed save: a model conflict belongs to the model field, a taken handle

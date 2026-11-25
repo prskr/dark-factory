@@ -1,12 +1,26 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
+use df_core::signing_key::SigningKey;
 use df_proto::gateway::v1::{CheckMode, PushPolicy};
 
 use super::*;
+use crate::git::signed_commits::{PERSONA_KEY, signed_by};
 use crate::git::view::{AddedCommit, PathChange, PushView};
 
 const AGENT: &str = "agent@factory.test";
 const MIB: u64 = 1024 * 1024;
+
+/// A second key, of another persona.
+static OTHER_KEY: LazyLock<SigningKey> = LazyLock::new(|| SigningKey::generate().unwrap());
+
+fn identity() -> Identity<'static> {
+    static PUBLIC: LazyLock<String> = LazyLock::new(|| PERSONA_KEY.public_key());
+    Identity {
+        email: AGENT,
+        signing_public_key: &PUBLIC,
+    }
+}
 
 fn id(n: u8) -> gix::ObjectId {
     gix::ObjectId::from_bytes_or_panic(&[n; 20])
@@ -39,6 +53,7 @@ fn commit(n: u8, paths: &[&str]) -> AddedCommit {
         parents: vec![id(n - 1)],
         author_email: AGENT.to_owned(),
         committer_email: AGENT.to_owned(),
+        signed: signed_by(&PERSONA_KEY, n),
         changes: paths
             .iter()
             .map(|path| PathChange {
@@ -102,7 +117,7 @@ fn check_with(
     secrets: &FakeSecrets,
 ) -> Vec<Finding> {
     let policy = CheckPolicy::new(policy).unwrap();
-    check_push(view, &policy, &Identity { email: AGENT }, target, secrets).unwrap()
+    check_push(view, &policy, &identity(), target, secrets).unwrap()
 }
 
 fn check(view: &PushView, policy: &PushPolicy) -> Vec<Finding> {
@@ -185,6 +200,82 @@ fn a_commit_as_a_human_is_an_identity_rejection() {
             ..
         }
     ));
+}
+
+/// The details of the signature findings of `commits`, in order.
+fn signature_details(commits: Vec<AddedCommit>, target: Target) -> Vec<String> {
+    check_with(
+        &view(commits, vec![]),
+        &default_policy(),
+        target,
+        &FakeSecrets::default(),
+    )
+    .into_iter()
+    .filter(|finding| finding.check == Check::Signature)
+    .inspect(|finding| assert_eq!(finding.mode, Mode::Reject))
+    .map(|finding| finding.detail)
+    .collect()
+}
+
+#[test]
+fn a_commit_without_a_signature_is_rejected_naming_the_commit() {
+    let mut unsigned = commit(2, &[]);
+    unsigned.signed.signature = None;
+
+    assert_eq!(
+        signature_details(vec![unsigned], Target::TaskBranch),
+        [format!("commit {} missing signature", id(2))]
+    );
+    assert_eq!(
+        PushCheck::from(Check::Signature).reason_code(),
+        Some("df:signature")
+    );
+}
+
+#[test]
+fn a_commit_signed_by_the_persona_passes() {
+    assert_eq!(
+        signature_details(vec![commit(2, &[]), commit(3, &[])], Target::TaskBranch),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_commit_signed_by_another_key_is_told_apart_from_an_invalid_signature() {
+    let mut other = commit(2, &[]);
+    other.signed = signed_by(&OTHER_KEY, 2);
+    let mut tampered = commit(3, &[]);
+    tampered.signed.payload.extend_from_slice(b" changed");
+
+    assert_eq!(
+        signature_details(vec![other, tampered], Target::TaskBranch),
+        [
+            format!("commit {} signed by another key", id(2)),
+            format!("commit {} invalid signature", id(3)),
+        ]
+    );
+}
+
+#[test]
+fn a_garbled_signature_is_invalid() {
+    let mut garbled = commit(2, &[]);
+    garbled.signed.signature = Some(b"-----BEGIN SSH SIGNATURE-----\nnope\n".to_vec());
+
+    assert_eq!(
+        signature_details(vec![garbled], Target::TaskBranch),
+        [format!("commit {} invalid signature", id(2))]
+    );
+}
+
+#[test]
+fn a_push_to_the_wip_branch_is_not_checked_for_signatures() {
+    let mut unsigned = commit(2, &[]);
+    unsigned.signed.signature = None;
+
+    assert_eq!(
+        signature_details(vec![unsigned], Target::Wip),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -594,14 +685,7 @@ fn a_failing_secret_scan_fails_the_check() {
     };
     let policy = CheckPolicy::new(&default_policy()).unwrap();
 
-    let error = check_push(
-        &view,
-        &policy,
-        &Identity { email: AGENT },
-        Target::TaskBranch,
-        &secrets,
-    )
-    .unwrap_err();
+    let error = check_push(&view, &policy, &identity(), Target::TaskBranch, &secrets).unwrap_err();
 
     assert_eq!(error.blob, id(7));
 }
@@ -670,6 +754,7 @@ fn checks_and_modes_map_to_their_contract_values() {
         (Check::BlobTooLarge, PushCheck::BlobTooLarge),
         (Check::MergeCommit, PushCheck::MergeCommit),
         (Check::HiddenPath, PushCheck::HiddenPath),
+        (Check::Signature, PushCheck::Signature),
     ];
     for (check, expected) in checks {
         assert_eq!(PushCheck::from(check), expected);

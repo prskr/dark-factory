@@ -27,6 +27,9 @@ pub const PATHSPEC_CHUNK: usize = 256;
 #[cfg(test)]
 pub const PATHSPEC_CHUNK: usize = 2;
 
+/// The read-only signing shim from the runtime image: `gpg.ssh.program` of every commit.
+pub const SIGN_PROGRAM: &str = "/opt/factory/df-git-sign";
+
 /// Upper bound for a single git invocation (clone, fetch and push talk to a remote peer).
 pub const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
@@ -104,6 +107,10 @@ pub struct GitConfigParams<'a> {
     /// Globs of the paths hidden from the workspace; [`rewrite_git_config`] writes them as
     /// sparse patterns.
     pub hidden_paths: &'a [String],
+    /// The persona's public signing key (OpenSSH format), written to `user.signingKey`. Git needs
+    /// a value; the shim ignores it, because the control plane signs with the persona's current
+    /// key.
+    pub signing_public_key: &'a str,
 }
 
 /// Returns true if a Git config key or value is denied.
@@ -336,6 +343,21 @@ pub fn render_git_config(params: &GitConfigParams<'_>) -> String {
         "\n",
     ]);
 
+    // 6. Signing: every commit is signed through the shim (the denylist keeps `gpg.*`,
+    // `user.*` and `commit.gpgSign` out of the extra entries, and these come last). The control
+    // plane always sends the key; without one nothing is configured and the gateway rejects the
+    // unsigned commits (`df:signature`).
+    if !params.signing_public_key.is_empty() {
+        out.extend([
+            "[user]\n\tsigningKey = ",
+            &quote_config_value(&format!("key::{}", params.signing_public_key)),
+            "\n",
+        ]);
+        out.push_str("[gpg]\n\tformat = ssh\n");
+        out.extend(["[gpg \"ssh\"]\n\tprogram = ", SIGN_PROGRAM, "\n"]);
+        out.push_str("[commit]\n\tgpgSign = true\n");
+    }
+
     out
 }
 
@@ -383,6 +405,7 @@ pub fn rewrite_git_config(repo_dir: &Path, params: &GitConfigParams<'_>) -> std:
         &ca,
         params.commit_author_name,
         params.commit_author_email,
+        params.signing_public_key,
     ] {
         if value.contains(['\n', '\r', '\0']) {
             return Err(std::io::Error::new(

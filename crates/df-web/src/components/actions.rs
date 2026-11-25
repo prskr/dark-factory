@@ -44,6 +44,10 @@ pub const ROUND_ACTION_CLASS: &str = "inline-flex size-11 shrink-0 items-center 
 /// The pill variant of [`ROUND_ACTION_CLASS`] for an action with a word (Save).
 pub const ROUND_PILL_CLASS: &str = "inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-accent px-5 text-sm font-semibold text-on-accent hover:brightness-95";
 
+/// A native modal `<dialog>` for a confirmation, centered from `md` and anchored to the bottom on
+/// a phone. Its content is a panel with a title, paragraphs and the buttons.
+pub const DIALOG_CLASS: &str = "fixed inset-x-0 bottom-0 m-0 mt-auto w-full max-w-none overflow-visible bg-transparent p-3 text-ink backdrop:bg-black/50 md:inset-0 md:m-auto md:h-fit md:max-w-md md:p-0";
+
 /// A `type=button` button.
 pub fn button(kind: ButtonKind, label: &str) -> Markup {
     html! { button type="button" class=(action_class(kind)) { (label) } }

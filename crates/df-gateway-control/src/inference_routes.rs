@@ -129,6 +129,7 @@ mod tests {
                 name: "Linus".into(),
                 email: "linus@example.org".into(),
             },
+            signing_public_key: None,
             forge_credential: None,
         }
     }

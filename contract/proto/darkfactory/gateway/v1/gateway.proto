@@ -178,6 +178,10 @@ message GitRoute {
   // The run is a chat's: every ref update is rejected (`df:read-only`). `task_branch` and
   // `wip_branch` are empty.
   bool read_only = 9;
+  // The current public signing key of the run's persona, OpenSSH format (`ssh-ed25519 AAAA…`);
+  // read live from the persona, not frozen on the run. Every commit of a task branch push must be
+  // signed by it (`df:signature`). Empty only for a read-only run. Never a private key.
+  string signing_public_key = 10;
 }
 
 // Branch rewrite policy of the project (`darkfactory.agent.v1.RewritePolicy`).
@@ -194,7 +198,8 @@ message ForgeCredential {
 }
 
 // A project's push checks (iter2-push-checks design D4). Always on and not listed here: the
-// commit identity and `.dark-factory/**` as a protected path, both with mode `REJECT`.
+// persona identity, the commit signature and `.dark-factory/**` as a protected path, all with mode
+// `REJECT`.
 message PushPolicy {
   // Protected path globs (`globset` syntax; `*` does not match `/`), e.g. `.forgejo/workflows/**`.
   repeated string protected_globs = 1;
@@ -399,6 +404,8 @@ enum PushCheck {
   PUSH_CHECK_MERGE_COMMIT = 5;
   // `df:hidden-path`
   PUSH_CHECK_HIDDEN_PATH = 6;
+  // `df:signature`: a commit has no SSH signature (namespace `git`) of `GitRoute.signing_public_key`.
+  PUSH_CHECK_SIGNATURE = 7;
 }
 
 message RefUpdate {

@@ -47,6 +47,17 @@ async fn mock_users(server: &MockServer, exist: bool, tokens: [&str; 2]) {
         .await;
     }
     mock(server, "POST", "/api/v1/admin/users", 201, created).await;
+    // The persona's commit email, so that Forgejo can show its signed commits as verified.
+    Mock::given(method("POST"))
+        .and(path("/api/v1/user/emails"))
+        .and(basic_auth("factory", data::FORGE_OWNER_PASSWORD))
+        .and(body_partial_json(
+            json!({ "emails": [data::PERSONA_EMAIL] }),
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!([])))
+        .expect(1)
+        .mount(server)
+        .await;
     mock_token(server, "factory", data::FORGE_OWNER_PASSWORD, tokens[0]).await;
     mock_token(server, "reviewer", data::FORGE_REVIEWER_PASSWORD, tokens[1]).await;
 }
