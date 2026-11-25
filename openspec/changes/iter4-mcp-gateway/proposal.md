@@ -30,7 +30,7 @@ Out of scope:
 - Rate limits per run against the shared upstream quota: backlog row added by this change ("MCP call rate limits per run").
 - MCP resources and prompts: backlog row added by this change ("MCP resources and prompts through the gateway"). Server-initiated requests (sampling, elicitation, roots): rejected; the gateway refuses them.
 - OAuth-based upstream servers: roadmap backlog (existing row, decision 7).
-- Live `tools/list_changed` notifications to running sessions: rejected for now; enablement changes apply to calls at once and to the tool list from the next run.
+- Live `tools/list_changed` notifications to running sessions: rejected for now; enablement changes apply to calls and to later tool lists at once, but a harness that does not list again sees added servers only in its next session.
 - Storing call arguments or results: rejected; the transcript holds them.
 - An HTTP MCP server registered directly in the harness: rejected; the stdio relay works for every ACP harness (design D8).
 

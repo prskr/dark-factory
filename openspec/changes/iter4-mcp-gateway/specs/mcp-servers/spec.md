@@ -92,15 +92,19 @@ Board members SHALL enable and disable MCP servers per project on the project se
 - **THEN** the next run of `DF` lists the tools of `context7` with the prefix `context7__`
 
 ### Requirement: Servers of a run
-A run SHALL get every server enabled for its project, chats included. Disabling, editing or deleting a server SHALL apply to calls of running runs within about a second. A server enabled during a run SHALL be available from the next run on.
+A run SHALL get every server currently enabled for its project, chats included. Enabling, disabling, editing or deleting a server SHALL apply to calls and tool lists of running runs within about a second. A harness session sees an added server only if it lists tools again; a run started without any enabled server (no `ext`) gets it from its next run.
 
 #### Scenario: Server disabled during a run
 - **WHEN** a board member disables `context7` for `DF` while a `DF` run is active
 - **THEN** the run's next call to a `context7__` tool is rejected
 
 #### Scenario: Server enabled during a run
-- **WHEN** a board member enables `context7` for `DF` while a `DF` run is active
-- **THEN** the running session lists no `context7__` tools, and the next run of `DF` does
+- **WHEN** a board member enables `wiki` for `DF` while a `DF` run with `ext` is active
+- **THEN** a call to a `wiki__` tool is permitted and a `tools/list` served after the change contains the `wiki__` tools
+
+#### Scenario: First server enabled during a run
+- **WHEN** a board member enables `context7` for a project whose active run started without enabled servers
+- **THEN** that run has no `ext` server, and the next run of the project does
 
 ### Requirement: Servers in use cannot be deleted
 Deleting an MCP server that is enabled for a project SHALL be refused, naming the projects.

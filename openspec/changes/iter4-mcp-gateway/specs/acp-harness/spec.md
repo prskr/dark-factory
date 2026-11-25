@@ -35,7 +35,7 @@ When `Assign` carries an MCP endpoint, the runtime SHALL register a second stdio
 - **THEN** the relay answers that request on stdout with a JSON-RPC error naming the cause, and keeps running
 
 ### Requirement: Relay framing and errors
-The relay SHALL write exactly one compact JSON line per message to stdout, never interleaving lines. A gateway answer with an HTTP error status SHALL become a JSON-RPC error for that request id. An accepted notification (202) SHALL write nothing.
+The relay SHALL write exactly one compact JSON line per message to stdout, never interleaving lines. A gateway answer with an HTTP error status to a request SHALL become a JSON-RPC error for that request id. For a notification the relay SHALL write nothing to stdout, whatever the answer; an HTTP error status for a notification SHALL be logged on stderr.
 
 #### Scenario: Pretty-printed answer
 - **WHEN** the gateway's answer body contains newlines
@@ -48,6 +48,10 @@ The relay SHALL write exactly one compact JSON line per message to stdout, never
 #### Scenario: Notification
 - **WHEN** the harness sends `notifications/initialized` and the gateway answers 202
 - **THEN** the relay writes nothing to stdout
+
+#### Scenario: Notification refused
+- **WHEN** the harness sends `notifications/cancelled` and the gateway answers 400
+- **THEN** the relay writes nothing to stdout and logs status 400 on stderr
 
 ### Requirement: Relay concurrency and lifetime
 The relay SHALL handle requests concurrently, so a slow call does not delay other requests. It SHALL exit with status 0 when stdin ends, and SHALL exit non-zero with a message on stderr when its CA file cannot be read.
