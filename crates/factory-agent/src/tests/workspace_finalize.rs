@@ -337,6 +337,10 @@ async fn test_scenario_finalize_uncommitted_work_and_secret_exclusion() {
         git_hooks: vec![],
         git_config: vec![],
         hidden_paths: Vec::new(),
+        // With signing configured (the shim does not exist here), the WIP snapshot is still made
+        // and stays unsigned.
+        signing_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItestkeytestkeytestkeytestkey"
+            .to_string(),
         ..Default::default()
     };
 
@@ -399,6 +403,20 @@ async fn test_scenario_finalize_uncommitted_work_and_secret_exclusion() {
         !file_list.contains(&"id_rsa"),
         "id_rsa MUST be excluded from WIP snapshot"
     );
+
+    // 5. The workspace signs (finalize rewrote the config), the WIP snapshot is not signed
+    assert_eq!(
+        git.git_output(&["config", "--get", "commit.gpgsign"])
+            .await
+            .unwrap()
+            .trim(),
+        "true"
+    );
+    let wip_commit = git
+        .git_output(&["cat-file", "commit", &state.wip_sha])
+        .await
+        .unwrap();
+    assert!(!wip_commit.contains("gpgsig"), "{wip_commit}");
 }
 
 #[tokio::test]
@@ -1104,6 +1122,7 @@ fn test_runtime_writes_do_not_follow_planted_symlinks() {
     std::os::unix::fs::symlink(&victim, repo.join(".git").join("config")).unwrap();
     let params = GitConfigParams {
         hidden_paths: &[],
+        signing_public_key: "",
         hooks_path: std::path::Path::new("/opt/factory/hooks-empty"),
         extra_config: &[],
         repo_url: "https://github.com/org/repo.git",

@@ -136,7 +136,7 @@ async fn forms_end_with_cancel_and_a_named_primary_action_at_the_bottom_right() 
     ] {
         let html = text(app.get_htmx(&uri, &cookie).await).await;
         let footer = &html[html
-            .find("justify-end")
+            .find("flex justify-end gap-2")
             .unwrap_or_else(|| panic!("{uri}: {html}"))..];
         let footer = &footer[..footer.find("</form>").unwrap()];
         let cancel = footer

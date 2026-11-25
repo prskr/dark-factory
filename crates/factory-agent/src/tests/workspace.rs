@@ -143,6 +143,7 @@ async fn test_fetch_trusts_the_proxy_through_the_scoped_ca_in_git_config() {
         &local,
         &GitConfigParams {
             hidden_paths: &[],
+            signing_public_key: "",
             repo_url: &url,
             commit_author_name: "Bot",
             commit_author_email: "bot@example.com",

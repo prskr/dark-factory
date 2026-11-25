@@ -257,6 +257,7 @@ const fn check_label(check: PushCheck) -> &'static str {
         PushCheck::BlobTooLarge => "Size limit",
         PushCheck::MergeCommit => "Merge commit",
         PushCheck::HiddenPath => "Hidden path",
+        PushCheck::Signature => "Signature",
     }
 }
 

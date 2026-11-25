@@ -26,7 +26,8 @@ use df_orchestrator::OrchestratorConfig;
 use df_proto::agent::v1::RunOutcome as WireOutcome;
 use df_proto::agent::v1::{
     AgentMessage, PhaseChanged, PushReport, PushStatus, PushTarget, RunPhase, RunReport,
-    RuntimeOperation, RuntimeTiming, ToolCallRequest, agent_message, control_message, harness,
+    RuntimeOperation, RuntimeTiming, SignRequest, ToolCallRequest, agent_message, control_message,
+    harness, sign_response,
 };
 use df_proto::transcript::v1::{
     AgentMessageChunk, ContentBlock, Event, TextContent, TurnEnded, UserMessage, content_block,
@@ -1002,6 +1003,54 @@ async fn tool_calls_are_answered_on_the_stream() -> anyhow::Result<()> {
         (call_id.as_str(), false)
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_sign_request_is_answered_on_the_stream_and_takes_no_place_in_the_sequence()
+-> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let h = Harness::start(pool.clone()).await?;
+    let key = df_db::persona_keys::sync_signing_key(
+        &pool,
+        h.env.ctx.secrets.as_ref(),
+        h.env.persona_id.as_uuid(),
+    )
+    .await?;
+    let (mut runtime, _) = h.handshake().await?;
+    let payload = "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n\
+                   author Linus <linus@example.org> 1700000000 +0000\n\
+                   committer Linus <linus@example.org> 1700000000 +0000\n\nFix\n";
+
+    runtime
+        .send_raw(AgentMessage {
+            seq: 0,
+            body: Some(agent_message::Body::SignRequest(SignRequest {
+                request_id: "sign-1".into(),
+                payload: payload.as_bytes().to_vec().into(),
+            })),
+        })
+        .await;
+    let msgs = runtime
+        .recv_until(|m| matches!(m.body, Some(control_message::Body::SignResponse(_))))
+        .await?;
+    let Some(control_message::Body::SignResponse(response)) =
+        msgs.last().and_then(|m| m.body.clone())
+    else {
+        anyhow::bail!("no response");
+    };
+    let Some(sign_response::Result::Signature(armored)) = response.result else {
+        anyhow::bail!("refused: {response:?}");
+    };
+
+    assert_eq!(response.request_id, "sign-1");
+    df_core::signing_key::verify(&key.public_key, payload.as_bytes(), armored.as_bytes())
+        .map_err(anyhow::Error::from)?;
+    // The next persisted message is still seq 1.
+    let seq = runtime.send(agent_text("hello")).await;
+    assert_eq!(seq, 1);
+    let acks = runtime.recv_until(|m| m.ack == 1).await?;
+    assert!(acks.iter().all(|m| m.ack <= 1));
     Ok(())
 }
 

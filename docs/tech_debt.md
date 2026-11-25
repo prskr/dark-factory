@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-131.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-132.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -40,6 +40,7 @@ Known shortcomings that were deferred on purpose. Each entry says what is wrong,
 - Origin of TD-121: code review of `sandbox-lifecycle-resilience` (`df-k8s`, 2026-11-06). The `TD-n (ID)` heading gives the ID used in that review.
 - Origin of TD-122: code review of `artifact-written-transcript-events` (`df-web`, 2026-11-10). The `TD-n (ID)` heading gives the ID used in that review.
 - Origin of TD-125: code review of `iter3-branch-workflows` (`df-gateway`, 2026-11-13). The `TD-n (ID)` heading gives the ID used in that review.
+- Origin of TD-131: code review of `persona-commit-signing` (`df-web`, 2026-11-25). The `TD-n (ID)` heading gives the ID used in that review.
 
 ## Summary
 
@@ -116,6 +117,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-128 | low   | `df-web` egress dialogs | Scope values `task:<KEY>` / `project:<KEY>` are built and parsed with string operations |
 | TD-129 | low   | design file (PenPot) | Project settings boards keep a white panel in the Dark theme preview |
 | TD-130 | low   | `plugins/forgejo`, `plugins/github` | Both plugins carry the same issue-list page cursor code |
+| TD-131 | low   | `df-web` persona signing key | `verify-key` error statuses for an unknown persona and an unreadable Secret are untested |
 
 ## Entries
 
@@ -839,6 +841,16 @@ Both plugins have the same `Position { page, offset }` cursor (`page:offset`) wi
 **Matters when:** a third forge plugin lists issues, or the cursor format changes; both copies must change in step.
 
 **Fix:** move `Position` and the page function to `forge-common`, with their tests.
+
+### TD-131 (P17). `verify-key` error statuses for an unknown persona and an unreadable Secret are untested
+
+`crates/df-web/src/config_pages/signing_key.rs` (`verify_forgejo`), `crates/df-web/src/config_pages/tests/signing_key.rs`
+
+The README row of `POST /personas/{id}/verify-key` promises two error answers that no test covers. An unknown persona gets 404 with nothing signed or audited. An unreadable key Secret gets 422 with the dialog body. The code does both today. The other cases are tested: no `forgejo` plugin, an invalid token or domain, and a persona without a stored key.
+
+**Matters when:** someone changes `verify_forgejo` or `SigningKeySection::from_db`. A wrong status, or a token signed for an unknown persona, would go unnoticed.
+
+**Fix:** two df-web tests. A random persona id → 404 and no `persona.signing_key.forge_verify` audit entry. A missing Secret for a persona with a stored key → 422 with the reason in the dialog.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122

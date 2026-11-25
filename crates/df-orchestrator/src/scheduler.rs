@@ -25,6 +25,7 @@ use crate::error::OrchestratorError;
 use crate::run_context::load_run_context;
 use crate::runs::{finish_overdue, finish_run, teardown};
 use df_core::run_transition::RunEnd;
+use df_db::persona_keys::sync_signing_key;
 use df_db::runs::{
     RunRow, begin_provisioning, get_run, list_active_runs, list_overdue_runs,
     list_unprovisioned_runs, mark_started, start_queued_runs,
@@ -335,6 +336,13 @@ impl Scheduler {
             return Ok(());
         }
 
+        // A persona from before the signing keys gets its key now: the runtime needs it to sign.
+        sync_signing_key(
+            &self.ctx.pool,
+            self.ctx.secrets.as_ref(),
+            rc.persona.id.as_uuid(),
+        )
+        .await?;
         ensure_base_branch(&self.ctx, &rc).await?;
 
         let volume = TaskVolumeSpec::for_task(rc.task.key.clone());

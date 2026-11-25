@@ -268,6 +268,20 @@ no prompt is sent to a `finalizing` run, a message queued meanwhile makes the ta
   host>:<git port>/inference`) as base URL, the placeholder key `df-placeholder` and the instance
   CA path in the harness's variables (Claude Code also gets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`), from the first wire API of the harness that the persona's
   model provider offers. No model credential is sent to a sandbox.
+- Commit signing: `Assign.workspace.signing_public_key` is the persona's current public key
+  (OpenSSH format; empty if the persona has none, which cannot happen for a provisioned run: the
+  scheduler creates the key before it creates the sandbox). A `SignRequest` (`AgentMessage.seq` 0,
+  not persisted, not acknowledged, not part of the sequence) is answered with a `SignResponse` of the
+  same `request_id`: the armored SSH signature (namespace `git`) or the reason it was refused. The
+  service (`signing.rs`) checks in order that the run has not ended, that the payload is at most
+  1 MiB, that it parses as a Git commit (a tag, other objects and a commit with a repeated `author`
+  or `committer` header are refused) and that author and committer name and email equal the run's
+  persona identity. It signs with SHA-512 through the `Signer` trait (`SecretSigner` reads the
+  persona's Secret on every request). If the public key of the Secret differs from the one in the
+  database, the service takes over the Secret's key first (audit entry
+  `persona.signing_key.reconcile`, `egress_policy` published) and refuses with "key out of sync"
+  only when that fails. Every signature writes the audit entry `commit.sign` (persona, run, task,
+  key fingerprint, tree id), every refusal `commit.sign_refused` with the reason.
 - Timeouts: `enforce_timeouts` ends every overdue run it can; a run that fails to end (or whose
   row cannot be read) is logged and does not stop the others.
 - Ordering and delivery: messages are persisted in batches of up to 50 per transaction, duplicates

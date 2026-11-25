@@ -423,6 +423,7 @@ mod tests {
             &policy,
             &Identity {
                 email: "agent@factory.test",
+                signing_public_key: "",
             },
             Target::TaskBranch,
             &matcher,

@@ -202,6 +202,7 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
             }
             .into(),
             existing_branch: rc.task.on_existing_branch(),
+            signing_public_key: rc.persona.signing_public_key.clone().unwrap_or_default(),
         }),
         harness: Some(Harness {
             kind: Some(harness_kind::Kind::Acp(AcpHarness {

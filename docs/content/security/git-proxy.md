@@ -67,6 +67,7 @@ checked again):
 | --- | --- | --- |
 | Secret scan | `df:secret-scan`: rule, path, line and a masked preview; the secret itself is never stored or logged | mode `approval` (default) or `reject` |
 | Commit identity | `df:identity`: author and committer email must be the commit email of the run's persona | no, always enforced |
+| Commit signature | `df:signature`: every commit must carry an SSH signature of the run's persona's current signing key; the finding says "missing signature", "signed by another key" or "invalid signature" and names the commit. Not checked on the WIP branch (see [Verify persona commits on the forge](../using/verify-persona-commits.md)) | no, always enforced; always `reject`, no exception request |
 | Hidden paths | `df:hidden-path`: a change to a path below a hidden glob (see [Hide files from agents](../using/hidden-paths.md)); also on the WIP branch | globs (default none); always `reject`, no exception request |
 | Protected paths | `df:protected-path`: a change below a protected glob; `.dark-factory/**` is always protected | globs (default CI workflow directories and `CODEOWNERS`) and mode |
 | Blob size | `df:blob-too-large`: a file larger than the limit | limit (default 5 MiB) and mode |
@@ -74,7 +75,16 @@ checked again):
 | Commit limit | `df:push-too-large`: more than 10,000 commits | no |
 | Push size | `df:push-too-large` (HTTP 413): a push body above the maximum (default 256 MiB) | instance setting |
 
-Pushes to the WIP branch get only the secret scan, the size limit and the hidden path check, always rejecting.
+Pushes to the WIP branch get only the secret scan, the size limit and the hidden path check, always rejecting. The proxy exempts a push from the signature check only by its target ref, never by what the commits contain; commits that are only on the WIP branch are checked when the task branch is pushed.
+
+**Signatures.** The runtime makes git sign every commit of the workspace through the control plane,
+so the agent never holds a key and commit IDs stay as they are. The gateway checks the signatures
+with the persona's public key from its snapshot (`GitRoute.signing_public_key`); it never gets a
+private key. After a [key rotation](../using/verify-persona-commits.md#rotate-the-key) the
+commits that were signed with the old key and are not pushed yet are rejected with "signed by
+another key". The message to the agent says how to sign them again. For about a minute after a
+rotation a gateway may still hold the old key: a push signed with the new key then fails with
+"signed by another key" and passes once the gateway has the new snapshot.
 
 **Approval mode.** A task-branch push rejected only by approval-mode findings raises a
 `push-check-exception` request in the inbox, listing the findings. Approving it creates exceptions

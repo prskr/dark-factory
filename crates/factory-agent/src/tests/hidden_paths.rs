@@ -113,6 +113,7 @@ impl Fixture {
 
 fn params(hidden_paths: &[String]) -> GitConfigParams<'_> {
     GitConfigParams {
+        signing_public_key: "",
         repo_url: "https://git.example.org/a.git",
         commit_author_name: "Bot",
         commit_author_email: "bot@example.org",

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE personas SET signing_public_key = $2, signing_fingerprint = $3 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b0ad0cb2a10a0dc492ba126c8bab953f3ca6bc568a99b0603998a5d8bfeab993"
+}

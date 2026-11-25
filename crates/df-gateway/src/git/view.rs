@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use df_core::signing_key::{SplitCommit, split_commit};
 use gix::bstr::BStr;
 use gix::diff::tree::recorder::Change;
 use gix::diff::tree::{Recorder, State};
@@ -35,6 +36,8 @@ pub struct AddedCommit {
     /// Escaped like [`PathChange::path`].
     pub author_email: String,
     pub committer_email: String,
+    /// The commit object without its signature header, and the signature if it has one.
+    pub signed: SplitCommit,
     /// Changes against each parent (the empty tree for a root commit), sorted. A rename is a
     /// deletion plus an addition. For a merge only the paths whose entry differs from the entry
     /// in every parent (combined diff), so merging the base branch adds none of its changes.
@@ -252,6 +255,7 @@ fn added_commit(
         parents,
         author_email: escape(commit.author().map_err(read_failed)?.email),
         committer_email: escape(commit.committer().map_err(read_failed)?.email),
+        signed: split_commit(&commit.data),
         changes,
     })
 }

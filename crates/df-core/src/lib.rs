@@ -17,6 +17,7 @@ pub mod public_address;
 pub mod routing;
 pub mod run_transition;
 pub mod seams;
+pub mod signing_key;
 pub mod task_transition;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;

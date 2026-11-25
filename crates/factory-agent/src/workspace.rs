@@ -114,6 +114,7 @@ fn config_params<'a>(
             anyhow::anyhow!("the assignment has no commit identity (name and email) for the run")
         })?;
     Ok(GitConfigParams {
+        signing_public_key: &workspace.signing_public_key,
         repo_url: &workspace.repo_url,
         commit_author_name: &identity.name,
         commit_author_email: &identity.email,

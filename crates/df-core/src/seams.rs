@@ -597,7 +597,7 @@ pub struct CredentialRef {
 pub enum SecretError {
     #[error("secret `{}` (key `{}`) not found", .0.name, .0.key)]
     NotFound(SecretKeyRef),
-    #[error("failed to read secret: {0}")]
+    #[error("secret store failed: {0}")]
     Backend(String),
 }
 
@@ -614,6 +614,20 @@ pub trait SecretStore: Send + Sync {
         r: &SecretKeyRef,
         labels: &BTreeMap<String, String>,
     ) -> Result<SecretString, SecretError>;
+
+    /// Like [`get_or_create`](Self::get_or_create), but a missing Secret is created with `value`
+    /// (the caller generated it, for example a persona signing key). Returns the stored value.
+    async fn get_or_create_with(
+        &self,
+        r: &SecretKeyRef,
+        labels: &BTreeMap<String, String>,
+        value: &SecretString,
+    ) -> Result<SecretString, SecretError>;
+
+    /// Replaces the value of `r.key` in an existing Secret, keeping its other keys. A missing
+    /// Secret is [`SecretError::NotFound`]; a concurrent change of the Secret is a
+    /// [`SecretError::Backend`] error.
+    async fn replace(&self, r: &SecretKeyRef, value: &SecretString) -> Result<(), SecretError>;
 }
 
 #[cfg(test)]

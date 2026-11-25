@@ -38,6 +38,7 @@ mod personas;
 mod project_page;
 mod providers;
 mod push_policy;
+mod signing_key;
 
 use push_policy::PushPolicyForm;
 

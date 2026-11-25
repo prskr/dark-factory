@@ -19,8 +19,8 @@ pub mod time;
 pub mod transcript;
 
 pub use actions::{
-    ButtonKind, ICON_BUTTON_CLASS, ROUND_ACTION_CLASS, ROUND_PILL_CLASS, action_class, button,
-    link_button, submit_button,
+    ButtonKind, DIALOG_CLASS, ICON_BUTTON_CLASS, ROUND_ACTION_CLASS, ROUND_PILL_CLASS,
+    action_class, button, link_button, submit_button,
 };
 pub use badges::{
     Tone, attached_badge, chip, filter_chip, harness_label, status_badge, tone_badge,

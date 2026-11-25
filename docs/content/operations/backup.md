@@ -12,6 +12,7 @@ audit log. Back up the database; everything else can be recreated.
 | Database | PostgreSQL, schema `dark_factory` | **yes** |
 | Code | the forge: task branches `factory/task/<KEY>` and WIP snapshots `factory/wip/<KEY>` | by the forge's own backup |
 | Secret values (forge and harness tokens, database passwords, OIDC client secret) | Kubernetes Secrets in the instance namespace | yes, with your usual Secret handling; the database only holds references |
+| Persona signing keys | Kubernetes Secrets `df-persona-key-<persona id>` (label `dark-factory.io/persona-key=true`) in the instance namespace | **yes**, together with the database: the database only holds each key's public half (see below) |
 | Task volumes | PVCs in the sandbox namespace | no: a cache; the next run re-clones from the task branch and the WIP snapshot |
 | Live traffic events | gateway memory | no: ephemeral by design |
 | Helm values | your `values.yaml` | keep it in version control |
@@ -27,6 +28,21 @@ pg_dump --format=custom --file=dark-factory-$(date +%F).dump \
 ```
 
 Take one before every upgrade: schema migrations cannot be undone ([Upgrades](upgrades.md)).
+
+### Persona signing keys
+
+Dark Factory generates one signing key per persona into the Secret `df-persona-key-<persona id>`
+and never writes the private key to the database or to a backup of it. Back up these Secrets with
+your usual Secret handling, for example `kubectl -n dark-factory get secret -l
+dark-factory.io/persona-key=true -o yaml`, and treat the output as confidential.
+
+If the Secrets are lost (the namespace was deleted without a backup), nothing breaks that a rotation
+does not repair: a persona without its Secret gets a new key before its next run, and the
+persona page shows the new public key. Commits that were signed with the lost key stay in the
+repositories, but the forge shows them as unverified once the old key is no longer registered on the
+bot account ([Verify persona commits on the forge](../using/verify-persona-commits.md)). After a
+restore of the database without the Secrets, a persona's stored public key differs from its new
+key; the next signature or the next save of the persona writes the new one.
 
 ## Restore
 

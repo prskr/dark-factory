@@ -200,6 +200,7 @@ fn git_route(run: &ActiveRun, git: &GitSettings) -> Option<GitRoute> {
             .unwrap_or_default(),
         commit_name: run.commit_identity.name.clone(),
         commit_email: run.commit_identity.email.clone(),
+        signing_public_key: run.signing_public_key.clone().unwrap_or_default(),
         rewrite_policy: match run.rewrite_policy {
             RewritePolicy::Never => pb::RewritePolicy::Never,
             RewritePolicy::WithLease => pb::RewritePolicy::WithLease,
@@ -278,6 +279,7 @@ mod tests {
                 name: "Linus".into(),
                 email: "linus@example.org".into(),
             },
+            signing_public_key: None,
             forge_credential: None,
         }
     }
@@ -534,6 +536,23 @@ mod tests {
             _labels: &std::collections::BTreeMap<String, String>,
         ) -> Result<secrecy::SecretString, df_core::SecretError> {
             self.get(reference).await
+        }
+
+        async fn get_or_create_with(
+            &self,
+            reference: &df_core::SecretKeyRef,
+            _labels: &std::collections::BTreeMap<String, String>,
+            _value: &secrecy::SecretString,
+        ) -> Result<secrecy::SecretString, df_core::SecretError> {
+            self.get(reference).await
+        }
+
+        async fn replace(
+            &self,
+            reference: &df_core::SecretKeyRef,
+            _value: &secrecy::SecretString,
+        ) -> Result<(), df_core::SecretError> {
+            Err(df_core::SecretError::NotFound(reference.clone()))
         }
     }
 

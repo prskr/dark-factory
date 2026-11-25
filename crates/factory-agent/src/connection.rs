@@ -157,7 +157,8 @@ impl CommandFilter {
                 control_message::Body::Cancel(_)
                 | control_message::Body::Release(_)
                 | control_message::Body::Interrupt(_)
-                | control_message::Body::HelloAck(_),
+                | control_message::Body::HelloAck(_)
+                | control_message::Body::SignResponse(_),
             )
             | None => true,
         }
@@ -271,6 +272,11 @@ impl ConnectionManager {
                 tracing::warn!(error = %error, ack = msg.ack, "failed to acknowledge outbox messages");
             }
         }
+        // The answer of a sign request goes to the shim that waits for it, not to the runner.
+        if let Some(control_message::Body::SignResponse(response)) = msg.body {
+            crate::sign_relay::complete(response);
+            return;
+        }
         // Deduplicate commands: Assign, Prompts, ToolCallResult
         if msg.body.is_some() {
             let is_fresh = self
@@ -291,6 +297,10 @@ impl ConnectionManager {
     async fn drain_outbound_to_outbox(&self, outbound_rx: &Mutex<mpsc::Receiver<AgentMessage>>) {
         let mut rx = outbound_rx.lock().await;
         while let Ok(msg) = rx.try_recv() {
+            // A sign request never waits for a later stream (design D2).
+            if matches!(msg.body, Some(agent_message::Body::SignRequest(_))) {
+                continue;
+            }
             if let Err(e) = self.outbox.lock().await.append(msg) {
                 tracing::error!(error = %e, "failed to persist queued message at shutdown");
             }
@@ -645,7 +655,7 @@ impl ConnectionManager {
 
 /// Persists outbound messages in the outbox and sends them on the stream until stopped. It
 /// signals `disconnect_tx` when the stream is gone.
-async fn send_outbound(
+pub(crate) async fn send_outbound(
     outbox: Arc<Mutex<Outbox>>,
     command_filter: Arc<Mutex<CommandFilter>>,
     outbound_rx: Arc<Mutex<mpsc::Receiver<AgentMessage>>>,
@@ -664,6 +674,15 @@ async fn send_outbound(
             }
             return;
         };
+        // A sign request is sent only while its shim still waits, and never stored for replay.
+        if let Some(agent_message::Body::SignRequest(request)) = &msg.body {
+            if crate::sign_relay::is_open(&request.request_id) && tx_stream.send(msg).await.is_err()
+            {
+                disconnect_tx.send(()).await.ok(); // receiver may be gone
+                return;
+            }
+            continue;
+        }
         command_filter.lock().await.track_outgoing_request(&msg);
         let seq = match Outbox::append_or_stop(&outbox, msg.clone(), &mut stop_rx).await {
             Ok(seq) => seq,

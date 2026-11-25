@@ -11,6 +11,7 @@ mod lists;
 mod personas;
 mod project_page;
 mod projects;
+mod signing_key;
 mod subtask_merge;
 mod webhook_wake;
 

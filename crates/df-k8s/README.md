@@ -1,6 +1,6 @@
 # df-k8s
 
-Kubernetes integration crate for Dark Factory: `SandboxProvider` implementation (managing one plain `Pod` per run and persistent task volumes), identity resolution from pod informers, per-run `NetworkPolicy` rendering and reconciliation, and `SecretStore` implementation reading Kubernetes Secrets.
+Kubernetes integration crate for Dark Factory: `SandboxProvider` implementation (managing one plain `Pod` per run and persistent task volumes), identity resolution from pod informers, per-run `NetworkPolicy` rendering and reconciliation, and `SecretStore` implementation reading Kubernetes Secrets: `get`, `get_or_create` (a random value), `get_or_create_with` (the caller's value, used for the persona signing keys) and `replace` (the value of one key of an existing Secret, other keys kept; the fetched `resourceVersion` makes a concurrent change a `Backend` error instead of a lost update).
 
 ## Spike Results (Iteration 1 §7)
 
@@ -97,7 +97,7 @@ The control plane verifies the following with `SelfSubjectAccessReview` at start
 - **Instance Namespace**:
   - `coordination.k8s.io` `leases`: `create`, `get`, `update`
   - `core` `services`: `get`
-  - `core` `secrets`: `get`
+  - `core` `secrets`: `get`. The chart also grants `create` and `update` (not checked at startup): the control plane creates the generated webhook Secrets and the persona signing keys (`df-persona-key-<id>`), and replaces a persona's key on a rotation. Neither verb can be limited by name, because the persona ids are not known in advance.
 - **Each cluster-target namespace** (cluster-wide with `anyNamespace`):
   - `core` `services`: `get`, `list`, `watch`
   - `discovery.k8s.io` `endpointslices`: `list`, `watch` (the chart grants `get` as well)

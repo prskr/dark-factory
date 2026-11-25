@@ -102,6 +102,10 @@ A **persona** is an agent with a role. **Settings → Personas → New persona**
 | Model provider | The [model provider](model-providers.md) the harness talks to. Only providers that offer a wire API of the harness are listed. |
 | Model | Required. One of the models of the provider whose wire API the harness can use. |
 
+The form groups its fields under the headings **Identity** (avatar, display name, handle,
+description), **Agent** (system prompt, harness, model provider, model) and **Commits** (commit
+email and the signing key, see [Sign a persona's commits](#sign-a-personas-commits)).
+
 Changing the harness or the model provider updates the other selects. A persona has no adapter
 command; a project can set one ([Projects](#projects)).
 
@@ -135,3 +139,14 @@ An edit applies to runs started after you saved it. An active run keeps the iden
 (its commits would otherwise be rejected by the Git proxy), so the next run of the same task commits
 with the new one. The transcript shows the current display name and handle of the persona, also for
 old messages; commits in Git history keep the identity they were made with.
+
+### Sign a persona's commits
+
+Every persona has its own Ed25519 signing key, which Dark Factory creates when you save the persona
+(or before its first run, for a persona created earlier). The agent's commits are signed with it at
+commit time, and the [Git proxy](../security/git-proxy.md) rejects a task-branch commit without a
+valid signature (`df:signature`). There is nothing to configure and no way for an agent to switch
+signing off. The group **Commits** of the persona form shows the public key and its fingerprint
+with copy buttons, and **Rotate key** replaces the key after a confirmation. To have the forge show
+the commits as verified, register the key and the commit email on the bot account:
+[Verify persona commits on the forge](verify-persona-commits.md).

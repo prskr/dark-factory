@@ -97,7 +97,7 @@ pub(crate) fn project_input(
 
 /// The projects of the suite that run a script on `factory/demo` with the default settings: key,
 /// name and script.
-const PLAIN_PROJECTS: [(&str, &str, &str); 15] = [
+const PLAIN_PROJECTS: [(&str, &str, &str); 16] = [
     (data::PROJECT_KEY, data::PROJECT_NAME, data::DEMO_SCRIPT),
     (
         data::RATE_LIMIT_PROJECT_KEY,
@@ -123,6 +123,11 @@ const PLAIN_PROJECTS: [(&str, &str, &str); 15] = [
         data::PROTECTED_PROJECT_KEY,
         data::PROTECTED_PROJECT_NAME,
         data::PROTECTED_SCRIPT,
+    ),
+    (
+        data::UNSIGNED_PROJECT_KEY,
+        data::UNSIGNED_PROJECT_NAME,
+        data::UNSIGNED_SCRIPT,
     ),
     (
         data::WEBHOOK_PROJECT_KEY,

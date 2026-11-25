@@ -1,15 +1,18 @@
 //! In-memory fake implementations of [`SandboxProvider`], [`ForgeClient`], and [`SecretStore`]
 //! for unit and integration testing across workstreams.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use secrecy::SecretString;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
+
+mod secret_store;
+
+pub use secret_store::FakeSecretStore;
 
 use crate::ids::{ProjectId, RunId};
 use crate::seams::{
@@ -17,7 +20,7 @@ use crate::seams::{
     Issue, IssueFilter, IssuePage, IssueRef, IssueState, IssueStateFilter, ListedPullRequest,
     NewIssue, NewPullRequest, PeerIdentity, ProviderError, PullRequest, PullRequestFilter,
     PullRequestRef, PullRequestState, PullRequestUpdate, RepoRef, RunSandboxSpec, SandboxEvent,
-    SandboxProvider, SecretError, SecretKeyRef, SecretStore, TaskVolumeSpec,
+    SandboxProvider, TaskVolumeSpec,
 };
 
 // ---------------------------------------------------------------------------
@@ -1035,109 +1038,6 @@ impl ForgeClient for FakeForgeClient {
     }
 }
 
-// ---------------------------------------------------------------------------
-// FakeSecretStore
-// ---------------------------------------------------------------------------
-
-#[derive(Default)]
-struct SecretStoreState {
-    calls: Vec<SecretKeyRef>,
-    entries: HashMap<(String, String), Result<SecretString, SecretError>>,
-    created: Vec<(SecretKeyRef, BTreeMap<String, String>)>,
-}
-
-/// In-memory fake [`SecretStore`] that records [`SecretKeyRef`] lookups and returns seeded secrets.
-#[derive(Clone, Default)]
-pub struct FakeSecretStore {
-    state: Arc<Mutex<SecretStoreState>>,
-}
-
-impl FakeSecretStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Returns all [`SecretKeyRef`] lookups recorded so far.
-    pub fn calls(&self) -> Vec<SecretKeyRef> {
-        self.state.lock().expect("lock poisoned").calls.clone()
-    }
-
-    /// Returns the Secrets created by `get_or_create` with the labels they were created with.
-    pub fn created(&self) -> Vec<(SecretKeyRef, BTreeMap<String, String>)> {
-        self.state.lock().expect("lock poisoned").created.clone()
-    }
-
-    /// Seeds a secret value for `(secret_name, secret_key)`.
-    pub fn insert(
-        &self,
-        secret_name: impl Into<String>,
-        secret_key: impl Into<String>,
-        value: impl Into<String>,
-    ) {
-        self.state.lock().expect("lock poisoned").entries.insert(
-            (secret_name.into(), secret_key.into()),
-            Ok(SecretString::from(value.into())),
-        );
-    }
-
-    /// Seeds an error for `(secret_name, secret_key)`.
-    pub fn insert_error(
-        &self,
-        secret_name: impl Into<String>,
-        secret_key: impl Into<String>,
-        err: SecretError,
-    ) {
-        self.state
-            .lock()
-            .expect("lock poisoned")
-            .entries
-            .insert((secret_name.into(), secret_key.into()), Err(err));
-    }
-
-    /// Deletes the seeded or created entry for `(secret_name, secret_key)`.
-    pub fn remove(&self, secret_name: &str, secret_key: &str) {
-        self.state
-            .lock()
-            .expect("lock poisoned")
-            .entries
-            .remove(&(secret_name.to_string(), secret_key.to_string()));
-    }
-}
-
-#[async_trait]
-impl SecretStore for FakeSecretStore {
-    async fn get(&self, r: &SecretKeyRef) -> Result<SecretString, SecretError> {
-        let mut state = self.state.lock().expect("lock poisoned");
-        state.calls.push(r.clone());
-        match state.entries.get(&(r.name.clone(), r.key.clone())) {
-            Some(Ok(secret)) => Ok(secret.clone()),
-            Some(Err(err)) => Err(err.clone()),
-            None => Err(SecretError::NotFound(r.clone())),
-        }
-    }
-
-    async fn get_or_create(
-        &self,
-        r: &SecretKeyRef,
-        labels: &BTreeMap<String, String>,
-    ) -> Result<SecretString, SecretError> {
-        let mut state = self.state.lock().expect("lock poisoned");
-        state.calls.push(r.clone());
-        let key = (r.name.clone(), r.key.clone());
-        if let Some(entry) = state.entries.get(&key) {
-            return entry.clone();
-        }
-        // The Secret exists without the key: never patch it (as `K8sSecretStore`).
-        if state.entries.keys().any(|(name, _key)| *name == r.name) {
-            return Err(SecretError::NotFound(r.clone()));
-        }
-        let value = SecretString::from(format!("generated-{}", state.created.len()));
-        state.entries.insert(key, Ok(value.clone()));
-        state.created.push((r.clone(), labels.clone()));
-        Ok(value)
-    }
-}
-
 #[cfg(test)]
 #[expect(
     clippy::too_many_lines,
@@ -1147,7 +1047,7 @@ mod tests {
     use super::*;
     use crate::ids::PersonaId;
     use crate::keys::TaskKey;
-    use crate::seams::ReviewThread;
+    use crate::seams::{ReviewThread, SecretError, SecretKeyRef, SecretStore};
     use secrecy::ExposeSecret;
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr};

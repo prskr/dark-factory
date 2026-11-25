@@ -1,5 +1,8 @@
 //! Git configuration denylist, planted configuration, hooks, remotes and the runtime socket mode.
 
+const SIGNING_KEY: &str =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItestkeytestkeytestkeytestkeytestkeytestkey";
+
 #[test]
 fn test_git_config_denylist() {
     use crate::git::is_config_entry_denied;
@@ -99,6 +102,7 @@ async fn test_planted_configuration_scenario() {
     let hooks_path = std::path::Path::new("/opt/factory/hooks-empty");
     let params = GitConfigParams {
         hidden_paths: &[],
+        signing_public_key: SIGNING_KEY,
         repo_url: "https://git.example.org/peter/dark-factory.git",
         commit_author_name: "Agent Bot",
         commit_author_email: "bot@darkfactory.local",
@@ -187,6 +191,7 @@ fn test_repo_url_cannot_break_out_of_the_config_subsection() {
     for url in urls {
         let params = GitConfigParams {
             hidden_paths: &[],
+            signing_public_key: SIGNING_KEY,
             repo_url: url,
             commit_author_name: "Agent Bot",
             commit_author_email: "bot@darkfactory.local",
@@ -218,7 +223,11 @@ fn test_repo_url_cannot_break_out_of_the_config_subsection() {
                 "partialclonefilter",
                 "helper",
                 "name",
-                "email"
+                "email",
+                "signingKey",
+                "format",
+                "program",
+                "gpgSign"
             ],
             "{url:?}: {rendered}"
         );
@@ -226,7 +235,16 @@ fn test_repo_url_cannot_break_out_of_the_config_subsection() {
         let sections: Vec<&str> = rendered.lines().filter(|l| l.starts_with('[')).collect();
         assert_eq!(
             sections,
-            ["[core]", "[remote \"origin\"]", "[credential]", "[user]"],
+            [
+                "[core]",
+                "[remote \"origin\"]",
+                "[credential]",
+                "[user]",
+                "[user]",
+                "[gpg]",
+                "[gpg \"ssh\"]",
+                "[commit]"
+            ],
             "{url:?}"
         );
     }
@@ -418,6 +436,7 @@ fn test_render_git_config_rejects_injection() {
     }];
     let params = GitConfigParams {
         hidden_paths: &[],
+        signing_public_key: SIGNING_KEY,
         hooks_path: Path::new("/etc/factory/hooks"),
         extra_config: &entries,
         repo_url: "https://github.com/prskr/dark-factory.git",
@@ -435,6 +454,7 @@ fn test_render_git_config_rejects_injection() {
     }];
     let params2 = GitConfigParams {
         hidden_paths: &[],
+        signing_public_key: SIGNING_KEY,
         hooks_path: Path::new("/etc/factory/hooks"),
         extra_config: &entries2,
         repo_url: "https://github.com/prskr/dark-factory.git",
@@ -452,6 +472,7 @@ fn test_render_git_config_rejects_injection() {
     }];
     let params3 = GitConfigParams {
         hidden_paths: &[],
+        signing_public_key: SIGNING_KEY,
         hooks_path: Path::new("/etc/factory/hooks"),
         extra_config: &entries3,
         repo_url: "https://github.com/prskr/dark-factory.git",
@@ -504,6 +525,7 @@ fn test_render_skips_unsafe_keys_and_quotes_values() {
     ];
     let params = GitConfigParams {
         hidden_paths: &[],
+        signing_public_key: SIGNING_KEY,
         hooks_path: std::path::Path::new("/etc/factory/hooks"),
         extra_config: &entries,
         repo_url: "https://github.com/prskr/dark-factory.git",
@@ -566,6 +588,7 @@ fn test_rewrite_git_config_requires_real_git_dir() {
     let temp = tempfile::tempdir().unwrap();
     let params = GitConfigParams {
         hidden_paths: &[],
+        signing_public_key: SIGNING_KEY,
         hooks_path: std::path::Path::new("/etc/factory/hooks"),
         extra_config: &[],
         repo_url: "https://github.com/prskr/dark-factory.git",
@@ -602,11 +625,85 @@ fn test_rewrite_git_config_requires_real_git_dir() {
 }
 
 #[test]
+fn signing_turned_off_by_the_agent_is_restored_by_the_next_rewrite() {
+    use crate::git::{GitConfigParams, SIGN_PROGRAM, rewrite_git_config};
+    use df_proto::agent::v1::GitConfigEntry;
+
+    let temp = tempfile::tempdir().unwrap();
+    let git_dir = temp.path().join(".git");
+    std::fs::create_dir_all(&git_dir).unwrap();
+    std::fs::write(
+        git_dir.join("config"),
+        "[commit]\n\tgpgSign = false\n[gpg \"ssh\"]\n\tprogram = /data/home/fake-sign\n[gpg]\n\tformat = openpgp\n[user]\n\tsigningKey = stolen\n",
+    )
+    .unwrap();
+    // The project's own entries are denied as well.
+    let entries: Vec<_> = [
+        ("commit.gpgSign", "false"),
+        ("gpg.ssh.program", "/data/home/fake-sign"),
+        ("user.signingKey", "mine"),
+    ]
+    .into_iter()
+    .map(|(key, value)| GitConfigEntry {
+        key: key.into(),
+        value: value.into(),
+    })
+    .collect();
+    let params = GitConfigParams {
+        hidden_paths: &[],
+        signing_public_key: SIGNING_KEY,
+        hooks_path: std::path::Path::new("/opt/factory/hooks-empty"),
+        extra_config: &entries,
+        repo_url: "https://git.example.org/a.git",
+        ssl_ca_info: None,
+        commit_author_name: "Linus",
+        commit_author_email: "linus@example.org",
+    };
+
+    rewrite_git_config(temp.path(), &params).unwrap();
+
+    let value = |key: &str| {
+        let out = std::process::Command::new("git")
+            .args(["config", "--file"])
+            .arg(git_dir.join("config"))
+            .args(["--get-all", key])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(value("commit.gpgSign"), "true");
+    assert_eq!(value("gpg.format"), "ssh");
+    assert_eq!(value("gpg.ssh.program"), SIGN_PROGRAM);
+    assert_eq!(value("user.signingKey"), format!("key::{SIGNING_KEY}"));
+}
+
+#[test]
+fn without_a_signing_key_in_the_assignment_no_signing_is_configured() {
+    use crate::git::{GitConfigParams, render_git_config};
+
+    let params = GitConfigParams {
+        hidden_paths: &[],
+        signing_public_key: "",
+        hooks_path: std::path::Path::new("/opt/factory/hooks-empty"),
+        extra_config: &[],
+        repo_url: "https://git.example.org/a.git",
+        ssl_ca_info: None,
+        commit_author_name: "Linus",
+        commit_author_email: "linus@example.org",
+    };
+
+    let rendered = render_git_config(&params);
+
+    assert!(!rendered.contains("gpg") && !rendered.contains("signingKey"));
+}
+
+#[test]
 fn test_runtime_owned_values_are_quoted_and_validated() {
     use crate::git::{GitConfigParams, render_git_config, rewrite_git_config};
 
     let params = GitConfigParams {
         hidden_paths: &[],
+        signing_public_key: SIGNING_KEY,
         hooks_path: std::path::Path::new("/opt/factory/hooks-empty"),
         extra_config: &[],
         repo_url: "https://git.example.org/a.git",

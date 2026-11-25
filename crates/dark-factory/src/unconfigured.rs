@@ -63,5 +63,22 @@ pub(crate) mod sandbox_placeholders {
         ) -> Result<SecretString, SecretError> {
             Err(SecretError::Backend(NO_SECRET_STORE.into()))
         }
+
+        async fn get_or_create_with(
+            &self,
+            _r: &SecretKeyRef,
+            _labels: &BTreeMap<String, String>,
+            _value: &SecretString,
+        ) -> Result<SecretString, SecretError> {
+            Err(SecretError::Backend(NO_SECRET_STORE.into()))
+        }
+
+        async fn replace(
+            &self,
+            _r: &SecretKeyRef,
+            _value: &SecretString,
+        ) -> Result<(), SecretError> {
+            Err(SecretError::Backend(NO_SECRET_STORE.into()))
+        }
     }
 }

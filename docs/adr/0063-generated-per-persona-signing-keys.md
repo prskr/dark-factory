@@ -1,6 +1,6 @@
 # ADR-0063: Generated per-persona signing keys
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-19
 - **Related:** [ADR-0062](0062-persona-identity.md), [ADR-0010](0010-credentials-in-the-sandbox.md), [ADR-0020](0020-configuration-in-database.md), [ADR-0056](0056-control-plane-generates-missing-instance-secrets.md)
 

@@ -32,6 +32,11 @@ pub const SECRET_PROJECT_NAME: &str = "Secret Scan";
 pub const PROTECTED_PROJECT_KEY: &str = "PP";
 pub const PROTECTED_PROJECT_NAME: &str = "Protected Path";
 
+/// Project whose fake agent commits with signing switched off (`df:signature` scenario of
+/// `persona-commit-signing`); tasks are `NS-<n>`.
+pub const UNSIGNED_PROJECT_KEY: &str = "NS";
+pub const UNSIGNED_PROJECT_NAME: &str = "No Signature";
+
 /// Project that hides `secret/**` and whose fake agent tries to delete `secret/value.txt` (demo
 /// step 6 of iteration 3); tasks are `HP-<n>`.
 pub const HIDDEN_PROJECT_KEY: &str = "HP";
@@ -242,6 +247,7 @@ pub const RATE_LIMIT_SHORT_SCRIPT: &str = "/opt/harness/scripts/rate-limit-short
 pub const NETWORK_SCRIPT: &str = "/opt/harness/scripts/network-access.yaml";
 pub const SECRET_SCRIPT: &str = "/opt/harness/scripts/push-secret.yaml";
 pub const PROTECTED_SCRIPT: &str = "/opt/harness/scripts/push-protected.yaml";
+pub const UNSIGNED_SCRIPT: &str = "/opt/harness/scripts/push-unsigned.yaml";
 pub const HIDDEN_SCRIPT: &str = "/opt/harness/scripts/push-hidden.yaml";
 pub const WEBHOOK_SCRIPT: &str = "/opt/harness/scripts/webhook.yaml";
 pub const EXISTING_BRANCH_SCRIPT: &str = "/opt/harness/scripts/existing-branch.yaml";
@@ -251,6 +257,16 @@ pub const RESEARCH_SCRIPT: &str = "/opt/harness/scripts/research.yaml";
 pub const TASK_TREE_SCRIPT: &str = "/opt/harness/scripts/task-tree.yaml";
 pub const INTERRUPT_SCRIPT: &str = "/opt/harness/scripts/interrupt.yaml";
 pub const LANDLOCK_SCRIPT: &str = "/opt/harness/scripts/landlock.yaml";
+
+/// The domain of the suite's Forgejo (its `DOMAIN` setting): the namespace of a key verification.
+pub fn forgejo_domain() -> String {
+    format!("{FORGE_SERVICE}.{FORGE_NAMESPACE}.svc")
+}
+
+/// Forgejo's web UI as the browser in the cluster addresses it.
+pub fn forgejo_web_url() -> String {
+    format!("http://{}:{FORGE_PORT}", forgejo_domain())
+}
 
 /// Repository URL of the projects: `factory/demo`.
 pub fn repo_url() -> String {

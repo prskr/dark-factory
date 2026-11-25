@@ -217,6 +217,51 @@ async fn assign_for_the_first_run_of_df_1() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn assign_carries_the_current_public_signing_key_of_the_persona() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let public = df_db::persona_keys::sync_signing_key(
+        &pool,
+        env.ctx.secrets.as_ref(),
+        env.persona_id.as_uuid(),
+    )
+    .await?
+    .public_key;
+    let run_id = env.insert_run(env.task.id, 1, "connecting").await;
+    let rc = load_run_context(&pool, get_run(&pool, run_id).await?.expect("run")).await?;
+
+    let assign = build_assign(&env.ctx, &rc).await?;
+
+    assert_eq!(
+        assign.workspace.expect("workspace").signing_public_key,
+        public
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn assign_holds_the_public_signing_key_and_no_private_key_material() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let public = df_db::persona_keys::sync_signing_key(
+        &pool,
+        env.ctx.secrets.as_ref(),
+        env.persona_id.as_uuid(),
+    )
+    .await?
+    .public_key;
+    let run_id = env.insert_run(env.task.id, 1, "connecting").await;
+    let rc = load_run_context(&pool, get_run(&pool, run_id).await?.expect("run")).await?;
+
+    let assign = build_assign(&env.ctx, &rc).await?;
+
+    let shown = format!("{assign:?}");
+    assert!(shown.contains(&public), "the public key is sent: {shown}");
+    assert!(!shown.contains("PRIVATE KEY"), "{shown}");
+    Ok(())
+}
+
+#[tokio::test]
 async fn assign_carries_the_persona_identity_the_run_started_with() -> anyhow::Result<()> {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
     let env = Env::new(pool.clone()).await;

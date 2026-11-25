@@ -51,6 +51,8 @@ pub struct PersonaInfo {
     pub harness: String,
     pub model: String,
     pub model_provider_id: uuid::Uuid,
+    /// The public signing key (OpenSSH format) when the context was loaded.
+    pub signing_public_key: Option<String>,
 }
 
 /// A run with its task, project and persona, loaded once per stream.
@@ -130,6 +132,7 @@ pub async fn load_run_context(pool: &PgPool, run: RunRow) -> Result<RunContext, 
         harness: persona.harness,
         model: persona.model,
         model_provider_id: persona.model_provider_id,
+        signing_public_key: persona.signing_key.map(|key| key.public_key),
     };
 
     let base_branch = df_db::base_branch(pool, task.id).await?;

@@ -149,6 +149,7 @@ serde_json = "1"
 serde-saphyr = "2.0.0"
 sha2 = "0.11"
 shlex = "2.0.1"
+ssh-key = { version = "0.7.0-rc.12", default-features = false, features = ["ed25519", "alloc"] }
 sqlx = { version = "=0.9.0", default-features = false, features = [
     "runtime-tokio",
     "tls-rustls-ring-webpki",
@@ -196,4 +197,5 @@ x509-parser = "0.18"
 [workspace.metadata.outdated.ignore]
 sqlx = "0.9.1 query macros run `cargo metadata` through $CARGO even in offline mode; Bazel has no cargo, so every query! panics. Renovate skips 0.9.1"
 globset = "rpi-tools 0.27 (df-harness) requires globset =0.4.15; the workspace resolves a single version"
+ssh-key = "0.7 is the line on ed25519-dalek 3 and rand_core 0.10, which the workspace resolves already; the stable 0.6.7 would add ed25519-dalek 2 and rand_core 0.6 (persona-commit-signing, ADR-0063)"
 reqwest = "native-harness-spike: rpi-ai 0.27 builds its provider client on reqwest 0.12; df-harness must hand it a client of the same version"

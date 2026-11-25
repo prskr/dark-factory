@@ -277,6 +277,16 @@ pub async fn run_audit_entries(pool: &PgPool, key: &str, action: &str) -> Result
     .with_context(|| format!("{action} audit entries of task {key}"))
 }
 
+/// Number of audit entries `action` about persona `handle` (`resource_id` is the handle).
+pub async fn persona_audit_entries(pool: &PgPool, handle: &str, action: &str) -> Result<i64> {
+    sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE resource_id = $1 AND action = $2")
+        .bind(handle)
+        .bind(action)
+        .fetch_one(pool)
+        .await
+        .with_context(|| format!("{action} audit entries of persona {handle}"))
+}
+
 /// Usage records of the runs of task `key`: `(known, unknown)`.
 pub async fn model_usage(pool: &PgPool, key: &str) -> Result<(i64, i64)> {
     let usage = sqlx::query!(
@@ -490,6 +500,17 @@ pub async fn pushes(pool: &PgPool, key: &str) -> Result<Vec<PushRow>> {
             })
         })
         .collect()
+}
+
+/// The public signing key (OpenSSH format) of the persona with `handle`; `None` while it has none.
+pub async fn persona_signing_key(pool: &PgPool, handle: &str) -> Result<Option<String>> {
+    sqlx::query_scalar!(
+        "SELECT signing_public_key FROM personas WHERE handle = $1",
+        handle
+    )
+    .fetch_one(pool)
+    .await
+    .with_context(|| format!("signing key of persona {handle}"))
 }
 
 /// The text of the `push.rejected` messages queued on task `key`, oldest first.

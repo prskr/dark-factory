@@ -1,0 +1,13 @@
+# Script of the `df:signature` scenario of `persona-commit-signing`: run 1 commits with signing
+# switched off (`-c` beats the runtime-owned `.git/config`). The Git proxy rejects every push of the
+# commit with `df:signature` ("missing signature"); later prompts (`push.rejected` messages) find no
+# scripted turn and end at once, and the runtime pushes the same commit again after each of them.
+sessions:
+  new:
+    - - say: "Committing without a signature."
+      - shell: |
+          printf 'unsigned\n' > unsigned.txt
+          git add unsigned.txt
+          git -c commit.gpgSign=false commit -q -m 'Add an unsigned file'
+      - say: "Committed unsigned.txt."
+      - end: end_turn

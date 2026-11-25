@@ -4,6 +4,7 @@
 
 mod common;
 
+use std::io::Write as _;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -12,6 +13,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use common::{certificate, forge, forge_repository, git};
+use df_core::signing_key::SigningKey;
 use df_gateway::git::mirror::Mirrors;
 use df_gateway::git::policy_checks::PolicyChecks;
 use df_gateway::git::push::{Push, PushRecord, PushRecorder, RecordError};
@@ -74,7 +76,11 @@ impl Gateway {
             UpstreamConnector::with_roots(forge_roots.clone())?,
         );
         let upstream = ForgeUpstream::with_roots(forge_roots)?;
-        let (snapshot, snapshots) = watch::channel(Some(Arc::new(policy(forge_addr.port(), &[])?)));
+        let (snapshot, snapshots) = watch::channel(Some(Arc::new(policy(
+            forge_addr.port(),
+            &[],
+            &persona_key().public_key(),
+        )?)));
         let records = Arc::new(Recorded::default());
         let push = Push::new(Arc::new(mirrors), &dir.path().join("mirrors"), 64 << 20)
             .with_checks(Arc::new(PolicyChecks::new(SecretRules::builtin()?)))
@@ -103,8 +109,18 @@ impl Gateway {
 
     /// Publishes a snapshot in which the task has the exceptions `fingerprints`.
     fn except(&self, fingerprints: &[String]) -> Result<()> {
+        self.snapshot.send_replace(Some(Arc::new(policy(
+            self.forge_port,
+            fingerprints,
+            &persona_key().public_key(),
+        )?)));
+        Ok(())
+    }
+
+    /// Publishes a snapshot whose route carries `public_key` as the persona's signing key.
+    fn rekey(&self, public_key: &str) -> Result<()> {
         self.snapshot
-            .send_replace(Some(Arc::new(policy(self.forge_port, fingerprints)?)));
+            .send_replace(Some(Arc::new(policy(self.forge_port, &[], public_key)?)));
         Ok(())
     }
 
@@ -162,9 +178,10 @@ impl Drop for Gateway {
 }
 
 /// The snapshot: task `DF-7` of project `DF` at 127.0.0.1, with the spec's default push policy
-/// and the exceptions `fingerprints`.
-fn policy(forge_port: u16, fingerprints: &[String]) -> Result<Policy> {
+/// and the exceptions `fingerprints`; the persona's signing key is `signing_public_key`.
+fn policy(forge_port: u16, fingerprints: &[String], signing_public_key: &str) -> Result<Policy> {
     let route = GitRoute {
+        signing_public_key: signing_public_key.to_owned(),
         upstream_url: format!("https://127.0.0.1:{forge_port}/app.git"),
         task_branch: BRANCH.into(),
         wip_branch: WIP.into(),
@@ -212,13 +229,64 @@ fn policy(forge_port: u16, fingerprints: &[String]) -> Result<Policy> {
         ))
 }
 
-/// Writes `content` to `file` and commits it with the instance's commit identity.
+/// The signing key of the persona of the run.
+fn persona_key() -> &'static SigningKey {
+    static KEY: OnceLock<SigningKey> = OnceLock::new();
+    KEY.get_or_init(|| SigningKey::generate().expect("a signing key"))
+}
+
+/// Replaces the commit at `HEAD` with the same commit signed by `key`, the way git signs it: the
+/// `gpgsig` header holds an SSH signature of the commit object without it.
+fn sign_head(work: &Path, key: &SigningKey) -> Result<()> {
+    let raw = String::from_utf8(git(work, &["cat-file", "commit", "HEAD"])?.stdout)?;
+    let headers_end = raw.find("\n\n").context("a commit without a message")? + 1;
+    let signature = key.sign(raw.as_bytes())?;
+    let header = signature.trim_end().lines().collect::<Vec<_>>().join("\n ");
+    let signed = format!(
+        "{}gpgsig {header}\n{}",
+        &raw[..headers_end],
+        &raw[headers_end..]
+    );
+    let mut hash = Command::new("git")
+        .current_dir(work)
+        .args(["hash-object", "-t", "commit", "-w", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+    hash.stdin
+        .take()
+        .context("no stdin")?
+        .write_all(signed.as_bytes())?;
+    let id = String::from_utf8(hash.wait_with_output()?.stdout)?;
+    git(work, &["update-ref", "HEAD", id.trim()])?;
+    Ok(())
+}
+
+/// Writes `content` to `file` and commits it with the instance's commit identity, signed by the
+/// persona.
 fn commit(work: &Path, file: &str, content: &str) -> Result<()> {
     commit_as(work, file, content, "Bot", BOT)
 }
 
-/// Writes `content` to `file` and commits it as `name` <`email`>, author and committer.
+/// Like [`commit`], without a signature.
+fn commit_unsigned(work: &Path, file: &str, content: &str) -> Result<()> {
+    commit_unsigned_as(work, file, content, "Bot", BOT)
+}
+
+/// Writes `content` to `file` and commits it as `name` <`email`>, author and committer, signed by
+/// the persona.
 fn commit_as(work: &Path, file: &str, content: &str, name: &str, email: &str) -> Result<()> {
+    commit_unsigned_as(work, file, content, name, email)?;
+    sign_head(work, persona_key())
+}
+
+fn commit_unsigned_as(
+    work: &Path,
+    file: &str,
+    content: &str,
+    name: &str,
+    email: &str,
+) -> Result<()> {
     let path = work.join(file);
     std::fs::create_dir_all(path.parent().context("file without a parent")?)?;
     std::fs::write(path, content)?;
@@ -537,6 +605,7 @@ async fn merging_the_base_branch_does_not_report_the_humans_changes() -> Result<
             "main",
         ],
     )?;
+    sign_head(&work, persona_key())?;
 
     let merged = gateway.push(&work).await?;
 
@@ -610,5 +679,95 @@ async fn an_exception_for_one_secret_does_not_cover_a_new_one() -> Result<()> {
         assert!(!recorded.contains(secret), "{recorded}");
         assert!(!logged.contains(secret), "{logged}");
     }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unsigned_commit_is_rejected_with_df_signature_and_a_signed_one_passes() -> Result<()> {
+    let gateway = Gateway::start().await?;
+    let work = gateway.client()?;
+    commit_unsigned(&work, "src/lib.rs", "// unsigned\n")?;
+
+    let rejected = gateway.push(&work).await?;
+
+    assert!(!rejected.status.success());
+    assert!(
+        stderr(&rejected).contains("df:signature")
+            && stderr(&rejected).contains("missing signature"),
+        "{}",
+        stderr(&rejected)
+    );
+    assert_eq!(gateway.forge_head()?, None);
+    let record = gateway.records.last()?;
+    assert_eq!(record.verdict, PushVerdict::Rejected);
+    assert_eq!(record.findings[0].check(), PushCheck::Signature);
+    assert!(!record.approval_requested);
+
+    // The agent signs the commit again (`git rebase --exec 'git commit --amend --no-edit'`).
+    sign_head(&work, persona_key())?;
+    let signed = gateway.push(&work).await?;
+
+    assert!(signed.status.success(), "{}", stderr(&signed));
+    assert_eq!(gateway.forge_head()?, head_of(&work, "HEAD")?);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commit_signed_by_another_key_is_rejected_and_passes_once_the_snapshot_has_that_key()
+-> Result<()> {
+    let gateway = Gateway::start().await?;
+    let work = gateway.client()?;
+    let rotated = SigningKey::generate()?;
+    commit_unsigned(&work, "src/lib.rs", "// signed after a rotation\n")?;
+    sign_head(&work, &rotated)?;
+
+    // The gateway still has the old key: the push window of design D6.
+    let early = gateway.push(&work).await?;
+
+    assert!(!early.status.success());
+    assert!(
+        stderr(&early).contains("signed by another key"),
+        "{}",
+        stderr(&early)
+    );
+    gateway.rekey(&rotated.public_key())?;
+    let later = gateway.push(&work).await?;
+    assert!(later.status.success(), "{}", stderr(&later));
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wip_snapshot_needs_no_signature_but_the_same_commit_on_the_task_branch_does()
+-> Result<()> {
+    let gateway = Gateway::start().await?;
+    let work = gateway.client()?;
+    commit_unsigned(&work, "wip.txt", "snapshot\n")?;
+
+    let wip = gateway.push_to(&work, WIP).await?;
+
+    assert!(wip.status.success(), "{}", stderr(&wip));
+    let task = gateway.push(&work).await?;
+    assert!(!task.status.success());
+    assert!(
+        stderr(&task).contains("df:signature") && stderr(&task).contains("missing signature"),
+        "{}",
+        stderr(&task)
+    );
+    assert_eq!(gateway.forge_head()?, None);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unsigned_commits_already_on_the_forge_are_not_checked_again() -> Result<()> {
+    let gateway = Gateway::start().await?;
+    let work = gateway.client()?;
+    commit_unsigned(&work, "old.txt", "from before signing\n")?;
+    git(&work, &["push", "-q", "origin", &format!("HEAD:{BRANCH}")])?;
+    commit(&work, "new.txt", "signed work\n")?;
+
+    let pushed = gateway.push(&work).await?;
+
+    assert!(pushed.status.success(), "{}", stderr(&pushed));
+    assert!(gateway.records.last()?.findings.is_empty());
     Ok(())
 }

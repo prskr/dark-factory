@@ -4,12 +4,13 @@ use async_trait::async_trait;
 use std::collections::BTreeMap;
 
 use df_core::seams::{SecretError, SecretKeyRef, SecretStore};
+use k8s_openapi::ByteString;
 use k8s_openapi::api::core::v1::Secret;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::Client;
 use kube::api::{Api, PostParams};
 use ring::rand::{SecureRandom, SystemRandom};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use tracing::instrument;
 
 use crate::K8S_API_TIMEOUT;
@@ -63,17 +64,30 @@ impl SecretStore for K8sSecretStore {
         r: &SecretKeyRef,
         labels: &BTreeMap<String, String>,
     ) -> Result<SecretString, SecretError> {
+        self.get_or_create_with(r, labels, &SecretString::from(random_hex()?))
+            .await
+    }
+
+    #[instrument(skip(self, labels, value), fields(secret = %r.name, key = %r.key))]
+    async fn get_or_create_with(
+        &self,
+        r: &SecretKeyRef,
+        labels: &BTreeMap<String, String>,
+        value: &SecretString,
+    ) -> Result<SecretString, SecretError> {
         if let Some(secret) = self.fetch(r).await? {
             return extract(&secret, r);
         }
-        let value = random_hex()?;
         let secret = Secret {
             metadata: ObjectMeta {
                 name: Some(r.name.clone()),
                 labels: Some(labels.clone()),
                 ..ObjectMeta::default()
             },
-            string_data: Some(BTreeMap::from([(r.key.clone(), value.clone())])),
+            string_data: Some(BTreeMap::from([(
+                r.key.clone(),
+                value.expose_secret().to_string(),
+            )])),
             ..Secret::default()
         };
         let created = tokio::time::timeout(
@@ -92,6 +106,30 @@ impl SecretStore for K8sSecretStore {
             Err(kube::Error::Api(err)) if err.code == 409 => self.get(r).await,
             Err(err) => Err(SecretError::Backend(err.to_string())),
         }
+    }
+
+    #[instrument(skip(self, value), fields(secret = %r.name, key = %r.key))]
+    async fn replace(&self, r: &SecretKeyRef, value: &SecretString) -> Result<(), SecretError> {
+        let mut secret = self
+            .fetch(r)
+            .await?
+            .ok_or_else(|| SecretError::NotFound(r.clone()))?;
+        // `string_data` is write-only and wins over `data`, so only `data` is edited. The fetched
+        // `resourceVersion` makes a concurrent change fail with a conflict instead of being lost.
+        secret.data.get_or_insert_default().insert(
+            r.key.clone(),
+            ByteString(value.expose_secret().as_bytes().to_vec()),
+        );
+        let name = r.name.as_str();
+        tokio::time::timeout(
+            K8S_API_TIMEOUT,
+            self.api().replace(name, &PostParams::default(), &secret),
+        )
+        .await
+        .map_err(|_elapsed| timeout_error("replacing", r))?
+        .map_err(|err| SecretError::Backend(err.to_string()))?;
+        tracing::info!(secret = %r.name, "replaced generated secret");
+        Ok(())
     }
 }
 
@@ -123,9 +161,6 @@ fn random_hex() -> Result<String, SecretError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use k8s_openapi::ByteString;
-    use secrecy::ExposeSecret;
-    use std::collections::BTreeMap;
     use tower_test::mock;
 
     #[tokio::test]
@@ -333,6 +368,98 @@ mod tests {
 
         let got = task.await.unwrap().unwrap();
         assert_eq!(got.expose_secret(), value);
+    }
+
+    #[tokio::test]
+    async fn get_or_create_with_creates_a_missing_secret_with_the_given_value() {
+        let (mock_service, mut handle) = mock::pair();
+        let store = K8sSecretStore::new(Client::new(mock_service, "ns"), "ns");
+        let task = tokio::spawn(async move {
+            store
+                .get_or_create_with(
+                    &webhook_ref(),
+                    &labels(),
+                    &SecretString::from("key-material"),
+                )
+                .await
+        });
+        let (_req, send) = handle.next_request().await.unwrap();
+        send.send_response(json_response(404, status_body(404, "NotFound")));
+        let (req, send) = handle.next_request().await.unwrap();
+        assert_eq!(req.method(), http::Method::POST);
+        let body = req.into_body().collect_bytes().await.unwrap();
+        let created: Secret = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            created
+                .string_data
+                .unwrap()
+                .get("secret")
+                .map(String::as_str),
+            Some("key-material")
+        );
+        send.send_response(created_response("secret", "key-material"));
+        assert_eq!(task.await.unwrap().unwrap().expose_secret(), "key-material");
+    }
+
+    #[tokio::test]
+    async fn replace_writes_the_new_value_and_keeps_other_keys_and_the_resource_version() {
+        let (mock_service, mut handle) = mock::pair();
+        let store = K8sSecretStore::new(Client::new(mock_service, "ns"), "ns");
+        let task = tokio::spawn(async move {
+            store
+                .replace(&webhook_ref(), &SecretString::from("new"))
+                .await
+        });
+        let (_req, send) = handle.next_request().await.unwrap();
+        let mut existing = Secret {
+            data: Some(BTreeMap::from([
+                ("secret".to_string(), ByteString(b"old".to_vec())),
+                ("other".to_string(), ByteString(b"kept".to_vec())),
+            ])),
+            ..Default::default()
+        };
+        existing.metadata.resource_version = Some("42".into());
+        send.send_response(json_response(
+            200,
+            serde_json::to_string(&existing).unwrap(),
+        ));
+
+        let (req, send) = handle.next_request().await.unwrap();
+        assert_eq!(req.method(), http::Method::PUT);
+        assert_eq!(req.uri().path(), "/api/v1/namespaces/ns/secrets/wh");
+        let body = req.into_body().collect_bytes().await.unwrap();
+        let written: Secret = serde_json::from_slice(&body).unwrap();
+        assert_eq!(written.metadata.resource_version.as_deref(), Some("42"));
+        let data = written.data.unwrap();
+        assert_eq!(data.get("secret").unwrap().0, b"new");
+        assert_eq!(data.get("other").unwrap().0, b"kept");
+        send.send_response(secret_response("secret", "new"));
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn replace_of_a_missing_secret_is_not_found_and_a_conflict_is_a_backend_error() {
+        let (mock_service, mut handle) = mock::pair();
+        let store = K8sSecretStore::new(Client::new(mock_service, "ns"), "ns");
+        let task = tokio::spawn(async move {
+            let missing = store
+                .replace(&webhook_ref(), &SecretString::from("n"))
+                .await;
+            let conflict = store
+                .replace(&webhook_ref(), &SecretString::from("n"))
+                .await;
+            (missing, conflict)
+        });
+        let (_req, send) = handle.next_request().await.unwrap();
+        send.send_response(json_response(404, status_body(404, "NotFound")));
+        let (_req, send) = handle.next_request().await.unwrap();
+        send.send_response(secret_response("secret", "old"));
+        let (_req, send) = handle.next_request().await.unwrap();
+        send.send_response(json_response(409, status_body(409, "Conflict")));
+
+        let (missing, conflict) = task.await.unwrap();
+        assert!(matches!(missing, Err(SecretError::NotFound(_))));
+        assert!(matches!(conflict, Err(SecretError::Backend(m)) if m.contains("Conflict")));
     }
 
     #[tokio::test]

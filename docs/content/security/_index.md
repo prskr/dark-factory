@@ -23,7 +23,9 @@ boundary of the sandbox instead of inside it.
 - **No long-lived credentials in the sandbox.** The forge credential never enters it: the
   [Git proxy](git-proxy.md) adds it on the way out, and the control plane calls the forge API itself.
   The model credential stays in the gateway too: the harness gets a placeholder key and the
-  [inference endpoint](inference-endpoint.md) adds the real one. A sandbox holds no secret.
+  [inference endpoint](inference-endpoint.md) adds the real one. A sandbox holds no secret. The
+  same holds for the persona's signing key: the agent's commits are signed by the control plane at
+  commit time, and the [Git proxy](git-proxy.md) rejects a commit without that signature.
 - **Git is the only durable store for code.** The task volume is a cache; the runtime regenerates
   the files it owns (`.git/config`, hooks path) before using the repository.
 - **Default deny on the network.** A sandbox reaches the control plane, the gateway and nothing else

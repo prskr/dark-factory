@@ -76,6 +76,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Config - Project integrations off | Integrations tab without the feature, publicUrl, webhook support or forge integration, with unrestricted URLs (partial boards: main column only); phone |
 | Config - Project egress | Egress tab (full screen) and its states (partial boards: main column only); phone |
 | Config - Personas | Personas: cards (full screen), identity (main column only), edit modal and its states (modal only); phone edit sheet; variant set `Settings nav` (property Active; the settings sidebar on every settings board is an instance) |
+| Config - Personas Signing | Grouped persona edit modal with the Commits group (modal only); Commits group states (group only); rotate key confirmations (dialog only); "Verify key on Forgejo" dialog and its states (dialog only); phone edit sheet |
 | Config - Credentials | Credentials: two-line list rows, new with validation error; error page (not found) |
 | Config - Model providers | Model providers: two-line list rows (full screen); new provider modal per credential scheme (modal only); provider settings page general, models, model errors (main column only) |
 | Empty states | One board per empty state |
@@ -256,6 +257,17 @@ The boards of a change in progress are listed in its `openspec/changes/<name>/de
 | Config - Personas / Personas · new persona, email taken | `/personas/new` | display name "Code Reviewer", handle `reviewer`, email `linus@example.org` saved; neutral avatar preview "CR". Partial board: modal only | 1440 |
 | Config - Personas / Phone · edit persona sheet, identity | `/personas/<id>/edit` | as Personas · edit modal, identity | 390 |
 | Config - Personas / Avatar · palette and sizes | none | reference: tokens `color.avatar.{1..8}.{bg,fg}` and neutral (`color.sunk`/`color.muted`); sizes 56 form, 48 phone form, 40 card, 32 transcript, 20 task row and details | none |
+| Config - Personas Signing / Personas · edit modal, commits | `/personas/<id>/edit` | persona `linus` (`linus@example.org`) with a signing key, instance without the `forgejo` plugin (no "Verify key on Forgejo"). Partial board: modal only | 1440 |
+| Config - Personas Signing / Personas · commits, no key yet | `/personas/<id>/edit` | persona without a key (or `/personas/new`). Partial board: group "Commits" only | 1440 |
+| Config - Personas Signing / Personas · commits, key rotated | `/personas/<id>/edit` | as Personas · edit modal, commits, after "Rotate key" was confirmed. Partial board: group "Commits" only | 1440 |
+| Config - Personas Signing / Personas · rotate key confirmation | `/personas/<id>/edit` | `linus` without active runs; "Rotate key" clicked. Partial board: dialog only | 1440 |
+| Config - Personas Signing / Personas · rotate key confirmation, active runs | `/personas/<id>/edit` | `linus` with 2 active runs; "Rotate key" clicked. Partial board: dialog only | 1440 |
+| Config - Personas Signing / Personas · rotate key failed | `/personas/<id>/edit` | Secret write fails on confirm. Partial board: dialog only | 1440 |
+| Config - Personas Signing / Phone · edit persona sheet, commits | `/personas/<id>/edit` | as Personas · edit modal, commits; sheet scrolled to "Commits" | 390 |
+| Config - Personas Signing / Personas · commits, Forgejo | `/personas/<id>/edit` | as Personas · edit modal, commits, on an instance with the `forgejo` plugin. Partial board: group "Commits" only | 1440 |
+| Config - Personas Signing / Personas · verify key on Forgejo | `/personas/<id>/edit` | `linus`, "Verify key on Forgejo" clicked, token empty, "Forgejo domain" prefilled `forgejo.example.org`. Partial board: dialog only | 1440 |
+| Config - Personas Signing / Personas · verify key on Forgejo, signed | `/personas/<id>/edit` | as above after "Sign token" with a valid token. Partial board: dialog only | 1440 |
+| Config - Personas Signing / Personas · verify key on Forgejo, failed | `/personas/<id>/edit` | token over 256 characters submitted. Partial board: dialog only | 1440 |
 | Tasks / Desktop · persona identity | `/tasks/<id>` | as Desktop · light, personas with handles: rows show the persona avatar before the time, transcript author "Linus @linus", details Persona "Linus @linus" with avatar | 1440 |
 | Tasks - Details Sidebar / Desktop · run usage, requests without usage | `/tasks/<id>` | manual seed (not built): run #8 with usage records and two records without usage. Partial board: details only | 1440 |
 | Tasks - Details Overview / Desktop · attached PR | `/tasks/<key>` | manual seed (not built): task on existing branch `renovate/serde-1.x` with attached open PR #40; "attached" pill after the PR link, tooltip "Opened outside the factory; the factory comments but never changes it". Partial board: details only | 1440 |

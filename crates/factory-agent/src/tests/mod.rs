@@ -20,6 +20,7 @@ mod confinement;
 mod connection;
 mod git;
 mod git_retry;
+mod git_sign;
 mod harness;
 mod hidden_paths;
 mod mcp;

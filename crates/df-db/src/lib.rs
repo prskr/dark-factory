@@ -25,6 +25,7 @@ pub mod model_usage;
 pub mod network_access;
 pub mod notify;
 pub mod outbox;
+pub mod persona_keys;
 pub mod placement;
 pub mod pool;
 pub mod projects;
