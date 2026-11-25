@@ -31,11 +31,17 @@ schema: spec-driven
 #       guidance:
 #         - Summarize the archive outcome before finishing
 
+context: |
+  Load skill `domain-modeling` before you plan a change, and use the terms of `product/GLOSSARY.md` in every artifact.
+  While planning, write each new or changed term into `product/GLOSSARY.md` once it is resolved, and record each decision that is hard to reverse, surprising without context and the result of a real trade-off as an ADR in `docs/adr/` (indexed in `docs/adr/README.md`).
+
 rules:
   proposal:
+    - The Impact section names the glossary terms and ADRs the change adds or changes, or says that the domain model is unchanged.
     - Every out-of-scope item that is a real follow-up names its target in product/iterations/roadmap.md (an iteration or the backlog); an item that is not wanted says "rejected".
     - New protobuf fields and enum values in existing messages and enums get placeholder numbers (`<n1>`, `<n2>`, …) or none, never a concrete field number or a `reserved` entry; the final numbers are assigned when the change is implemented, because parallel changes would otherwise claim the same numbers.
   specs:
+    - A requirement's text stays under 500 characters, a MODIFIED requirement counted as it reads after the edit (strict validation rejects longer ones once the change is archived and synced); move examples and edge cases into scenarios, or split the requirement.
     - New protobuf fields and enum values in existing messages and enums get placeholder numbers (`<n1>`, `<n2>`, …) or none, never a concrete field number or a `reserved` entry; the final numbers are assigned when the change is implemented, because parallel changes would otherwise claim the same numbers.
   design:
     - Every non-goal that is a real follow-up names its target in product/iterations/roadmap.md (an iteration or the backlog); a non-goal that is not wanted says "rejected".
