@@ -215,12 +215,17 @@ The form posts `selected` once per checked option, `other` and `text`. The handl
 
 **Answered card:** every option of the question is listed read-only in its order; chosen ones in `ink` with the Lucide `circle-check` (single) or `square-check` (multi) and the screen-reader text "chosen", the others in `muted` without icon; "Other: <text>" last when given. A text answer is rendered with `markdown::render` in a `bg-panel` block. Below: "Answered by <name> · <time>" (closed: "Closed: <reason>", unchanged).
 
-**Drafts survive live updates: unchanged cards are not sent again.** A pending question's markup only changes when the question is decided or closed (or its task is renamed). So a live update leaves a card alone unless its own markup changed:
+**Drafts survive live updates: the answer form moves into the new card.** A pending card is sent again in more cases than a decision: a reconnect of the stream (the first send of a connection deletes and re-inserts every card today, `sse.rs` `changed_requests`), a renamed task, the readdress note of `iter3-parent-questions`. The draft lives in the form, so the form is kept whenever the question itself is unchanged:
 
-- **Task timeline** (`sse.rs`, `changed_requests`): already sends a card only when its HTML differs from the last one sent on this connection. Unchanged.
-- **Inbox** (`requests.rs`, `events`): today it morphs the whole `#request-list` when anything changed, which would reset drafts in every card. It changes to per-card partials, like the timeline: a new card is inserted at its place (newest first), a card that is no longer pending is removed (as the list re-render does today), a pending card whose markup changed is morphed, an unchanged card is not sent. The empty state is sent when the list becomes empty.
-- **No preserve or ignore option** on the form: the 422 card of a rejected answer (`hx-swap="outerHTML"` from the form post) and the decided card from another board member must both replace the form. Nothing depends on htmx 4 morph options.
-- A pending card whose task is renamed while the human types is re-sent and loses the draft. Accepted: rare, and the title is part of the card.
+- **Form key:** the `<form>` of a pending question card carries `data-question="<request id>:<hash>"`, the hash of the stored question (text, kind, options, limits). It does not change while the question is pending.
+- **One upsert path for live cards:** live updates no longer target cards directly. The server sends each card as `<template data-request-card data-before="<anchor id or empty>">…</template>` and each removal as `<template data-request-delete="<card id>">`, appended to a hidden sink (`#request-updates`). A small component script `requestCards.ts` takes each template after the swap:
+  - no card with that id on the page: insert it before the anchor (or at the end of the list or transcript);
+  - a card with that id: replace it; if the old and the new card are both pending and their forms have the same `data-question`, move the old `<form>` element into the new card first, so checked options, typed text, the open Write or Preview tab and focus stay;
+  - a delete template: remove the card.
+- **Task and chat timeline** (`sse.rs`, `changed_requests`): the first send of a connection becomes an upsert instead of delete plus insert; later sends stay "only changed cards". So a reconnect re-sends every card without losing drafts, and a card decided or closed during the disconnect is still replaced.
+- **Inbox** (`requests.rs`, `events`): today it morphs the whole `#request-list` when anything changed. It changes to the same upserts and deletes: a new card is inserted at its place (newest first), a card that is no longer pending is deleted, a changed card is upserted, an unchanged card is not sent. The empty state is sent when the list becomes empty.
+- **Not kept:** the 422 card of a rejected answer (the form's own `hx-swap="outerHTML"`, not the sink) and a decided or closed card replace the form, as they must.
+- **Without the script** the sink stays hidden and live card updates do nothing until reload; the forms still post.
 
 ### D7: `Preview::TabsPlain`
 
@@ -272,7 +277,7 @@ Decided by Peter (PR #360, Q10): `question-kinds` is implemented first, and this
 
 - [Agents keep sending `suggested_answers`] → The handler returns an error result naming `kind` and `options`; the tool description and the playbook show the new form. Harness prompts in `factory-agent` are checked for the old field (task 3.4).
 - [Two taps instead of one for a single choice] → Accepted for correctability and keyboard use (Q3).
-- [Live update resets a draft in another card] → Unchanged cards are not sent again (D6); tested in a browser (task 6.4).
+- [Live update resets a draft] → The form of an unchanged pending question moves into the re-sent card, also on reconnect (D6); tested in a browser (task 6.4).
 - [Option ids that change between asks] → Merging is by text; the pending question keeps its first options. The description says so.
 - [A long text answer in the message] → Bounded at 4,000 characters, like today.
 - [Merge with `iter3-parent-questions`] → Six overlaps, listed with their merged form in D11.

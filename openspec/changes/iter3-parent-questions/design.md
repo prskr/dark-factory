@@ -104,14 +104,14 @@ The kind line follows `question-kinds`: `single_choice` or `multi_choice` with o
 
 - **`answer_question` handler:**
   1. Loads the request.
-  2. Returns `NotAddressed` unless `addressee_task_id` equals the run's task and `readdressed_at IS NULL`.
+  2. Returns `NotAddressed` early unless `addressee_task_id` equals the run's task and `readdressed_at IS NULL` (a fast path for a clear error; the binding check is step 4).
   3. Builds a `QuestionAnswer` (`question-kinds` D2) by the stored kind: from `selected` and `other` for a choice question (`other` present means Other was chosen; `_other` is not used in the tool), from `text` for a text question. Empty fields of the other kind (`null`, `[]`, `""`) are ignored, as for `ask_question` (`question-kinds` Q8); a non-empty one is rejected with "This answer does not fit the question.".
-  4. Calls `decide` with the run's agent principal, `roles = []` and `Decision::Answer(answer)`; `decide` runs `QuestionSpec::check`, as for a human.
+  4. Calls `decide` with the run's agent principal, `roles = []`, `Decision::Answer(answer)` and `addressee: Some(run's task id)`. After `decide` locks the request row (`FOR UPDATE`), it checks `state = 'pending'` and, when `addressee` is given, `addressee_task_id = addressee AND readdressed_at IS NULL`; otherwise it returns `NotAddressed` and stores nothing. Then it runs `QuestionSpec::check`, as for a human. Readdressing updates the same row (D3), so it either commits before the lock (the check fails) or waits for the decision (the question is no longer pending and the update skips it). A readdressed question can't be answered by the parent that ended. Human callers pass `addressee: None`.
   5. Maps the errors:
      - `AlreadyDecided`: the result names the decider, or the close reason, from the stored row.
      - `InvalidAnswer`: the result names the field and the message of `check` ("Choose one option.").
      - `NotFound`, `NotAddressed`: say so.
-- **`decide`** stays the single path, called with the agent principal. The addressee check lives in the tool handler, since the web routes already allow any board member to answer any question (Q4).
+- **`decide`** stays the single path, called with the agent principal. The addressee check runs under its row lock for agent callers only, since the web routes already allow any board member to answer any question (Q4).
 - **`decision_message`** names every principal: humans by display name, agents as `<task key> (<persona name>)`. The persona name is the principal's `display_name`; the task key is looked up by `task_id`.
 - **Audit:** `request.answer` with the agent principal as actor.
 

@@ -23,7 +23,7 @@ A request from an agent for a decision, of one question kind, addressed to its p
 _Avoid_: Escalation request, query, ask
 
 **Question kind**:
-What answer a question takes: single choice (exactly one option), multiple choice (several options within limits) or text (a free Markdown answer). A choice question may also allow an Other answer in the answerer's own words.
+What answer a question takes: single choice (one option, or Other), multiple choice (several options within limits, Other counting as one) or text (a free Markdown answer). A choice question may also allow an Other answer in the answerer's own words.
 _Avoid_: Question type, answer type
 
 **Option**:
