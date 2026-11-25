@@ -27,6 +27,8 @@ description: Drawing and changing boards in the PenPot file "App Design" through
 | `await storage.applyTokenEach(tokenName, shapes, props = ["fill"])` | Binds one token to the given shapes, skipping bound ones; returns the names still unbound |
 | `storage.trimToOverlay(name, keep, pad = 24)` | Turns a full-screen board into a partial board of the named shapes (dialog, menu, a column, a panel nested in `Main`); list the base first and the overlay last, the order is the stacking; throws if a name is missing |
 | `await storage.centreLabel(shape)` | Centres the text child of an avatar or badge, keeping weight and fill token |
+| `storage.text(characters, { size, weight, mono, colour, name })` | A new text with family, weight variant and size set on its whole range (Inter, or JetBrains Mono with `mono`); defaults 13 / 400 / `#1C1917` |
+| `await storage.comments()` | Open comment threads of the current page: `{ seq, board, comments: ["author: text"] }` |
 
 ## Before the first write
 
@@ -43,8 +45,9 @@ description: Drawing and changing boards in the PenPot file "App Design" through
 4. Work in small calls: one board, or one part of a board, per `execute_code`.
 5. Export each board with `export_shape` (by shape id) and look at it. For the dark preview, `storage.setMode("Dark")`, export, and `storage.setMode("Light")`.
 6. Check every touched page with `storage.overlaps()`.
+7. Read `await storage.comments()` on every touched page and work each thread in. Before removing or re-cutting a board, read its threads first: a thread on a removed board is gone.
 
-Done when every new board is exported in light and dark, no new board overlaps another, the theme is back on `Light`, and every touched page is within the page budget.
+Done when every new board is exported in light and dark, no new board overlaps another, the theme is back on `Light`, every touched page is within the page budget, and every open comment thread is worked in or answered.
 
 ## Binding colours
 
@@ -57,6 +60,15 @@ The web UI is the reference for every colour role. Where the roles live in `crat
 | Buttons (primary, secondary, ghost, danger), icon buttons | `src/components/actions.rs` |
 | Avatars | `src/components/persona_avatar.rs`, `avatar()` in `src/components/shell.rs` |
 | Events table rows, graph edges and nodes | `src/egress/log/rows.rs`, `src/egress/log/graph.rs` |
+
+Token names that differ between `input.css` and PenPot:
+
+| `input.css` / Tailwind | PenPot token |
+|---|---|
+| `accent-text` (links, "Copied", success status) | `color.accent-strong` |
+| `danger` (`text-danger`, error lines) | `color.failed` |
+
+When you draw a new element, take its raw colour from the light value of its PenPot token (`penpot.library.local.tokens.sets`), so the rules bind it.
 
 1. Theme on `Light`: the rules compare raw colours with the light values, and under `Dark` every bound fill reports its dark value. Run `storage.unboundColours(board)` and read `unknown`; its sample paths name the shapes.
 2. For each unknown colour, find the element in the web UI and the token it uses. A colour the UI draws with an existing token goes into `OFF_TOKEN` in `helpers.js`; a value whose token depends on the element gets a role rule in `storage.colourToken`. A colour the UI lacks becomes a new token in both sets. Add a case to `helpers.test.js` (`node --test .agents/skills/penpot/helpers.test.js`; pre-commit runs it), then reinstall the helpers by passing the whole file: a partial reinstall drifts from it.
@@ -90,6 +102,8 @@ For a page far over the page budget, with outdated boards or explicit dark board
 | A board's own fill stays unbound | `penpotUtils.findShapes(pred, board)` skips `board` itself | Check `[board, ...findShapes(...)]`, as `storage.unboundColours` does. |
 | `board.removeFlexLayout is not a function` | The flex layout is removed through its object | `board.flex.remove()`. |
 | A child doesn't move in a flex layout, or an inserted component lands in the wrong place | In flex layouts the `children` array is the visual order; `insertChild(i)` didn't reorder, and `setParentIndex` counts from the end of the child list | Call `appendChild` for each child in visual order, or assign `setParentIndex(length - 1 - position)`. |
+| A new text renders in the default family or weight although `fontFamily`/`fontWeight` are set on the shape | The font needs its variant (`fontVariantId`) on the text range | `storage.text(...)`. |
+| A `fill` child stays at its old width after `appendChild` or after a clone moved into a narrower parent; inputs overflow | The sizing was set before the parent had its width, and isn't recomputed | After moving, set `horizontalSizing = "fix"`, `resize` to the target width, then `"fill"` again; check the widths in the result. |
 | A text loses its font after a range edit | `getRange(...).fontWeight = …` can reset the family | Set `fontFamily` and `fontId` on the full range afterwards; compare with a sibling text. |
 | Initials or a badge label sit off-centre | An auto-width text box centred by flex leaves the glyphs off-centre | `storage.centreLabel`. |
 | `export_shape` fails with "Cannot read properties of null" | It takes a shape id; `selection` needs a selected shape | Pass the id returned by your script. |

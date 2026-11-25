@@ -129,6 +129,8 @@ storage.colourToken = (shape, hex, prop, opacity) => {
   if (shape.type === "text" && hex === "#292524") return "color.text"; // prose, not the rail
   if (shape.type === "text" && hex === "#A8A29E") return "color.faint"; // placeholders, keys
   if (shape.type === "text" && hex === "#44403C") return inStatus ? "color.status.queued.fg" : "color.muted"; // labels: `text-muted`
+  // Icon glyphs of icon-only buttons: `ICON_BUTTON_CLASS` is `text-muted`.
+  if (prop === "strokeColor" && hex === "#44403C" && (/^icon/i.test(shape.name) || hasAncestor(shape, /^icon/i))) return "color.muted";
   const candidates = penpot.library.local.tokens.sets
     .find((s) => s.name === "light")
     .tokens.filter((t) => t.type === "color" && t.value.toUpperCase() === hex)
@@ -306,7 +308,36 @@ storage.centreLabel = async (shape) => {
   return [];
 };
 
+// A new text with font, weight and size set on the whole range: setting them on the shape alone
+// renders the default family and weight. `weight` picks the font variant (400 is "regular").
+storage.text = (characters, { size = 13, weight = 400, mono = false, colour = "#1C1917", name = characters.slice(0, 24) } = {}) => {
+  const t = penpot.createText(characters);
+  const range = t.getRange(0, characters.length);
+  range.fontFamily = mono ? "JetBrains Mono" : "Inter";
+  range.fontId = mono ? "gfont-jetbrains-mono" : "gfont-inter";
+  range.fontVariantId = weight === 400 ? "regular" : String(weight);
+  range.fontWeight = String(weight);
+  range.fontSize = String(size);
+  t.fills = [{ fillColor: colour, fillOpacity: 1 }];
+  t.name = name;
+  return t;
+};
+
+// Open comment threads of the current page: sequence number, board name (null when loose) and
+// each comment as "author: text". Read them before every approval and before removing a board.
+storage.comments = async () => {
+  const threads = await penpot.currentPage.findCommentThreads({ onlyYours: false, showResolved: false });
+  return Promise.all(
+    threads.map(async (t) => ({
+      seq: t.seqNumber,
+      board: t.board?.name ?? null,
+      comments: (await t.findComments()).map((c) => `${c.user?.name}: ${c.content}`),
+    })),
+  );
+};
+
 return [
   "tree", "board", "pageBudget", "overlaps", "setMode", "applyTokenEach", "colourToken",
   "unboundColours", "bindColours", "bindPage", "checkPages", "suspectBindings", "trimToOverlay", "centreLabel",
+  "text", "comments",
 ].filter((n) => typeof storage[n] === "function");

@@ -35,7 +35,7 @@ Load skill `penpot` and measure each target page ("Before the first write", step
 
 ## 3. Design
 
-Follow skill `penpot` for every board: clone, change, bind tokens, export light and dark, check overlaps. Show each finished group of boards (the exported images plus a short list of what changed) and ask with `AskUserQuestion`: "Approve" / "Change it (say what)" / "Stop". Iterate until approved. Don't go on without approval. After each approved group, add its rows to `design-boards.md` with status `partial (<date>)` (format in step 4) and commit it as `wip(<name>): design (partial)`, so a stop keeps the approved boards and leaves a clean tree.
+Follow skill `penpot` for every board: clone, change, bind tokens, export light and dark, check overlaps. Before each approval question, read the open comment threads of every touched page (`storage.comments()`), work each one in, and list in the question how you handled it. Show each finished group of boards (the exported images plus a short list of what changed) and ask with `AskUserQuestion`: "Approve" / "Change it (say what)" / "Stop". Iterate until approved. Don't go on without approval. After each approved group, add its rows to `design-boards.md` with status `partial (<date>)` (format in step 4) and commit it as `wip(<name>): design (partial)`, so a stop keeps the approved boards and leaves a clean tree.
 
 If a board shows that `design.md` or a spec is wrong beyond its labels (a missing state, a different flow), suggest `/openspec-update-change` with the finding and stop.
 
