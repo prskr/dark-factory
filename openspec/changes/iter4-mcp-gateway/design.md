@@ -38,7 +38,7 @@ This slice forwards every tool of an enabled server, with the upstream's current
 - Every write tool is available, without push checks or approvals. The credential's scope is the real permission (Security).
 - When the catalog arrives, tool definitions move from the gateway's live `tools/list` to the snapshot. The aggregation of live lists (D5) then becomes the discovery source; the per-run list path is replaced. That rework is small.
 
-**Amendment of ADR-0032.** ADR-0032 has every enabled tool available to granted personas, and projects can *restrict further* (default allow). This change makes projects **opt in** per server (default deny). The reason is the shared credential: enabling a server for a project gives that project's agents everything the credential reaches. With persona grants later, a run's tools become servers enabled for the project ∩ catalog filters ∩ persona grants. Task 7.2 records this in ADR-0032.
+**Amendments of ADR-0032 and iteration 4 decision 2.** Until `iter4-mcp-catalog`, this slice suspends "upstream updates can't silently grant new capabilities" (ADR-0032) and "tools added upstream are disabled by default" (decision 2): all tools are forwarded unreviewed. Demo step 3 of iteration 4 ("enables a subset", "shows up disabled and flagged") holds only after the catalog. Task 7.2 records this in ADR-0032; `iteration-4.md` notes it at decision 2 and demo step 3. ADR-0032 also has every enabled tool available to granted personas, and projects can *restrict further* (default allow). This change makes projects **opt in** per server (default deny). The reason is the shared credential: enabling a server for a project gives that project's agents everything the credential reaches. With persona grants later, a run's tools become servers enabled for the project ∩ catalog filters ∩ persona grants. Task 7.2 records this in ADR-0032.
 
 Alternatives: permissions and catalog first (the original plan): larger first change, nothing usable until three changes are done. Pinned review in the first slice (the first version of this proposal): about a third more work (fetch page, selection, change marks, race handling, size caps in the snapshot) before the first call works; moved to `iter4-mcp-catalog`.
 
@@ -59,7 +59,7 @@ The gateway sits in a privileged place: its network policy limits only ingress, 
 That attack needs a name the board member did not choose to resolve somewhere unexpected. For a server the board member registers on a private address on purpose, it does not apply. So the check is a per-server switch:
 
 - **"Private network" off (default):** the gateway resolves the host with `SystemResolver`, refuses the connection if `BlockedRanges` covers **any** resolved address (as `proxy.rs`), and connects to a checked address with the original host for SNI.
-- **"Private network" on:** no address check; the gateway connects to whatever the name resolves to. For internal servers, and later for stdio → HTTP bridges in the cluster.
+- **"Private network" on:** no address check; the gateway connects to whatever the name resolves to. For internal servers, and later for stdio → HTTP bridges in the cluster. Use it only for names in DNS you control: it also turns off the rebinding protection, and with it on, the server's name may point at `localhost` or the gateway's own ports. The security page says so.
 - **Both:** redirects are never followed (a 3xx could lead anywhere), `http` only with `network.allowPlainHttp`, no `http-host` allowlist entry needed (registering is the allow decision, as for model providers).
 
 Credential injection does not depend on the switch.
@@ -76,7 +76,13 @@ Both run on what the gateway already has: the hyper server of the Git port and `
 
 ### D5: Aggregated tool list
 
-On `tools/list` the gateway asks each enabled server for `tools/list` (all pages; 30 s, 1,000 tools, 4 MiB per server) in parallel, keeps only `title`, `description`, `inputSchema`, `outputSchema`, `annotations`, prefixes names with `<server>__`, leaves out invalid or too long names, and returns one page. A server that fails is left out and logged, so one broken server does not hide the others. No caching: harnesses list once per session, and a fresh list per session keeps the "current tools" behavior simple to reason about.
+On `tools/list` the gateway asks each enabled server for `tools/list` (all pages; 1,000 tools and 4 MiB per server) in parallel, keeps only `title`, `description`, `inputSchema`, `outputSchema`, `annotations`, prefixes names with `<server>__`, leaves out invalid or too long names and later duplicates, and returns one page.
+
+- **Failures:** a failing server is retried once; if it fails again or exceeds a limit, it is left out, so one broken server does not hide the others. Each server left out produces a record with tool `tools/list` in the run view. Consequence: the harness usually lists once per session and `listChanged` is false, so a server missing at session start stays missing for that session (for a chat kept alive, up to its keep-alive). The run view shows why.
+- **Deadline:** 15 s per upstream list, 20 s for the whole answer, so the harness's own MCP list timeout is not hit first. Spike 1.2 records the harnesses' timeouts and how often they call `tools/list`; the values are adjusted there if needed.
+- **Cache:** the aggregated list of a run is reused for 60 s per gateway pod. If a harness lists per turn, or any process in the sandbox calls `tools/list` in a loop, the upstreams still see at most one list per minute, run and pod.
+
+`tools/call` checks only that the prefix names a server enabled for the run (removals apply at once), then forwards the rest of the name. Whether the tool exists is the upstream's answer. The per-tool check comes with the catalog's filters.
 
 `tools/call` checks only that the prefix names a server enabled for the run (removals apply at once), then forwards the rest of the name. Whether the tool exists is the upstream's answer. The per-tool check comes with the catalog's filters.
 
@@ -157,7 +163,7 @@ Credential values reuse `Snapshot.provider_credentials` (keyed by credential ref
 ACP requires every agent to support stdio MCP servers; HTTP MCP is optional (`mcpCapabilities.http`). Registering the gateway as an HTTP server would depend on each harness (Claude adapter, OpenCode, later "Generic ACP" agents) and on its CA and proxy handling. So the runtime registers a second stdio server:
 
 - `session/new` and `session/load` list `factory` (as today) and `ext`: `/opt/factory/factory-agent mcp-relay --url <mcp_endpoint> --ca <INSTANCE_CA_PATH>`.
-- `mcp-relay` is a transport bridge, not an MCP server: each JSON-RPC line from stdin becomes a `POST` to the endpoint (with `Mcp-Session-Id` and `MCP-Protocol-Version` once known), each answer goes to stdout unchanged. It parses only what the transport needs (the session header, the request id for an error answer when the gateway is unreachable). It connects directly (ignores `HTTPS_PROXY`), trusts only the instance CA, sends no credential and opens no listener. It needs no MCP library.
+- `mcp-relay` is a transport bridge, not an MCP server: each JSON-RPC line from stdin becomes a `POST` to the endpoint (with `Mcp-Session-Id` and `MCP-Protocol-Version` once known), each answer is re-serialized as one compact JSON line on stdout. It parses only what the transport needs: the session header, and the request id to answer with a JSON-RPC error when the gateway is unreachable or answers with an HTTP error status. Accepted notifications (202) write nothing. Requests run concurrently, one writer task serializes stdout. It exits on stdin EOF and refuses to start without a readable CA. It connects directly (ignores `HTTPS_PROXY`), trusts only the instance CA, sends no credential and opens no listener. It needs no MCP library.
 - A separate server, not tools mixed into `factory`: the transcript keeps telling factory tools (`mcp__factory__*`) and third-party tools apart; factory calls keep their gRPC path with retries on reconnect; third-party calls go only to the gateway, so the control plane stays out of that data path (ADR-0032, alternatives).
 - The relay talks to the gateway itself instead of through the runtime's Unix socket: the identity is the pod IP either way, and a hop through the runtime would add code without a gain.
 
@@ -167,7 +173,7 @@ Alternative: HTTP MCP server entry in `session/new` (the first version of this p
 
 ### D9: Call records
 
-The gateway reuses the usage reporter's pattern (bounded queue of 10,000, batches of 100, flush every 2 s, back-off retries, oldest dropped and counted in `df.gateway.mcp.calls_dropped`). `df-gateway-control` stores them in `mcp_calls`; records of unknown runs are dropped and counted, as for usage. The run view gets a "Tool calls (MCP)" section. Arguments and results are not stored: the transcript has them as harness tool calls, truncated at 64 KiB like every tool call.
+The gateway reuses the usage reporter's pattern (bounded queue of 10,000, batches of 100, flush every 2 s, back-off retries, oldest dropped and counted in `df.gateway.mcp.calls_dropped`). A server left out of a `tools/list` gives a record with tool `tools/list`, so missing tools are visible in the run view, not only in the gateway log. `df-gateway-control` stores them in `mcp_calls`; records of unknown runs are dropped and counted, as for usage. The run view gets a "Tool calls (MCP)" section. Arguments and results are not stored: the transcript has them as harness tool calls, truncated at 64 KiB like every tool call.
 
 ### D10: UI and authorization
 
@@ -179,12 +185,13 @@ The gateway reuses the usage reporter's pattern (bounded queue of 10,000, batche
 ## Security
 
 - **Untrusted descriptions and results.** In this slice, tool descriptions come live from the upstream and reach the model unreviewed (tool poisoning), and results pass unchanged (prompt injection). The gateway limits what an upstream can do beyond text: no sampling, elicitation or roots, size and time limits, only five tool fields served. Review and pinning of descriptions come with `iter4-mcp-catalog`. Until then: register only servers whose operator you trust.
-- **Write tools bypass the factory's controls.** A write tool acts directly on the upstream system. For a forge server (forgejo-mcp) that means commits, merges, file changes and issues **without** the Git proxy's push checks, secret rules and task-branch rules, and without the `create-issue` approval of `chat-issue-tools`; in chats, too, nothing asks a human. Any tool argument also leaves to the upstream, read-only tools included. **Rule for this slice** (docs and form warning): the credential's scope is the permission. Use read-only tokens where possible; register no forge server with a write-capable token until filters and "ask" exist. Do not enable a server that reads private data together with one that writes to a public place in the same project: an injected result can drive the other server's tools.
+- **Write tools bypass the factory's controls.** A write tool acts directly on the upstream system. For a forge server (forgejo-mcp) that means commits, merges, file changes and issues **without** the Git proxy's push checks, secret rules and task-branch rules, and without the `create-issue` approval of `chat-issue-tools`; in chats, too, nothing asks a human. Any tool argument also leaves to the upstream, read-only tools included. **Rule for this slice** (docs and form warning): the credential's scope is the permission. Use read-only tokens where possible; register no forge server with a write-capable token until filters and "ask" exist. One technical guard: an MCP server cannot use a credential reference that a project uses as its forge credential or a model provider uses (and the other way round), so the factory's own forge token cannot be selected by mistake. A separate write-capable token remains possible; the warning covers it. Do not enable a server that reads private data together with one that writes to a public place in the same project: an injected result can drive the other server's tools.
 - **Credentials.** In the control plane and in gateway memory only. The gateway builds upstream requests itself and forwards no sandbox header. Nothing from upstream response headers goes back. The relay carries no credential.
 - **One credential per server per instance.** The upstream sees all projects' calls under one identity. Any project that enables a server reaches everything the credential reaches, and the upstream's audit log cannot tell projects apart. One run can use up the credential's rate limit for all projects. Per-project credentials and rate limits: backlog.
 - **Any process in the sandbox** can call `/mcp`, as with `/inference`: the trust boundary is the sandbox, not the harness.
 - **SSRF.** D3: public servers checked, private ones by explicit switch, no redirects.
-- **Limits.** 1 MiB request, 4 MiB result, 1,000 tools and 4 MiB per upstream list, 10 s connect, 30 s list, 120 s call, 8 concurrent calls per run and gateway pod.
+- **Limits.** 1 MiB request, 4 MiB result, 1,000 tools and 4 MiB per upstream list, 10 s connect, 15 s per upstream list and 20 s per `tools/list`, list cache 60 s, 120 s call, 8 concurrent calls per run and gateway pod.
+- **Client capabilities** the harness sends in `initialize` are ignored; the gateway never sends requests to the harness.
 - **Permission prompts.** The runtime auto-approves ACP permission requests, so harnesses run `ext` tools without asking, as all tools today.
 
 ## Risks / Trade-offs
@@ -192,7 +199,8 @@ The gateway reuses the usage reporter's pattern (bounded queue of 10,000, batche
 - [Upstream servers use protocol versions or SSE behaviors the thin client does not handle] → spike 1.1 against Context7 and the fake MCP server; tests cover JSON and SSE answers.
 - [Large tool sets fill the model context] → per-server limit of 1,000 tools; filters with the catalog; `search_tools` / `load_server` in the backlog.
 - [A harness ignores `ext` because a repository configuration defines a server with that name] → the same situation as `factory` today; spike 1.2 checks both harnesses.
-- [A harness's tool list call takes long because an upstream is slow] → 30 s per upstream list, in parallel; a slow server is left out.
+- [A harness's tool list call takes long because an upstream is slow] → 15 s per upstream list, in parallel, 20 s overall; a slow server is left out with a record in the run view.
+- [A server missing at session start stays missing for the session] → one retry, a `tools/list` record in the run view; a new run lists again.
 - [Gateway on the path of every MCP call] → same as inference (ADR-0050); a gateway outage already stops agents.
 
 ## Migration Plan
@@ -206,7 +214,7 @@ Taken on 2026-11-25 (Peter Kurfer): gateway first with all tools forwarded (D1);
 | # | Question | Recommendation |
 |---|---|---|
 | Q1 | Enable servers per project or per persona, opt-in or opt-out? | Per project, opt-in (D1, amends ADR-0032). A server is an external system with its own data; which projects may reach it is the blast-radius decision, and it matches the egress rules. Persona grants later intersect with it. |
-| Q2 | Write tools until the catalog? | No technical block; the form warning and the documented rule (read-only tokens, no forge write tokens). |
+| Q2 | Write tools until the catalog? | No block of write tools; the form warning, the documented rule (read-only tokens, no forge write tokens), and the guard that the factory's own forge and model credentials cannot be used for MCP servers. |
 | Q3 | Store call arguments or results? | No. Size and outcome only; the transcript has the payloads. |
 | Q4 | Who registers servers? | Board members now; `admin` (`credential:manage`) after `iter4-permissions`. |
 | Q5 | One credential per server per instance? | Yes, with the consequences documented. Per-project credentials and rate limits to the backlog. |
