@@ -1,6 +1,6 @@
 # ADR-0043: Delegation chain, chats as tasks and waiting on subtasks
 
-- **Status:** Accepted (planned for iteration 3, amended by ADR-0052 and ADR-0053)
+- **Status:** Accepted (planned for iteration 3, amended by ADR-0052 and ADR-0053; amended by change `question-kinds` (#334): chats can also ask questions, which go to humans)
 - **Date:** 2026-10-27
 - **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0016](0016-runs-and-triggers.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0034](0034-task-hierarchy-subtask-branches-and-merging.md), [ADR-0036](0036-code-review-stays-in-the-forge.md), [ADR-0038](0038-agent-questions-and-approval-requests.md), [ADR-0052](0052-dependencies-gate-the-first-start.md), [ADR-0053](0053-parallel-chats-topics-and-archiving.md)
 

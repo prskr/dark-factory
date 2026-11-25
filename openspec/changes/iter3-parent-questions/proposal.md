@@ -19,7 +19,7 @@ A question can only go to a human (iteration-2 decision 8). With delegation (`it
   - Takes `request_id` and the structured answer of `question-kinds`: `selected` option ids and `other` for a choice question, `text` for a text question. The answer is checked by the same rules as a human's; an invalid one is a tool error that names the field.
   - Only the run of the addressed parent may answer, and only while the question is pending. Otherwise the call is a tool error ("already answered by …", "closed: task completed", "not addressed to this task").
   - The answer is recorded with the parent's agent principal and delivered to the child with the existing `request.decided` message.
-  - Chat runs still get no `ask_question`; a chat agent asks its human in the conversation.
+  - Chat runs also have `ask_question` (`question-kinds`); a chat has no parent task, so its questions go to humans.
 - **Humans**:
   - A board member can answer any pending question from the asking task's page, including one addressed to a parent. The first answer wins.
   - The inbox and the navigation count list only questions addressed to humans. A readdressed question shows that its parent ended.
@@ -35,7 +35,6 @@ A question can only go to a human (iteration-2 decision 8). With delegation (`it
 - Agents deciding approval requests: iteration 6 (`roadmap.md`).
 - A forward tool or a link between relayed questions: rejected (ADR-0043).
 - Removing a stale `question.asked` message after the question was readdressed or answered: rejected. `answer_question` reports the state.
-- `ask_question` in chats: rejected. The human is in the conversation.
 - Questions to siblings or children: rejected. Parents use `send_message` (`iter3-task-dependencies`); siblings use the forge (ADR-0036).
 - Counting questions addressed to a chat in its "needs you" marker: rejected. "Needs you" stays based on the chat's own approval requests (`iter3-chats`).
 

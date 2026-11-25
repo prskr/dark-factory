@@ -117,7 +117,7 @@ The kind line follows `question-kinds`: `single_choice` or `multi_choice` with o
 
 ### D6: Chats
 
-`answer_question` is added to `CHAT_TOOLS`. `ask_question` stays excluded.
+`answer_question` is added to `CHAT_TOOLS`. `ask_question` is there already (`question-kinds` D9); a chat has no parent task, so its `to` defaults to `human` and `to: parent` is an error.
 
 `answer_question` goes into `contract/mcp/factory-tools.v2.json` (tool set v2 allows additions), next to `ask_question`'s new `to` property (`enum: ["parent","human"]`, optional). Its input: `request_id` (required), `selected` (array of option ids, at most 10), `other` (string, at most 1,000 characters) and `text` (string, at most 4,000 characters), all optional in the schema; which ones apply depends on the question's kind and is checked by `QuestionSpec::check`.
 

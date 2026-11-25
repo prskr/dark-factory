@@ -65,8 +65,8 @@
 - **THEN** the result has `is_error: true` and says the question was closed with reason `task-completed`
 
 ### Requirement: answer_question offered to chat runs
-Chat runs SHALL be offered `answer_question` next to their other tools, and SHALL still not be offered `ask_question`.
+Chat runs SHALL be offered `answer_question` next to their other tools, `ask_question` included.
 
 #### Scenario: Chat answers a subtask
 - **WHEN** a chat run connects
-- **THEN** `Assign.tools` contains `answer_question` and not `ask_question`
+- **THEN** `Assign.tools` contains `answer_question` and `ask_question`
