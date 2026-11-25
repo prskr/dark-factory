@@ -27,7 +27,7 @@ Deciding SHALL require a human with `approval:decide` (iteration 2: the `board-m
 - **THEN** the question is `answered` with that text and the deciding user
 
 ### Requirement: Decisions are delivered as messages
-Every decision SHALL queue one message on the task, authored by the system principal with reason `request.decided`, stating the request, the outcome, the scope or answer and the comment, in the same transaction as the decision. For a question it SHALL also hold the structured answer as one JSON block. The message's content SHALL be marked hidden: the agent receives it, and the request card shows the decision to humans.
+Every decision SHALL queue one message on the task, authored by the system principal with reason `request.decided`, stating the request, the outcome, the scope or answer and the comment, in the same transaction as the decision. For a question it SHALL hold the structured answer as one JSON block before the readable answer. The message's content SHALL be marked hidden: the agent receives it, and the request card shows the decision to humans.
 
 #### Scenario: Answer reaches a waiting task
 - **WHEN** a question of task `DF-7` (status `blocked`) is answered
@@ -46,8 +46,8 @@ Every decision SHALL queue one message on the task, authored by the system princ
 - **THEN** the message holds a JSON block with the request id, kind `multi_choice`, the options `api` and `ui` with their labels, and `other` "also the CLI"
 
 #### Scenario: Structured text answer
-- **WHEN** a board member answers a text question
-- **THEN** the message holds the text and a JSON block with the request id, kind `text` and the text
+- **WHEN** a board member answers a text question with a text that holds a fenced `json` block
+- **THEN** the message starts with a JSON block with the request id, kind `text` and the text, and the readable text follows it
 
 ## ADDED Requirements
 
@@ -86,25 +86,37 @@ An answer SHALL be rejected, naming the field, and nothing stored when it does n
 
 #### Scenario: Unknown option
 - **WHEN** an answer names an option id the question does not have
-- **THEN** it is rejected and the question stays `pending`
+- **THEN** it is rejected with "Choose from the listed options." and the question stays `pending`
+
+#### Scenario: Below the default minimum
+- **WHEN** a multiple-choice question without limits is answered with nothing chosen
+- **THEN** it is rejected with "Choose at least one option." and the question stays `pending`
+
+#### Scenario: Exact count
+- **WHEN** a multiple-choice question with `min_selected: 2` and `max_selected: 2` is answered with one option
+- **THEN** it is rejected with "Choose exactly 2 options." and the question stays `pending`
 
 #### Scenario: Empty text
 - **WHEN** a text question is answered with only spaces
 - **THEN** it is rejected with "Write an answer." and the question stays `pending`
 
 ### Requirement: Other answer
-When a choice question allows Other, its answer MAY carry an Other text of 1 to 1,000 characters. In a single-choice answer Other SHALL replace the option; in a multiple-choice answer it SHALL count as one choice.
+When a choice question allows Other, Other SHALL be a choice of its own that carries a text of 1 to 1,000 characters. In a single-choice answer Other SHALL replace the option; in a multiple-choice answer it SHALL count as one choice. An Other text without Other chosen SHALL be ignored.
 
 #### Scenario: Other on a single choice
 - **WHEN** a board member answers a single-choice question with Other "Neither, use 15"
 - **THEN** the question is `answered` with no option and Other "Neither, use 15"
 
+#### Scenario: Other chosen without text
+- **WHEN** an answer chooses Other with an empty text
+- **THEN** it is rejected with "Write your Other answer." and the question stays `pending`
+
 #### Scenario: Other not allowed
-- **WHEN** an answer carries Other on a question with `allow_other: false`
-- **THEN** it is rejected and the question stays `pending`
+- **WHEN** an answer chooses Other on a question with `allow_other: false`
+- **THEN** it is rejected with "This question has no Other answer." and the question stays `pending`
 
 ### Requirement: Stored questions migrated
-Questions stored before question kinds SHALL be readable after the upgrade: a question with suggested answers SHALL become a single-choice question with those answers as options and Other allowed; one without SHALL become a text question. Their answers SHALL become the matching option, Other, or the text.
+Questions stored before question kinds SHALL be readable after the upgrade: a question with suggested answers SHALL become a single-choice question with those answers as options and Other allowed; one without SHALL become a text question. Their answers SHALL become the first option with the same label, else Other, or the text. A migrated pending question SHALL be answerable like a new one.
 
 #### Scenario: Answered question with a suggested answer
 - **WHEN** an instance with a question answered "17" from the suggested answers "16" and "17" is upgraded
@@ -113,3 +125,11 @@ Questions stored before question kinds SHALL be readable after the upgrade: a qu
 #### Scenario: Free answer to a question with suggested answers
 - **WHEN** an instance with a question answered "15" from the suggested answers "16" and "17" is upgraded
 - **THEN** the question is answered with Other "15"
+
+#### Scenario: Answered question without suggested answers
+- **WHEN** an instance with a question answered "Yes, update the docs" without suggested answers is upgraded
+- **THEN** the question is a text question answered with "Yes, update the docs"
+
+#### Scenario: Pending question answered after the upgrade
+- **WHEN** a question with the suggested answers "16" and "17" is pending during the upgrade and a board member then chooses "16"
+- **THEN** the question is `answered` with the option labelled "16" and the agent receives its id in the JSON block

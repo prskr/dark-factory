@@ -36,6 +36,24 @@ An `ask_question` call whose arguments break the question rules of `agent-reques
 - **WHEN** the agent calls `ask_question` with kind `multi_choice`, three options, `allow_other: false` and `min_selected: 4`
 - **THEN** the result has `is_error: true` and names `min_selected`
 
+#### Scenario: Limits on a single choice
+- **WHEN** the agent calls `ask_question` with kind `single_choice`, two options and `max_selected: 2`
+- **THEN** the result has `is_error: true` and names `max_selected`
+
+### Requirement: ask_question ignores neutral arguments of another kind
+An argument that does not apply to the kind SHALL be ignored when it is neutral (`null`, an empty `options` list, `allow_other: false`) and SHALL produce an error result otherwise.
+
+#### Scenario: Text question with empty options
+- **WHEN** the agent calls `ask_question` with kind `text`, `options: []`, `allow_other: false` and `min_selected: null`
+- **THEN** a pending text question exists
+
+### Requirement: ask_question reports a merged question
+When an identical pending question is returned instead of a new one, the result SHALL say so (`merged: true`) and that its kind and options are unchanged.
+
+#### Scenario: Same text with other options
+- **WHEN** the agent asks "Which version?" as a single choice with options `a` and `b` while the same text is pending as a text question
+- **THEN** the result has the pending question's id, `merged: true`, and the question stays a text question
+
 ### Requirement: ask_question describes the answer
 The description of `ask_question` SHALL say when to use each kind, that option ids come back in the answer, and that the answer arrives as a message with a JSON block holding the structured answer.
 
