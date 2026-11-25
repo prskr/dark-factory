@@ -1,15 +1,27 @@
 ## MODIFIED Requirements
 
 ### Requirement: ask_question
-`ask_question` SHALL raise a question on the run's task with `text`, optional `suggested_answers` (at most 5), `blocking` (default false) and `to` (`parent` or `human`; default `parent` when the task has a parent task, otherwise `human`), and return the request id, state and addressee. `to: parent` on a task without a parent SHALL produce an error result. A blocking call SHALL return a result with `await_input_after_turn: true`.
+`ask_question` SHALL raise a question on the run's task with `text`, a required `kind` and its arguments (see `agent-requests`), `blocking` (default true) and `to` (`parent` or `human`; default `parent` when the task has a parent, else `human`), and return the request id, state and addressee. It SHALL NOT accept `suggested_answers`. `to: parent` without a parent SHALL produce an error result. A blocking call SHALL return `await_input_after_turn: true`.
 
 #### Scenario: Non-blocking question
-- **WHEN** the agent calls `ask_question` with text "Should I also update the docs?" and `blocking: false`
+- **WHEN** the agent calls `ask_question` with text "Should I also update the docs?", kind `text` and `blocking: false`
 - **THEN** the result contains the request id and state `pending`, and the run continues
 
 #### Scenario: Blocking question
-- **WHEN** the agent calls `ask_question` with `blocking: true`
+- **WHEN** the agent calls `ask_question` with kind `text` and `blocking: true`
 - **THEN** the result has `await_input_after_turn: true`
+
+#### Scenario: Blocking by default
+- **WHEN** the agent calls `ask_question` with kind `text` and without `blocking`
+- **THEN** the result has `await_input_after_turn: true`
+
+#### Scenario: Single-choice question
+- **WHEN** the agent calls `ask_question` with kind `single_choice` and options `pg16` "PostgreSQL 16" and `pg17` "PostgreSQL 17"
+- **THEN** a pending single-choice question with both options and "Other" allowed exists
+
+#### Scenario: Old argument
+- **WHEN** the agent calls `ask_question` with `suggested_answers` and without `kind`
+- **THEN** the result has `is_error: true`, names `kind` and `options`, and no question is stored
 
 #### Scenario: Default addressee of a subtask
 - **WHEN** the agent of `DF-21` (parent `DF-20`) calls `ask_question` without `to`
@@ -26,15 +38,18 @@
 #### Scenario: Parent has ended
 - **WHEN** the agent of `DF-21` calls `ask_question` without `to` while `DF-20` is Done
 - **THEN** the result says the parent has ended and names humans as the addressee
-
 ## ADDED Requirements
 
 ### Requirement: answer_question
-`answer_question` SHALL answer a pending question addressed to the run's task with `request_id` and `answer` (1 to 4,000 characters), and return the request id and state `answered`. A question that doesn't exist, isn't addressed to the run's task or isn't pending SHALL produce an error result that says why (not addressed to this task, already answered by whom, closed with its reason) and change nothing.
+`answer_question` SHALL answer a pending question addressed to the run's task with `request_id` and the structured answer of its kind (`selected` and `other`, or `text`), and return the request id and state `answered`. A question that doesn't exist, isn't addressed to the run's task or isn't pending, and an answer that doesn't fit the question, SHALL produce an error result that says why and change nothing.
 
 #### Scenario: Parent answers its subtask
-- **WHEN** the agent of `DF-20` calls `answer_question` with the id of `DF-21`'s pending question and answer "yes"
-- **THEN** the result has state `answered` and `DF-21` receives the answer as a message
+- **WHEN** the agent of `DF-20` calls `answer_question` with the id of `DF-21`'s pending single-choice question and `selected: ["yes"]`
+- **THEN** the result has state `answered` and `DF-21` receives the answer as a message with the option `yes` in its JSON block
+
+#### Scenario: Answer does not fit
+- **WHEN** the agent of `DF-20` calls `answer_question` with `text` for a single-choice question
+- **THEN** the result has `is_error: true`, names `selected`, and the question stays `pending`
 
 #### Scenario: Already answered by a human
 - **WHEN** the agent of `DF-20` calls `answer_question` for a question a board member answered

@@ -3,6 +3,7 @@
 Prerequisites:
 - `iter3-task-dependencies` is merged (`parent_id`, the task transitions `transition` / `apply_task_event`, the child-ended message format).
 - `iter3-chats` is merged (`CHAT_TOOLS`, the `Archived` event, the chat page link).
+- `question-kinds` is merged and archived first (question kinds, `QuestionAnswer` and `QuestionSpec::check`, the JSON block of the decision message, `blocking` default true, the question card). The `ask_question` and "Decisions" blocks here are written on top of it.
 
 Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS.md`.
 
@@ -14,7 +15,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 
 ## 2. Raising and readdressing
 
-- [ ] 2.1 Write failing `df-db` tests, then add `Addressee` to `raise_question` with the parent resolution and the `question.asked` message of design D2 and D4. Verify with `cargo test -p df-db raise_question`. The tests cover the spec `agent-requests` scenarios of "Question addressee" and "Question delivered to the parent", plus:
+- [ ] 2.1 Write failing `df-db` tests, then add `Addressee` to `raise_question` with the parent resolution and the `question.asked` message of design D2 and D4. The message names the kind, the options and the limits (design D4). Verify with `cargo test -p df-db raise_question`. The tests cover the spec `agent-requests` scenarios of "Question addressee" and "Question delivered to the parent", plus:
   - no parent gives `NoParent`;
   - a merged duplicate returns the existing addressee and queues no second message.
 - [ ] 2.2 Write failing tests, then add the `ReaddressQuestions` effect to `transition` (emitted when the resulting status becomes `completed`, `cancelled` or `failed`, and by `Archived`) and execute it with `readdress_to_humans_tx` in `apply_task_event` (design D3). Verify with `cargo test -p df-core task_transition` and `cargo test -p df-db readdress`. The tests cover:
@@ -29,7 +30,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 
 - [ ] 3.1 Write failing tests, then make `decision_message` name agent deciders as `<key> (<persona>)` (design D5). Verify with `cargo test -p df-db decision_message`, covering the scenario "Parent answers" (message text).
 - [ ] 3.2 Write failing `df-agent-channel` tests, then add `to` to `ask_question` and the new `answer_question` (contract `factory-tools.v2.json`, handlers per design D2 and D5). Verify with `cargo test -p df-agent-channel ask_question answer_question`. The tests cover:
-  - the spec `factory-tools` scenarios of "ask_question" and "answer_question";
+  - the spec `factory-tools` scenarios of "ask_question" and "answer_question", including an answer that doesn't fit the kind (the `InvalidAnswer` message of `check`);
   - the `agent-requests` scenarios "Sibling tries to answer", "Readdressed question" and "Human answers a question addressed to the parent".
 - [ ] 3.3 Write a failing test, then add `answer_question` to `CHAT_TOOLS` (design D6). Verify with the scenario "Chat answers a subtask", via `cargo test -p df-agent-channel chat_tools`.
 - [ ] 3.4 Update `product/agent-playbook.md` (when to ask the parent, how to relay, answering subtasks) and the tool descriptions in `factory-tools.v2.json`. Verify that the playbook examples use `to` and `answer_question` as specified.

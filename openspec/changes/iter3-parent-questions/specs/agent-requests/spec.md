@@ -20,11 +20,11 @@ A question SHALL be addressed either to the agent of the asking task's parent ta
 - **THEN** the question is addressed to humans
 
 ### Requirement: Question delivered to the parent
-Raising a new question addressed to a parent SHALL queue one message on the parent, in the same transaction, authored by the system principal with reason `question.asked`. It SHALL name the asking task's key and title, the request id, the suggested answers and whether the asking agent waits, and quote the question text as the asking agent's words. A merged duplicate SHALL NOT queue another message.
+Raising a new question addressed to a parent SHALL queue one message on the parent, in the same transaction, authored by the system principal with reason `question.asked`. It SHALL name the asking task's key and title, the request id, the question kind with its options and limits, and whether the asking agent waits, and quote the question text as the asking agent's words. A merged duplicate SHALL NOT queue another message.
 
 #### Scenario: Parent woken
-- **WHEN** `DF-21` asks `DF-20` "Keep the old API?" with suggested answers "yes" and "no" while `DF-20` is `waiting`
-- **THEN** `DF-20` has a queued `question.asked` message with the request id, `DF-21`, both suggested answers and the quoted text, and becomes `queued`
+- **WHEN** `DF-21` asks `DF-20` the single-choice question "Keep the old API?" with options `yes` and `no` while `DF-20` is `waiting`
+- **THEN** `DF-20` has a queued `question.asked` message with the request id, `DF-21`, the kind, both options with their ids and the quoted text, and becomes `queued`
 
 #### Scenario: Message on an archived chat parent
 - **WHEN** a question is addressed to the chat `DF-12-CHAT` and the chat is archived afterwards
@@ -49,8 +49,8 @@ When a parent task becomes Done, cancelled or failed, or a chat is archived, eve
 The agent of the addressed parent task SHALL be able to answer a pending question addressed to its task. The decider SHALL be recorded as that agent's principal, and the answer SHALL be delivered like a human decision. A question that is not pending or not addressed to the caller's task SHALL NOT change.
 
 #### Scenario: Parent answers
-- **WHEN** the agent of `DF-20` answers the pending question of `DF-21` with "yes"
-- **THEN** the question is `answered` with text "yes", the decider is the agent of `DF-20`, and `DF-21` has a queued `request.decided` message naming `DF-20` as the one who answered
+- **WHEN** the agent of `DF-20` chooses the option `yes` of the pending question of `DF-21`
+- **THEN** the question is `answered` with the option `yes`, the decider is the agent of `DF-20`, and `DF-21` has a queued `request.decided` message naming `DF-20` as the one who answered
 
 #### Scenario: Sibling tries to answer
 - **WHEN** the agent of `DF-22` answers a question of `DF-21` addressed to `DF-20`
@@ -63,11 +63,19 @@ The agent of the addressed parent task SHALL be able to answer a pending questio
 ## MODIFIED Requirements
 
 ### Requirement: Decisions
-Deciding SHALL require a human with `approval:decide` (iteration 2: the `board-member` role), or, for a question addressed to a parent task, the agent of that task. A human SHALL be able to answer any pending question, including one addressed to a parent task. An answer SHALL carry text. An approval SHALL carry one of the scopes the type offers. A denial MAY carry a comment.
+Deciding SHALL require a human with `approval:decide` (iteration 2: the `board-member` role), or, for a question addressed to a parent task, the agent of that task. A human SHALL be able to answer any pending question, including one addressed to a parent task. An answer SHALL carry a structured answer that fits the question ("Answer validation"). An approval SHALL carry one of the scopes the type offers. A denial MAY carry a comment.
 
 #### Scenario: Answer by suggested answer
-- **WHEN** a board member picks the suggested answer "17"
-- **THEN** the question is `answered` with text "17" and the deciding user
+- **WHEN** a board member chooses the option "17" of a pending question that was migrated from the suggested answers "16" and "17", and answers
+- **THEN** the question is `answered` with the id of the option labelled "17" and the deciding user
+
+#### Scenario: Answer by option
+- **WHEN** a board member chooses the option `pg17` of a single-choice question and answers
+- **THEN** the question is `answered` with the selected option id `pg17` and the deciding user
+
+#### Scenario: Text answer
+- **WHEN** a board member answers a text question with "Use the **old** endpoint"
+- **THEN** the question is `answered` with that text and the deciding user
 
 #### Scenario: Human answers a question addressed to the parent
 - **WHEN** a board member answers a pending question of `DF-21` addressed to `DF-20`
