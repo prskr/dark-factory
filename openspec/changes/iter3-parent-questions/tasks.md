@@ -28,6 +28,8 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 
 ## 3. Answering
 
+- [ ] 3.0 Write a failing `df-db` test first: an agent answer whose `decide` runs while the parent's Done transition readdresses the question, in both orders with two transactions. The question either ends `answered` by the parent (the decision committed first) or stays `pending` and addressed to humans with `NotAddressed` returned (the readdress committed first), never answered after its readdress. Then add the `addressee` parameter and its check under the row lock to `decide` (design D5, step 4). Verify with `cargo nextest run -p df-db decide_readdress_race`.
+
 - [ ] 3.1 Write failing tests, then make `decision_message` name agent deciders as `<key> (<persona>)` (design D5). Verify with `cargo test -p df-db decision_message`, covering the scenario "Parent answers" (message text).
 - [ ] 3.2 Write failing `df-agent-channel` tests, then add `to` to `ask_question` and the new `answer_question` (contract `factory-tools.v2.json`, handlers per design D2 and D5). Verify with `cargo nextest run -p df-agent-channel ask_question answer_question`. The tests cover:
   - the spec `factory-tools` scenarios of "ask_question" and "answer_question", including an answer that doesn't fit the kind (the `InvalidAnswer` message of `check`);

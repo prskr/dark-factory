@@ -78,14 +78,14 @@ An answer the server rejects SHALL be shown again on its card with the submitted
 - **THEN** the card shows "Write your Other answer." below the input and the question stays pending
 
 ### Requirement: Answered question in history
-A decided question card SHALL show the question, its kind, every option in order with the chosen ones marked (icon and accessible text), the Other text when given, or the text answer rendered as Markdown, and who answered and when.
+A decided question card SHALL show the question, its kind, every option in order with the chosen ones marked (icon and accessible text), the Other text when given, or the text answer rendered as Markdown under "Agent text is untrusted" (it may come from an agent), and who answered and when.
 
 #### Scenario: Answered multiple choice
 - **WHEN** a board member opens a task whose multiple-choice question was answered with `api` and Other "also the CLI"
 - **THEN** the card lists all options with `api` marked chosen, shows "Other: also the CLI" and who answered
 
 ### Requirement: Answer drafts survive live updates
-A live update of the inbox or the task timeline SHALL send a card again only when its content changed, so choices and text in an unchanged pending card are kept. A card whose question was decided elsewhere SHALL show the decision on the timeline and leave the inbox.
+A live update of the inbox, the task timeline or the chat timeline SHALL keep the choices and text typed into a pending card while its question stays pending and unchanged, also when the card is sent again (a reconnect) or other parts of it change. A card whose question was decided or closed elsewhere SHALL show that on the timeline and leave the inbox.
 
 #### Scenario: New request while typing in the inbox
 - **WHEN** a board member has written half an answer to a text question in the inbox and another agent raises a request
@@ -98,6 +98,14 @@ A live update of the inbox or the task timeline SHALL send a card again only whe
 #### Scenario: Decided elsewhere while typing
 - **WHEN** a board member is writing an answer on `DF-7` and another board member answers the same question
 - **THEN** the card on `DF-7` shows the other board member's answer instead of the input
+
+#### Scenario: Stream reconnects while typing
+- **WHEN** a board member has written half an answer on `DF-7` and the live connection of the page drops and reconnects
+- **THEN** the card is still there with the written text and the open tab
+
+#### Scenario: Card changes while typing
+- **WHEN** a board member has checked an option of a pending question on `DF-7` and `DF-7` is renamed
+- **THEN** the card shows the new title and the option is still checked
 
 #### Scenario: Rejected answer after a live update
 - **WHEN** a new request arrived while a board member was typing, and the board member then submits an answer the server rejects
