@@ -18,7 +18,7 @@ Prerequisites: iteration 3 is done, in particular `iter3-inference-gateway` ([`i
 
 1. An operator registers the harness image of an ACP registry agent with an `openai-compatible` provider. A persona selects it; a task completes. The sandbox holds no API key; the gateway reports the usage.
 2. A project whose image contains an ACP adapter uses "Generic ACP" with its adapter command; a task completes.
-3. An admin registers Context7 with its API key. The control plane discovers the tools; the admin enables a subset and grants it to a persona. The agent calls a tool; the sandbox holds no key; the gateway records the call. A tool added upstream shows up disabled and flagged.
+3. An admin registers Context7 with its API key. The control plane discovers the tools; the admin enables a subset and grants it to a persona. The agent calls a tool; the sandbox holds no key; the gateway records the call. A tool added upstream shows up disabled and flagged. (Subset, grant and flags need `iter4-mcp-catalog`; with `iter4-mcp-gateway` alone, the project enables Context7 and the agent sees all its tools.)
 4. An agent requests a tool it wasn't granted (`tool-access`). The board member approves; the next call works without restarting the run.
 5. An admin creates a skill and assigns it to a persona; the run's harness lists it next to the built-in `dark-factory-basics`. The CEO agent asks to add a skill to another persona (`instance-operation`, mode "requires approval"); after approval the change applies.
 6. A user with the `controller` role sees everything read-only. The audit log view shows the agent-created tasks, push records, decided requests and the skill change; the cost view shows the "what if" cost per run, task, persona and project, and the actual cost of API-billed runs.
@@ -56,7 +56,7 @@ Taken (from existing ADRs and future options):
 | # | Decision | Source |
 |---|---|---|
 | 1 | Third-party MCP servers are reached only through one aggregating gateway endpoint, which the runtime passes in `session/new` (as the stdio relay `ext`, `iter4-mcp-gateway` D8); harnesses never connect to upstream servers directly. | ADR-0032 |
-| 2 | Tools added upstream are disabled by default; a run's tool set is enabled catalog ∩ persona grants ∩ project restrictions. | ADR-0032 |
+| 2 | Tools added upstream are disabled by default; a run's tool set is enabled catalog ∩ persona grants ∩ project restrictions. Suspended until `iter4-mcp-catalog`: `iter4-mcp-gateway` forwards all tools of the servers a project enabled (opt-in), unreviewed. | ADR-0032 |
 | 3 | Model credentials reach harnesses only through the inference endpoint; a harness that can't use a base URL is not supported without an explicit accepted-risk decision. | F12, ADR-0010 |
 | 4 | ACP has no skill concept: skills are files the runtime writes into the harness's skill directory on every run. | F13 |
 | 5 | Roles come from the token's `roles` claim, never from the database. | ADR-0011 |

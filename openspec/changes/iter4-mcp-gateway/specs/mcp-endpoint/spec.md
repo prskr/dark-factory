@@ -9,7 +9,7 @@ The gateway SHALL serve one MCP server (Streamable HTTP transport) at `https://<
 
 #### Scenario: Initialize
 - **WHEN** the runtime relay of run R sends an MCP `initialize` request to `POST https://<gateway>:8443/mcp`
-- **THEN** the gateway answers with server capabilities `tools` only (`listChanged: false`) and an `Mcp-Session-Id` bound to R
+- **THEN** the gateway answers with server capabilities `tools` only (`listChanged: false`) and an `Mcp-Session-Id` bound to R, and ignores the client capabilities in the request
 
 #### Scenario: Server stream requested
 - **WHEN** a client sends `GET /mcp`
@@ -68,7 +68,15 @@ The endpoint SHALL answer `initialize`, `ping`, `tools/list` and `tools/call`, a
 - **THEN** the gateway answers with error `-32601` and contacts no upstream
 
 ### Requirement: Aggregated tool list
-`tools/list` SHALL ask every server enabled for the run for its tools (all pages) and return them in one page, each named `<server>__<tool>` with only its `title`, `description`, `inputSchema`, `outputSchema` and `annotations`. A server that fails or exceeds the list limits SHALL be left out and logged; the others SHALL still be listed.
+`tools/list` SHALL ask every server enabled for the run for its tools (all pages, in parallel) and return them in one page, each named `<server>__<tool>` with only its `title`, `description`, `inputSchema`, `outputSchema` and `annotations`. Of tools with the same name from one server, only the first SHALL be listed. A server that fails twice in a row or exceeds the list limits SHALL be left out; the others SHALL still be listed.
+
+#### Scenario: Duplicate name upstream
+- **WHEN** `wiki` lists two tools named `search`
+- **THEN** the list contains one `wiki__search`, the first one
+
+#### Scenario: Transient failure
+- **WHEN** `wiki` answers the first `tools/list` with 503 and the retry succeeds
+- **THEN** the list contains the `wiki__` tools
 
 #### Scenario: Two servers
 - **WHEN** project `DF` has `context7` (tool `get-library-docs`) and `wiki` (tool `search`) enabled and a `DF` run lists tools
@@ -79,8 +87,23 @@ The endpoint SHALL answer `initialize`, `ping`, `tools/list` and `tools/call`, a
 - **THEN** the listed tool has neither
 
 #### Scenario: One upstream down
-- **WHEN** `wiki` refuses the connection while the run lists tools
-- **THEN** the list contains the `context7__` tools only, and the gateway logs the failure with run and server
+- **WHEN** `wiki` refuses the connection twice while the run lists tools
+- **THEN** the list contains the `context7__` tools only, and a record for `wiki` with tool `tools/list` and outcome `upstream-error` is reported
+
+### Requirement: Tool list deadline and cache
+One `tools/list` SHALL answer within 20 s: an upstream list SHALL time out after 15 s (outcome `timeout`), and servers not done by the deadline SHALL be left out. The gateway pod SHALL reuse a run's aggregated list for 60 s, so repeated `tools/list` requests do not reach the upstreams again.
+
+#### Scenario: Slow upstream during tools/list
+- **WHEN** `wiki` sends no list for 15 s while `context7` answers at once
+- **THEN** the harness receives the `context7__` tools within 20 s, and a record for `wiki` with tool `tools/list` and outcome `timeout` is reported
+
+#### Scenario: Repeated listing
+- **WHEN** the harness lists tools twice within 60 s
+- **THEN** the upstreams receive one `tools/list` each
+
+#### Scenario: Public server resolves to a private address during listing
+- **WHEN** the host of server `docs` (without "Private network") resolves to `10.0.0.5` while the run lists tools
+- **THEN** no connection is opened, the `docs__` tools are left out, and a record with outcome `upstream-error` is reported
 
 ### Requirement: Tool names agents can use
 The gateway SHALL leave out every upstream tool whose name does not match `^[A-Za-z0-9_-]{1,64}$` or whose name as the harness sees it, `mcp__ext__<server>__<tool>`, exceeds 64 characters, and SHALL log it with server and tool name.
@@ -94,7 +117,7 @@ The gateway SHALL accept at most 1,000 tools and 4 MiB per server for one `tools
 
 #### Scenario: Huge tool list
 - **WHEN** an enabled server lists 1,500 tools
-- **THEN** none of its tools is listed and the gateway logs "tool list too large" with run and server
+- **THEN** none of its tools is listed, and a record with tool `tools/list` and outcome `too-large` is reported
 
 ### Requirement: Enforcement of the enabled servers
 For `tools/call` the endpoint SHALL split the name at the first `__` and check that the prefix names a server enabled for the run. Otherwise the call SHALL get a tool result with `isError: true` and the text `tool <name> is not available in this run`, SHALL be recorded with outcome `rejected`, and SHALL NOT contact any upstream.
@@ -182,7 +205,7 @@ The endpoint SHALL answer a request body over 1 MiB with 413 and contact no upst
 - **THEN** the harness receives `isError: true` with `result too large` and the record has outcome `too-large`
 
 ### Requirement: Timeouts and concurrency
-The gateway SHALL use a connect timeout of 10 s, a timeout of 30 s per upstream `tools/list` and of 120 s per call; a timed-out call SHALL get `isError: true` (`upstream timeout`), outcome `timeout`. A run SHALL have at most 8 calls in progress per gateway pod; a further call SHALL get `isError: true` (`too many concurrent calls`), outcome `rejected`, without contacting an upstream.
+The gateway SHALL use a connect timeout of 10 s and a timeout of 120 s per call; a timed-out call SHALL get `isError: true` (`upstream timeout`), outcome `timeout`. A run SHALL have at most 8 calls in progress per gateway pod; a further call SHALL get `isError: true` (`too many concurrent calls`), outcome `rejected`, without contacting an upstream.
 
 #### Scenario: Slow upstream
 - **WHEN** an upstream sends no result for 120 s
@@ -215,11 +238,14 @@ For a server without "Private network", the gateway SHALL resolve the host itsel
 - **THEN** the gateway connects and forwards the call
 
 ### Requirement: Call records
-The gateway SHALL report one record per `tools/call` to the control plane: run, server, tool, outcome (`ok`, `tool-error`, `rejected`, `upstream-error`, `timeout`, `too-large`, `cancelled`), start time, duration, request and response size in bytes. Records SHALL NOT contain arguments, results or headers. Reporting SHALL be batched and retried; when the buffer is full the oldest records SHALL be dropped and counted in `df.gateway.mcp.calls_dropped`.
+The gateway SHALL report one record per `tools/call`, and one per server left out of a `tools/list` (tool `tools/list`), to the control plane: run, server, tool, outcome (`ok`, `tool-error`, `rejected`, `upstream-error`, `timeout`, `too-large`, `cancelled`), start time, duration, request and response size. Records SHALL NOT contain arguments, results or headers.
 
 #### Scenario: Tool error
 - **WHEN** an upstream returns a result with `isError: true`
 - **THEN** the record has outcome `tool-error`
+
+### Requirement: Call record delivery
+Reporting SHALL be batched and retried. When the buffer is full the oldest records SHALL be dropped and counted in `df.gateway.mcp.calls_dropped`.
 
 #### Scenario: Control plane briefly unreachable
 - **WHEN** the control plane is unreachable for 10 s while runs make calls

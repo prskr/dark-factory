@@ -59,6 +59,17 @@ An MCP server SHALL reference an existing credential reference (Secret name and 
 - **WHEN** a board member deletes credential reference `context7-key` while `context7` uses it
 - **THEN** the deletion is refused with a message naming `context7`
 
+### Requirement: No factory credentials for MCP servers
+An MCP server SHALL NOT use a credential reference that a project uses as its forge credential or that a model provider uses, and a project or model provider SHALL NOT be saved with a credential reference an MCP server uses. The refusal SHALL name the other user of the reference.
+
+#### Scenario: Forge token selected
+- **WHEN** a board member saves server `forgejo` with credential reference `forge-bot`, which project `DF` uses as its forge credential
+- **THEN** the form rejects it with "credential `forge-bot` is the forge credential of project DF" and nothing is stored
+
+#### Scenario: Project takes an MCP credential
+- **WHEN** a board member sets project `DF`'s forge credential to `context7-key`, which server `context7` uses
+- **THEN** the form rejects it naming `context7`
+
 ### Requirement: Editing a server
 Every edit of a server SHALL reach the gateways within about a second and SHALL end their open upstream sessions of that server, so the next call uses the new URL, credential and switch.
 
@@ -67,11 +78,11 @@ Every edit of a server SHALL reach the gateways within about a second and SHALL 
 - **THEN** the next call opens a new upstream session with the new credential
 
 ### Requirement: Write tools warning
-The server form SHALL state that agents get every tool the server offers, including tools that write, that those writes bypass the Git proxy's push checks and the factory's approvals, and that the credential's scope is the effective permission.
+The server form SHALL state that agents, in tasks and chats, get every tool the server offers with its unreviewed description, including tools that write; that those writes bypass the Git proxy's push checks and the factory's approvals; that the credential's scope is the effective permission; and that a forge token with write access must not be used.
 
 #### Scenario: Form text
 - **WHEN** a board member opens the form to create a server
-- **THEN** the form shows the warning next to the credential reference
+- **THEN** the form shows the warning, including the forge token rule, next to the credential reference
 
 ### Requirement: Enablement per project
 Board members SHALL enable and disable MCP servers per project on the project settings page ("MCP servers" tab). No server SHALL be enabled for a project by default. Changes SHALL be audited (`project.mcp_servers_update`).
@@ -99,7 +110,11 @@ Deleting an MCP server that is enabled for a project SHALL be refused, naming th
 - **THEN** the deletion is refused with a message naming `DF`
 
 ### Requirement: Call records in the run view
-The control plane SHALL store the call records the gateway reports with their run and show them in the run view: time, server, tool, outcome, duration, request and response size. Arguments and results SHALL NOT be stored. Records SHALL be deleted with their run.
+The control plane SHALL store the call records the gateway reports with their run and show them in the run view: time, server, tool (`tools/list` for a failed list), outcome, duration, request and response size. Arguments and results SHALL NOT be stored. Records SHALL be deleted with their run.
+
+#### Scenario: Server missing from the tool list
+- **WHEN** `wiki` timed out while the run listed its tools
+- **THEN** the run view shows a `wiki` record with tool `tools/list` and outcome `timeout`
 
 #### Scenario: Run with two calls
 - **WHEN** a run called `context7__resolve-library-id` once successfully and `wiki__search` once while `wiki` was disabled
