@@ -19,8 +19,16 @@ The task another task reports to: it is woken whenever that task ends and receiv
 _Avoid_: Creator, owner, supervisor
 
 **Question**:
-A free-text request from an agent for a decision, addressed to its parent task's agent or to a human. Answering it only delivers the answer to the asking agent. A question to a parent task that has reached a final state, or to an archived chat, goes to a human instead.
+A request from an agent for a decision, of one question kind, addressed to its parent task's agent or to a human. Answering it only delivers the structured answer to the asking agent. A question to a parent task that has reached a final state, or to an archived chat, goes to a human instead.
 _Avoid_: Escalation request, query, ask
+
+**Question kind**:
+What answer a question takes: single choice (exactly one option), multiple choice (several options within limits) or text (a free Markdown answer). A choice question may also allow an Other answer in the answerer's own words.
+_Avoid_: Question type, answer type
+
+**Option**:
+One answer a choice question offers, with an id chosen by the asking agent and a label shown to the answerer.
+_Avoid_: Suggested answer, choice, alternative
 
 **Subtask**:
 A task whose parent task is set.
