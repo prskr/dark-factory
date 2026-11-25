@@ -38,6 +38,7 @@
 #### Scenario: Parent has ended
 - **WHEN** the agent of `DF-21` calls `ask_question` without `to` while `DF-20` is Done
 - **THEN** the result says the parent has ended and names humans as the addressee
+
 ## ADDED Requirements
 
 ### Requirement: answer_question
@@ -50,6 +51,10 @@
 #### Scenario: Answer does not fit
 - **WHEN** the agent of `DF-20` calls `answer_question` with `text` for a single-choice question
 - **THEN** the result has `is_error: true`, names `selected`, and the question stays `pending`
+
+#### Scenario: Empty fields of the other kind
+- **WHEN** the agent of `DF-20` calls `answer_question` for a single-choice question with `selected: ["yes"]` and `text: ""`
+- **THEN** the result has state `answered` with the option `yes`
 
 #### Scenario: Already answered by a human
 - **WHEN** the agent of `DF-20` calls `answer_question` for a question a board member answered

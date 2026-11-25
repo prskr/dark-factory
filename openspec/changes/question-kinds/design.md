@@ -70,6 +70,8 @@
 
 ### D1a: Blocking by default
 
+*Written into the specs, the ADR amendment and `iter3-parent-questions` as recommended; pending Peter's confirmation (Q11). If he declines, revert those places to `false`.*
+
 Asked by Peter on PR #360: agents rarely set `blocking: true`, even when they cannot sensibly continue, so they guess and the answer arrives after the work is done. The default becomes `true`:
 
 - A call without `blocking` ends the turn after it and the run waits for the answer (keep-alive window, then `blocked`), as `blocking: true` does today.
