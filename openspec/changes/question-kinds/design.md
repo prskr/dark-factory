@@ -158,7 +158,7 @@ The migration does not re-validate: stored rows may have one option, duplicate o
 
 ### D5: The answer the agent receives
 
-`decision_message` for a question starts with one fenced JSON block, so the agent reads ids, not prose, followed by the human sentence. The JSON comes first because a text answer may hold fences of its own:
+`decision_message` for a question has three parts: one line naming the request and who answered, one fenced JSON block, so the agent reads ids, not prose, and then the readable answer. The JSON comes before the readable answer because a text answer may hold fences of its own:
 
 ````text
 Request 3f2a… (your question "Which PostgreSQL version …") was answered by Peter Kurfer. Structured answer:
@@ -247,7 +247,7 @@ Both changes are proposed and not built. They overlap in five places:
 | `question.asked` message (iter3 D4) | lists "Suggested answers: yes \| no" | — | lists the kind, the options as `id: label` and the limits |
 | `request-inbox` scenario "Question to the parent on the task page" | "offers the suggested answers and a free-text answer" | input by kind | "offers the input of its kind" |
 
-This change does not edit the `iter3-parent-questions` artifacts (one change directory per PR). Whichever change is implemented second updates the other's text as in the last column, in the PR that implements it; the parent-answers scenario "yes" becomes a choice of the option `yes`. Q10.
+This proposal does not edit the `iter3-parent-questions` artifacts: the planning task for this PR limits it to its own change directory. Whichever change is implemented second applies the last column, in the PR that implements it: to its own artifacts and code, and to the other change's synced spec texts; the parent-answers scenario "yes" becomes a choice of the option `yes`. Q10.
 
 ## Risks / Trade-offs
 

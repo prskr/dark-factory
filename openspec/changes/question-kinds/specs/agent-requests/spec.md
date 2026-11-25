@@ -47,7 +47,7 @@ Every decision SHALL queue one message on the task, authored by the system princ
 
 #### Scenario: Structured text answer
 - **WHEN** a board member answers a text question with a text that holds a fenced `json` block
-- **THEN** the message starts with a JSON block with the request id, kind `text` and the text, and the readable text follows it
+- **THEN** the message holds a JSON block with the request id, kind `text` and the text, and the JSON block comes before the readable text
 
 ## ADDED Requirements
 
