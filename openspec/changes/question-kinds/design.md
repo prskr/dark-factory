@@ -5,7 +5,7 @@
 - **Delivery:** `decision_message` writes one hidden text block on the task (`request.decided`): `Request <id> (your question "<text>") was answered by <name>: <answer>`. The agent gets prose.
 - **UI** (`crates/df-web/src/requests.rs`): one `request_card` for the inbox (`/requests`), the task timeline and the chat timeline (`sse.rs` sends the same markup). For a question it renders the text with `markdown::render`, the suggested answers as one-tap buttons and a one-line input with "Answer". A failed decision re-renders the card with a card-wide `role=alert` line. The inbox list is re-sent with `outerMorph` on every request change (`events`).
 - **Markdown field** (`markdown-editor`, merged, not built yet): `markdown_field` with `Preview::Tabs` and `Preview::SideBySide`. From 768 px every layout attaches the CodeMirror highlighting editor when the bundle is loaded. `iter6-agent-memory` adds `Preview::SourceOnly`. There is no tabs layout without highlighting.
-- **Chats** are not offered `ask_question` (`chats` spec). `iter3-parent-questions` adds `to` to `ask_question` and the tool `answer_question(request_id, answer)` and keeps chats without `ask_question`.
+- **Chats** are not offered `ask_question` today (`chats` spec), and archiving a chat is rejected while it has a pending approval request. `iter3-parent-questions` adds `to` to `ask_question` and the tool `answer_question`; this PR also updates it (D11).
 - **Accessibility** (`web-ui-shell`): interactive elements at least 44×44 px below 1024 px; checked radios and checkboxes in `accent-text`. The approval card's scope radios already use `min-h-11 lg:min-h-9` rows.
 
 ## Goals / Non-Goals
@@ -18,7 +18,6 @@
 **Non-Goals:**
 - Agents answering questions and question addressees: `iter3-parent-questions` (iteration 3, `product/iterations/roadmap.md`).
 - More kinds (number, date, ranking, file): backlog row "Further question kinds" (added by this change).
-- `ask_question` in chats: rejected for now (D9, Q5).
 - Markdown in option labels or descriptions: rejected (they sit inside form controls; the question text carries the Markdown).
 - Syntax highlighting in text answers: rejected (issue #334).
 
@@ -70,7 +69,7 @@
 
 ### D1a: Blocking by default
 
-*Written into the specs, the ADR amendment and `iter3-parent-questions` as recommended; pending Peter's confirmation (Q11). If he declines, revert those places to `false`.*
+*Decided by Peter (Q11).*
 
 Asked by Peter on PR #360: agents rarely set `blocking: true`, even when they cannot sensibly continue, so they guess and the answer arrives after the work is done. The default becomes `true`:
 
@@ -193,7 +192,7 @@ Answer: PostgreSQL 17
 
 ### D6: One question card
 
-`request_card` keeps one structure for every request; the inbox and the task timeline show it (a chat timeline would too, but chats raise no questions, D9). For a question the order is fixed, and only the input changes by kind:
+`request_card` keeps one structure for every request; the inbox, the task timeline and the chat timeline show it (chats raise questions, D9). For a question the order is fixed, and only the input changes by kind:
 
 1. **Header:** chip "Question" with the kind ("Question · Single choice", "Question · Multiple choice", "Question · Text"), "Blocking" while pending, task key and title (unchanged).
 2. **Question:** `markdown::render(text)` in `md-body md-request` (unchanged sanitizing: no raw HTML, images as links, Mermaid isolated).
@@ -240,7 +239,15 @@ The question card is the history: it is placed on the timeline at the time it wa
 
 ### D9: Chats
 
-Chats are not offered `ask_question` in this change. Reasons: the human is in the conversation and answers there; a question card in a chat adds pending and blocking states and an inbox entry for a conversation that is already waiting for its human; `iter3-parent-questions` rejected it with the same reason. A choice question would be quicker than typing on a phone, so this is Q5.
+Decided by Peter (Q5): chat runs are offered `ask_question`. Humans get used to agents asking in a structured way, and a choice is quicker to answer than typing, above all on a phone.
+
+- **Tools:** `ask_question` joins `CHAT_TOOLS` (`crates/df-agent-channel/src/assign.rs`). Same arguments and defaults as for tasks, `blocking` included.
+- **Card:** the question card appears on the chat timeline at the time it was raised, like an approval card there today (the chat page already renders `request_card`). The inbox lists it with a link to the chat page (`request-inbox`, "Requests from chats", unchanged).
+- **Needs you:** a chat with a pending question needs you, like one with a pending approval request (`chat-ui`, "Chats that need you").
+- **A message instead of an answer:** when the board member writes in the message box instead of answering, the message is delivered as usual and the question stays pending and answerable. Closing it automatically would guess what the human meant. The agent sees the message and may ask again; asking the same text returns the pending question (D1, `merged`).
+- **Archiving:** today archiving is rejected while the chat has a pending approval request. A pending question does not block it: archiving closes the chat's own pending questions with reason `chat-archived` in the archive transaction. A question is part of the conversation; an unanswered one should not keep a board member from tidying up. Questions of subtasks addressed to the chat are readdressed by `iter3-parent-questions` (unchanged).
+- **Blocking in a chat:** a blocking question ends the chat run's turn; the run waits in its keep-alive window and then ends; the answer or the next message starts a new run, as for any queued message on a chat.
+- **Agent guidance:** the tool description and the playbook tell chat agents to use `ask_question` for choices and for decisions the human should see in the inbox, and plain replies for conversation.
 
 ### D10: Design first
 
@@ -248,7 +255,7 @@ Group 1 of the tasks draws the boards in PenPot (skill `penpot`) on page "Tasks 
 
 ### D11: Overlap with `iter3-parent-questions`
 
-Both changes are proposed and not built. They overlap in five places:
+Both changes are proposed and not built. They overlap in six places:
 
 | Place | `iter3-parent-questions` | This change | Merged result |
 |---|---|---|---|
@@ -257,6 +264,7 @@ Both changes are proposed and not built. They overlap in five places:
 | `answer_question` input | `request_id`, `answer` (string, 1–4,000) | — | `request_id` plus `selected` (option ids, `_other` not used), `other`, `text`, checked by `QuestionSpec::check` |
 | `question.asked` message (iter3 D4) | lists "Suggested answers: yes \| no" | — | lists the kind, the options as `id: label` and the limits |
 | `request-inbox` scenario "Question to the parent on the task page" | "offers the suggested answers and a free-text answer" | input by kind | "offers the input of its kind" |
+| `ask_question` in chats | rejected; "answer_question offered to chat runs" says "and not `ask_question`" | offered (D9) | chats get both; a chat's `to` defaults to `human` |
 
 Decided by Peter (PR #360, Q10): `question-kinds` is implemented first, and this PR updates the `iter3-parent-questions` artifacts to the last column (proposal, design D4, D5 and D6, the three spec deltas, tasks). Its MODIFIED blocks of "ask_question" and "Decisions" are written on top of this change, including `blocking` default `true`; the parent-answers scenario chooses the option `yes`.
 
@@ -267,7 +275,7 @@ Decided by Peter (PR #360, Q10): `question-kinds` is implemented first, and this
 - [Live update resets a draft in another card] → Unchanged cards are not sent again (D6); tested in a browser (task 6.4).
 - [Option ids that change between asks] → Merging is by text; the pending question keeps its first options. The description says so.
 - [A long text answer in the message] → Bounded at 4,000 characters, like today.
-- [Merge with `iter3-parent-questions`] → Five overlaps, listed with their merged form in D11.
+- [Merge with `iter3-parent-questions`] → Six overlaps, listed with their merged form in D11.
 
 ## Migration Plan
 
@@ -277,19 +285,16 @@ Decided by Peter (PR #360, Q10): `question-kinds` is implemented first, and this
 
 ## Open Questions
 
-### Decided (Peter, PR #360, 2026-11-25)
+None. All decided by Peter on PR #360 (2026-11-25):
 
+- **Q1.** Break `ask_question`: `suggested_answers` is removed and `kind` is required, with no compatibility path (D1).
 - **Q2.** "Other" means "type your own answer", as in Claude Code: on by default (`allow_other: true`), the agent may turn it off.
 - **Q3.** Single choice: radio plus "Answer" (D6).
 - **Q4.** Limits: 2 to 10 options, labels 200 characters, descriptions 300, "Other" 1,000, text answer 4,000.
+- **Q5.** Chats get `ask_question` (D9).
 - **Q6.** The answer reaches the agent as a JSON block in the decision message (D5).
+- **Q7.** Multiple choice: default `min_selected` 1.
+- **Q8.** Empty values of arguments that don't fit the kind are ignored; real values are rejected (D1).
 - **Q9.** Same text asked again: merging stays by text; the result says `merged: true` (D1).
 - **Q10.** `question-kinds` is implemented first; this PR updates `iter3-parent-questions` (D11).
-
-### Still open (explained on PR #360)
-
-- **Q1. Break `ask_question`?** "Break" means: `suggested_answers` is removed and `kind` is required, with no compatibility path. An agent that calls the old form gets an error result that names `kind` and `options` and tries again; agents read the tool schema at every run start, so nothing outside the control plane must change. Stored questions are migrated (D4). Recommendation: break.
-- **Q5. `ask_question` in chats?** Today chats can't call it (`chats` spec: not offered). A chat agent asks in its normal reply and the human answers in the chat. Recommendation: keep it so (D9); backlog row for choices in chats.
-- **Q7. Default `min_selected` of multiple choice.** "Multiple choice" here means checkboxes: the human *may* choose several, not *must*. With a minimum of 2, "Which platforms are affected?" could not be answered with one platform. Recommendation: 1; the agent sets a higher minimum when it needs one.
-- **Q8. Extra arguments that don't fit the kind.** Models often fill every field of a tool schema, for example `options: []` or `min_selected: null` on a text question. Reject that call (the agent must retry) or ignore such empty values? Recommendation: ignore empty values, reject real ones (`options` with items on a text question) (D1).
-- **Q11. `blocking` default `true`** (Peter's suggestion, D1a). Recommendation: yes for `ask_question`; `request_approval` keeps `false`.
+- **Q11.** `ask_question` blocks by default; `request_approval` keeps `false` (D1a).

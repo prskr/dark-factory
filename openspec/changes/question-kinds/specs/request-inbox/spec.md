@@ -18,11 +18,15 @@ For a pending question the UI SHALL offer the input of its kind ("Answer input b
 - **THEN** the request is approved with the preselected scope
 
 ### Requirement: One question card
-A question SHALL be shown by the same card in the inbox and on the task timeline, with the parts in this order: header ("Question · " and the kind, Blocking while pending, task), question text, input or answer, field error, "Answer" action, time. Only the input and the answer SHALL differ by kind.
+A question SHALL be shown by the same card in the inbox, on the task timeline and on the chat timeline, with the parts in this order: header ("Question · " and the kind, Blocking while pending, task), question text, input or answer, field error, "Answer" action, time. Only the input and the answer SHALL differ by kind.
 
 #### Scenario: Same card in inbox and timeline
 - **WHEN** a single-choice question of `DF-7` is pending and a board member opens `/requests` and then `DF-7`
 - **THEN** both show the card with "Question · Single choice", the question, the options and "Answer"
+
+#### Scenario: Same card in a chat
+- **WHEN** the agent of `DF-12-CHAT` asks a multiple-choice question and a board member opens `/chats/DF-12-CHAT`
+- **THEN** the chat timeline shows the card with "Question · Multiple choice", the checkboxes and "Answer"
 
 ### Requirement: Question text rendered as Markdown
 The question text SHALL be rendered as Markdown under "Agent text is untrusted". Option labels and descriptions SHALL be shown as plain text.

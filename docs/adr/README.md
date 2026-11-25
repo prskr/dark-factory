@@ -46,7 +46,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0040](0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned for iteration 6) |
 | [ADR-0041](0041-tasks-based-on-another-tasks-branch.md) | Tasks based on another task's branch | Accepted (planned for iteration 3, amended by ADR-0052) |
 | [ADR-0042](0042-live-views-resume-only-from-an-authoritative-sequence.md) | Live views resume only from an authoritative sequence | Accepted |
-| [ADR-0043](0043-delegation-chain-chats-as-tasks.md) | Delegation chain, chats as tasks and waiting on subtasks | Accepted (planned for iteration 3, amended by ADR-0052 and ADR-0053) |
+| [ADR-0043](0043-delegation-chain-chats-as-tasks.md) | Delegation chain, chats as tasks and waiting on subtasks | Accepted (planned for iteration 3, amended by ADR-0052, ADR-0053 and change `question-kinds`) |
 | [ADR-0044](0044-task-artifacts-and-cross-task-reading.md) | Task artifacts and cross-task reading | Accepted (planned for iteration 3; amended by ADR-0048 and on 2026-11-03) |
 | [ADR-0045](0045-full-harness-mode-as-separate-acp-binary.md) | Full-harness mode as a separate ACP binary | Proposed (spike `native-harness-spike`) |
 | [ADR-0046](0046-forge-activity-in-the-transcript.md) | Forge activity in the transcript | Accepted |
