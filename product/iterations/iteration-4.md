@@ -41,13 +41,13 @@ flowchart LR
 |---|---|
 | `iter4-permissions` | ADR-0011: `admin` and `controller` roles, one `can(principal, action, resource)` check, role → permission mapping in the instance configuration, instance-management permissions for agents (deny / requires approval / allow) with a ceiling, `instance-operation` approval type, `harness-permission` approvals for selected `session/request_permission` categories. |
 | `iter4-harness-registry` | F12: harness registry instead of the fixed `claude-code` value, ACP registry presets, credential mapping to an inference provider or a Secret, default egress hosts per harness, "Generic ACP" with an adapter command; usage from the gateway (decision 13). |
-| `iter4-mcp-gateway` | Initial end-to-end slice (proposed: `openspec/changes/iter4-mcp-gateway`). ADR-0032, [`design/egress.md`](../../design/egress.md) §10: register HTTP servers (URL, credential reference, scheme) as board member, fetch tools on demand and pin a human selection, enable servers per project; MCP endpoint (Streamable HTTP) in the gateway, pod-IP identity, credential injection, tool set enforcement on `tools/list` and `tools/call`, private-destination check for upstreams, one call record per call; the runtime registers the endpoint in `session/new`. |
-| `iter4-mcp-catalog` | Builds on `iter4-mcp-gateway`. ADR-0032, control plane: periodic discovery, catalog snapshots, instance filters (globs, read-only only), new and changed tools flagged automatically, grants per persona (with the per-persona tool permissions of `iter4-permissions`), `tool-access` approval type, in-cluster upstream opt-in for stdio → HTTP bridges. Project-scoped stdio servers from `.mcp.json`: the `repository-mcp-server` approval activates an entry, the runtime starts it in the sandbox and passes it in `session/new` (decision 8). `search_tools` / `load_server`: backlog. |
+| `iter4-mcp-gateway` | Initial end-to-end slice (proposed: `openspec/changes/iter4-mcp-gateway`). ADR-0032, [`design/egress.md`](../../design/egress.md) §10: register HTTP servers (URL, credential reference, scheme, "Private network" switch) as board member, enable servers per project; MCP endpoint (Streamable HTTP) in the gateway that forwards **all** tools of the enabled servers, pod-IP identity, credential injection, private-address check for public servers, one call record per call; the runtime registers a stdio relay `ext` to the endpoint in `session/new`. No earlier change needed. |
+| `iter4-mcp-catalog` | Builds on `iter4-mcp-gateway`. ADR-0032, control plane: tool review and pinned definitions, periodic discovery, catalog snapshots, instance filters (selection, globs, read-only only), new and changed tools flagged, grants per persona (with the per-persona tool permissions of `iter4-permissions`), `tool-access` approval type, stdio → HTTP bridges in the cluster as "Private network" servers. Project-scoped stdio servers from `.mcp.json`: the `repository-mcp-server` approval activates an entry, the runtime starts it in the sandbox and passes it in `session/new` (decision 8). `search_tools` / `load_server`: backlog. |
 | `iter4-skills` | F13: skill storage with versions, built-in skills from [`agent-playbook.md`](../agent-playbook.md), assignment per persona and project, delivery in `Assign`, the runtime writes them into the harness's skill directory on every run, a transcript warning for shadowed repository skills (decision 12), UI, skill changes as an agent instance operation. |
 | `iter4-audit-view` | Filterable `audit_log` list (actor, action, resource, time), push records and decided requests linked from their entries, desktop only (ADR-0035). |
 | `iter4-cost-view` | ADR-0021: pricing tables in the instance configuration, versioned by date, seeded with defaults (decision 14); cost per run, task, persona and project from harness and gateway usage; "what if" for subscription runs, actual cost for API-billed runs. |
 
-Suggested order: `iter4-permissions` first, because registering harnesses, MCP credentials and skills needs the `admin` role, and agent instance operations need the modes. `iter4-mcp-gateway` (board members register servers until the `admin` role exists) before `iter4-mcp-catalog`, which extends its pinned tool list into the full catalog. `iter4-harness-registry` and `iter4-cost-view` are independent and can run in parallel.
+Suggested order: `iter4-permissions` first, because registering harnesses, MCP credentials and skills needs the `admin` role, and agent instance operations need the modes. `iter4-mcp-gateway` can start at once (board members register servers until the `admin` role exists); `iter4-mcp-catalog` adds review, filters and grants on top of it after `iter4-permissions`. `iter4-harness-registry` and `iter4-cost-view` are independent and can run in parallel.
 
 ## 4. Decisions
 
@@ -55,7 +55,7 @@ Taken (from existing ADRs and future options):
 
 | # | Decision | Source |
 |---|---|---|
-| 1 | Third-party MCP servers are reached only through one aggregating gateway endpoint, which the runtime passes in `session/new`; harnesses never connect to upstream servers directly. | ADR-0032 |
+| 1 | Third-party MCP servers are reached only through one aggregating gateway endpoint, which the runtime passes in `session/new` (as the stdio relay `ext`, `iter4-mcp-gateway` D8); harnesses never connect to upstream servers directly. | ADR-0032 |
 | 2 | Tools added upstream are disabled by default; a run's tool set is enabled catalog ∩ persona grants ∩ project restrictions. | ADR-0032 |
 | 3 | Model credentials reach harnesses only through the inference endpoint; a harness that can't use a base URL is not supported without an explicit accepted-risk decision. | F12, ADR-0010 |
 | 4 | ACP has no skill concept: skills are files the runtime writes into the harness's skill directory on every run. | F13 |
@@ -95,10 +95,10 @@ Decided on 2026-10-30 for this iteration:
 
 ## 7. Verify first (spikes)
 
-- ACP `session/new` with an HTTP MCP server: support in the Claude adapter (`mcpCapabilities.http`) and in `df-native`, custom headers.
+- ACP `session/new` with a second stdio MCP server `ext` (the gateway relay) in the Claude adapter, OpenCode and `df-native` (`iter4-mcp-gateway`, spike 1.2).
 - Claude Code reads skills from the skill directory under `HOME` (`/data/home`) when started through the ACP adapter.
 - ACP registry: format, and which registered agents accept a base URL for model access (compatible with the inference endpoint).
-- MCP Streamable HTTP endpoint and client in the gateway on the existing HTTP stack, `rmcp` for the message types (`iter4-mcp-gateway`, spike 1.3); `search_tools` / `load_server` are in the backlog.
+- MCP Streamable HTTP endpoint and client in the gateway on the existing HTTP stack, `rmcp` for the message types (`iter4-mcp-gateway`, spike 1.1); `search_tools` / `load_server` are in the backlog.
 - Whether all registry presets can send their model traffic through the inference endpoint (decision 13), and what usage ACP adapters report for those that can't.
 - The runtime starting a stdio MCP server from `.mcp.json` in the sandbox and passing it in `session/new`.
 - Context7 authentication (header name, key format) as the first static-credential server.
