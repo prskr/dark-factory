@@ -91,7 +91,7 @@ The endpoint SHALL answer `initialize`, `ping`, `tools/list` and `tools/call`, a
 - **THEN** the list contains the `context7__` tools only, and a record for `wiki` with tool `tools/list` and outcome `upstream-error` is reported
 
 ### Requirement: Tool list deadline and cache
-One `tools/list` SHALL answer within 20 s: an upstream list SHALL time out after 15 s (outcome `timeout`), and servers not done by the deadline SHALL be left out. The gateway pod SHALL reuse a run's aggregated list for 60 s, so repeated `tools/list` requests do not reach the upstreams again.
+One `tools/list` SHALL answer within 20 s: an upstream list SHALL time out after 15 s (outcome `timeout`), and servers not done by the deadline SHALL be left out. The gateway pod SHALL reuse a run's aggregated list for 60 s, so repeated `tools/list` requests do not reach the upstreams again. A change of the run's enabled servers, or of the configuration of one of them, SHALL drop the run's cached list.
 
 #### Scenario: Slow upstream during tools/list
 - **WHEN** `wiki` sends no list for 15 s while `context7` answers at once
@@ -100,6 +100,10 @@ One `tools/list` SHALL answer within 20 s: an upstream list SHALL time out after
 #### Scenario: Repeated listing
 - **WHEN** the harness lists tools twice within 60 s
 - **THEN** the upstreams receive one `tools/list` each
+
+#### Scenario: Server disabled within the cache window
+- **WHEN** the harness lists tools, `context7` is disabled for the project 10 s later, and the harness lists again
+- **THEN** the second list contains no `context7__` tools
 
 #### Scenario: Public server resolves to a private address during listing
 - **WHEN** the host of server `docs` (without "Private network") resolves to `10.0.0.5` while the run lists tools
@@ -172,11 +176,11 @@ The gateway SHALL be the MCP client of each upstream with one session per gatewa
 
 #### Scenario: First call
 - **WHEN** run R uses `context7` for the first time on a gateway pod
-- **THEN** the gateway sends `initialize` to the `context7` upstream with empty client capabilities, then the request
+- **THEN** the gateway sends `initialize` to the `context7` upstream with empty client capabilities, waits for its successful response, sends `notifications/initialized`, then sends the request
 
 #### Scenario: Expired upstream session
 - **WHEN** the upstream answers a call with 404 for R's session
-- **THEN** the gateway initializes a new session and sends the call once more; a second 404 gives outcome `upstream-error`
+- **THEN** the gateway initializes a new session, completes the handshake with `notifications/initialized`, and sends the call once more; a second 404 gives outcome `upstream-error`
 
 #### Scenario: Run ends
 - **WHEN** run R leaves the snapshot

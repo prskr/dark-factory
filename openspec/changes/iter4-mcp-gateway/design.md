@@ -80,9 +80,8 @@ On `tools/list` the gateway asks each enabled server for `tools/list` (all pages
 
 - **Failures:** a failing server is retried once; if it fails again or exceeds a limit, it is left out, so one broken server does not hide the others. Each server left out produces a record with tool `tools/list` in the run view. Consequence: the harness usually lists once per session and `listChanged` is false, so a server missing at session start stays missing for that session (for a chat kept alive, up to its keep-alive). The run view shows why.
 - **Deadline:** 15 s per upstream list, 20 s for the whole answer, so the harness's own MCP list timeout is not hit first. Spike 1.2 records the harnesses' timeouts and how often they call `tools/list`; the values are adjusted there if needed.
-- **Cache:** the aggregated list of a run is reused for 60 s per gateway pod. If a harness lists per turn, or any process in the sandbox calls `tools/list` in a loop, the upstreams still see at most one list per minute, run and pod.
-
-`tools/call` checks only that the prefix names a server enabled for the run (removals apply at once), then forwards the rest of the name. Whether the tool exists is the upstream's answer. The per-tool check comes with the catalog's filters.
+- **Cache:** the aggregated list of a run is reused for 60 s per gateway pod. If a harness lists per turn, or any process in the sandbox calls `tools/list` in a loop, the upstreams still see at most one list per minute, run and pod. The cache entry is keyed by the run's enabled server ids and their `config_version`s, so any change to them drops it and a disabled server never appears in a list served after the change.
+- **Upstream handshake:** `initialize`, its successful response, `notifications/initialized`, then the request; the same after an expired session.
 
 `tools/call` checks only that the prefix names a server enabled for the run (removals apply at once), then forwards the rest of the name. Whether the tool exists is the upstream's answer. The per-tool check comes with the catalog's filters.
 
@@ -92,7 +91,7 @@ On `tools/list` the gateway asks each enabled server for `tools/list` (all pages
 - `Mcp-Session-Id` is `df-<run id>-<random>`. A gateway pod accepts it when the run id equals the source pod's run. The downstream session holds no state on the gateway: `tools/list` and `tools/call` are answered from the snapshot by pod IP. So every gateway replica serves every request and no session affinity is needed. The pod IP authenticates, as for `/inference`.
 - Upstream sessions are state, but per gateway pod: opened on first use, closed when the run leaves the snapshot, when `config_version` changes, or after 10 min idle.
 - Cancellation: if the client closes the connection of a call, the pod cancels the upstream request (outcome `cancelled`). This deliberately departs from Streamable HTTP's "disconnection SHOULD NOT be interpreted as cancellation": the endpoint offers no resumable stream, so a result whose connection is gone can never be delivered. `notifications/cancelled` may reach another pod, which ignores it. The concurrency limit (8) is per run and gateway pod.
-- Enablement changes: removals apply to calls at once; additions appear from the next run, because a run whose `Assign` had no endpoint has no `ext`, and `listChanged` is false.
+- Enablement changes apply at once, in both directions: the gateway checks the run's current enabled servers on every call and list. A server enabled during a run is callable at once and appears in the next `tools/list`; a harness that does not list again (`listChanged` is false) does not see it until its next session, and a run whose `Assign` had no endpoint has no `ext` until its next run. Keeping each run's start-time server set and intersecting it was considered (CodeRabbit review) and rejected: enabling a server for a project is the board member's decision for that project, so letting a running run use it grants nothing beyond that decision, and the start-time set would need its own storage per run.
 
 ### D7: Contracts
 
