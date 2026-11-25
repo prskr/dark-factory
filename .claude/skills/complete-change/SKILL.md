@@ -19,7 +19,8 @@ This skill rewrites local history and publishes the result. Every step that push
    - No ledger: ask the user for BASE (the commit before the first WIP commit) and check it with `git log --oneline BASE..HEAD`.
 4. Tasks: `openspec instructions apply --change "<name>" --json` must report `remaining: 0`. If not, show the open tasks and stop.
 5. Commits: list them with `git log --oneline BASE..HEAD`. Every commit whose subject does not start with `wip(<name>)` is a separate change, for example a dependency bump the pre-push hook required. Ask whether to keep it as its own commit (the default) or fold it into the squash.
-6. Main: run `git fetch origin main`. Check whether commits below BASE already landed on `main` under other SHAs: `git log --oneline $(git merge-base HEAD origin/main)..BASE`. Remember the result for step 3.
+6. Design mapping: if `openspec/changes/<name>/design-boards.md` lists boards, add its rows to `docs/design-workflow.md`, "Mapping views to boards", next to the rows of the same page. Skip rows that are already there. If that changed the file, commit it as `wip(<name>): design mapping` (the squash takes it in); otherwise there is nothing to commit. The file itself stays with the change and is archived with it.
+7. Main: run `git fetch origin main`. Check whether commits below BASE already landed on `main` under other SHAs: `git log --oneline $(git merge-base HEAD origin/main)..BASE`. Remember the result for step 3.
 
 ## 1. Squash
 
@@ -42,7 +43,7 @@ This skill rewrites local history and publishes the result. Every step that push
 
 ## 3. Rebase (only if needed)
 
-- If step 0.6 listed commits, or `origin/main` is not an ancestor of HEAD (`git merge-base --is-ancestor origin/main HEAD`), ask "Rebase onto origin/main (Recommended)" / "Push without rebase".
+- If step 0.7 listed commits, or `origin/main` is not an ancestor of HEAD (`git merge-base --is-ancestor origin/main HEAD`), ask "Rebase onto origin/main (Recommended)" / "Push without rebase".
 - On rebase: if commits below BASE landed on `main` under other SHAs, move only this change's commits with `git rebase --onto origin/main BASE`. Otherwise use `git rebase origin/main`. On conflicts, use the `resolving-merge-conflicts` skill. After the rebase, run `cargo build --workspace` and `openspec validate --all --strict`. If any `Cargo.toml` or `Cargo.lock` changed in the rebase, also run the Bazel build with `--lockfile_mode=error` (skill `rust`).
 
 ## 4. Push

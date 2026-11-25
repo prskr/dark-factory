@@ -98,14 +98,10 @@ flowchart TD
 
 ## Known issues
 
+PenPot issues (tab freezes, page budget, storage resets, token bindings, child order, text centring) and how to work around them: skill `penpot`, "API gotchas".
+
 | Issue | Effect | Handling |
 |---|---|---|
-| The browser tab with PenPot freezes (heartbeat lost) | MCP calls time out, work in the plugin is lost | Keep the tab in the foreground. Reconnect with `/mcp`. Work in small calls. |
-| One page with ~9,500 shapes | Exports time out, tab freezes | One page per section (done). Delete empty icon backgrounds (`base-background`). |
-| Plugin storage and helper functions reset on reconnect | Scripts that rely on `storage` stop working | Keep each script self-contained. |
-| Token bindings are lost when the page changes before PenPot applies them | Boards stay unbound | Wait on a page until the bindings are visible, then switch. |
-| `setParentIndex` counts from the end of the child list | Inserted components land in the wrong place | Compute the target order, then assign `length - 1 - position`. |
-| Library tokens cannot be applied in a consuming file | A separate library file does not share tokens | Keep components and tokens in one file. |
 | `@playwright/mcp@latest` depends on an alpha Playwright and wants its own Chromium revision | Browser start fails with a missing revision | Pin the version, or use the container. |
 | Obscura: fixed 1280 px viewport, no web fonts, no event stream, no graph lines | Comparisons were wrong | Replaced by Playwright. |
 
@@ -132,6 +128,8 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 ## Mapping views to boards
 
 One row per view. The agent reads it to know the PenPot page and board, the route, the data it needs and the viewport.
+
+The boards of a change in progress are listed in its `openspec/changes/<name>/design-boards.md` (written by `/prepare-change`, same columns). `/complete-change` moves those rows here.
 
 | Board (page / name) | Route | Data | Viewport |
 |---|---|---|---|

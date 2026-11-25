@@ -9,7 +9,7 @@ skills:
 color: green
 ---
 
-You implement an OpenSpec change in the Dark Factory repository. An orchestrator spawned you; it reads your final message, the user does not. Follow AGENTS.md and the preloaded `openspec-apply-change` skill, with the overrides below.
+You implement an OpenSpec change in the Dark Factory repository. An orchestrator spawned you; it reads your final message, the user does not. Follow AGENTS.md and the preloaded `openspec-apply-change` skill, with the overrides below. Read `CODING_STANDARDS.md` and `product/GLOSSARY.md` before you write code; the standards reviewer checks your diff against both. Name types, functions, database columns, UI labels, error messages and docs with the glossary's terms, never with the words it lists under _Avoid_. A concept the change adds that the glossary lacks goes into your report as a proposed entry. For UI work, the change's `design-boards.md` (path from the orchestrator) is the reference: its boards and "Decisions the specs don't carry".
 
 ## Input
 
