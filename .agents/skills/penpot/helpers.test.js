@@ -24,6 +24,9 @@ const LIGHT = {
   "color.status.failed.bg": "#FEE2E2",
   "color.status.waiting.bg": "#FEF3C7",
   "color.border": "#E7E5E4",
+  "color.muted": "#57534E",
+  "color.status.queued.fg": "#44403C",
+  "color.accent-strong": "#00691A",
 };
 
 let ids = 0;
@@ -57,12 +60,32 @@ const text = (name, characters, hex, props = {}) => shape({ type: "text", name, 
 
 const descendants = (root) => (root.children || []).flatMap((c) => [c, ...descendants(c)]);
 
-// Loads helpers.js into a fresh `storage` against the given pages ({ name: [boards] }).
-const load = (pages = { Page: [] }) => {
+// A comment thread: `comments` as [author, content] pairs.
+const thread = (seqNumber, board, comments, resolved = false) => ({
+  seqNumber,
+  board,
+  resolved,
+  findComments: async () => comments.map(([name, content]) => ({ user: { name }, content })),
+});
+
+// Loads helpers.js into a fresh `storage` against the given pages ({ name: [boards] }) and the
+// comment threads of the first page.
+const load = (pages = { Page: [] }, threads = []) => {
   const pageList = Object.entries(pages).map(([name, boards]) => ({ id: `page-${name}`, name, root: shape({ name: "Root Frame" }, boards) }));
+  pageList[0].findCommentThreads = async ({ showResolved }) => threads.filter((t) => showResolved || !t.resolved);
   const penpot = {
     currentPage: pageList[0],
     openPage: async (id) => (penpot.currentPage = pageList.find((p) => p.id === id)),
+    createText: (characters) => {
+      const t = text("", characters, "#000000");
+      t.ranges = [];
+      t.getRange = (start, end) => {
+        const range = { start, end };
+        t.ranges.push(range);
+        return range;
+      };
+      return t;
+    },
     library: { local: { tokens: { sets: [{ name: "light", tokens: Object.entries(LIGHT).map(([name, value]) => ({ name, value, type: "color" })) }], themes: [] } } },
   };
   const penpotUtils = {
@@ -95,6 +118,36 @@ test("colour rules pick the token of the role", () => {
     [shape({ name: "nothing like it" }), "#123456", "fill", undefined],
   ];
   for (const [s, hex, prop, want, opacity] of cases) assert.equal(storage.colourToken(s, hex, prop, opacity), want, `${s.name} ${hex}`);
+});
+
+test("icon strokes are muted like ICON_BUTTON_CLASS, not the status value they share", () => {
+  const { storage } = load();
+  const path = shape({ name: "svg-path", type: "path", strokes: [{ strokeColor: "#44403C" }] });
+  shape({ name: "Copy public key" }, [shape({ name: "icon copy", type: "group" }, [path])]);
+  assert.equal(storage.colourToken(path, "#44403C", "strokeColor"), "color.muted");
+});
+
+test("comments lists the open threads of the page with board and text", async () => {
+  const board = shape({ name: "Personas · edit modal" });
+  const { storage } = load({ Page: [board] }, [
+    thread(3, board, [["Peter", "Remove this field?"], ["Claude", "Moved down."]]),
+    thread(4, undefined, [["Peter", "Loose note"]]),
+    thread(5, board, [["Peter", "done"]], true),
+  ]);
+  assert.deepEqual(await storage.comments(), [
+    { seq: 3, board: "Personas · edit modal", comments: ["Peter: Remove this field?", "Claude: Moved down."] },
+    { seq: 4, board: null, comments: ["Peter: Loose note"] },
+  ]);
+});
+
+test("text sets font, weight variant, size and fill on the whole range", () => {
+  const { storage } = load();
+  const t = storage.text("Signing key", { size: 15, weight: 600, colour: "#1C1917", name: "heading" });
+  assert.deepEqual(t.ranges, [{ start: 0, end: 11, fontFamily: "Inter", fontId: "gfont-inter", fontVariantId: "600", fontWeight: "600", fontSize: "15" }]);
+  assert.deepEqual([t.name, t.fills], ["heading", fill("#1C1917")]);
+  const mono = storage.text("SHA256:x", { mono: true });
+  assert.deepEqual(mono.ranges[0], { start: 0, end: 8, fontFamily: "JetBrains Mono", fontId: "gfont-jetbrains-mono", fontVariantId: "regular", fontWeight: "400", fontSize: "13" });
+  assert.deepEqual([mono.name, mono.fills], ["SHA256:x", fill("#1C1917")]);
 });
 
 test("a shared value resolves by role: avatar, status badge, else accent-soft", () => {
