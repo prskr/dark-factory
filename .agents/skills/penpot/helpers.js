@@ -144,8 +144,17 @@ storage.colourToken = (shape, hex, prop, opacity) => {
   return token;
 };
 
+// The names from `board` down to `shape`, for finding an unknown colour on the board.
+const pathOf = (shape, board) => {
+  const names = [];
+  for (let s = shape; s && s.id !== board.id; s = s.parent) names.unshift(s.name);
+  return [board.name, ...names].join(" / ");
+};
+
 // Unbound fills and strokes of a board (the board itself included), skipping `base-background`.
-// Returns { jobs: [{ shape, token, prop }], unknown: { "fill #HEX": count } }.
+// Returns { jobs: [{ shape, token, prop }], unknown: { "fill #HEX": { count, samples } } } with up
+// to three sample paths per unknown colour. A shape with several fills or strokes can't take one
+// token; it is reported as "fill: N paints" for a decision by hand.
 storage.unboundColours = (board) => {
   const jobs = [];
   const unknown = {};
@@ -156,16 +165,19 @@ storage.unboundColours = (board) => {
   };
   for (const shape of [board, ...penpotUtils.findShapes(() => true, board)]) {
     if (shape.name === "base-background") continue;
-    const fill = Array.isArray(shape.fills) && shape.fills.length === 1 && shape.fills[0];
-    const stroke = Array.isArray(shape.strokes) && shape.strokes.length === 1 && shape.strokes[0];
-    const colours = [
-      fill?.fillColor && !shape.tokens.fill && ["fill", fill.fillColor, fill.fillOpacity],
-      stroke?.strokeColor && !shape.tokens.strokeColor && ["strokeColor", stroke.strokeColor, stroke.strokeOpacity],
-    ].filter(Boolean);
-    for (const [prop, hex, opacity] of colours) {
-      const token = storage.colourToken(shape, hex, prop, opacity);
+    const paints = [
+      ["fill", Array.isArray(shape.fills) ? shape.fills : [], "fillColor", "fillOpacity"],
+      ["strokeColor", Array.isArray(shape.strokes) ? shape.strokes : [], "strokeColor", "strokeOpacity"],
+    ];
+    for (const [prop, list, colour, alpha] of paints) {
+      if (shape.tokens[prop] || !list.some((p) => p[colour])) continue;
+      if (list.length > 1) {
+        report(`${prop}: ${list.length} paints`, shape);
+        continue;
+      }
+      const token = storage.colourToken(shape, list[0][colour], prop, list[0][alpha]);
       if (token) jobs.push({ shape, token, prop });
-      else if (token === undefined) unknown[`${prop} ${hex}`] = (unknown[`${prop} ${hex}`] || 0) + 1;
+      else if (token === undefined) report(`${prop} ${list[0][colour]}`, shape);
     }
   }
   return { jobs, unknown };
@@ -181,6 +193,60 @@ storage.bindColours = async (board) => {
   await new Promise((r) => setTimeout(r, 2500));
   const left = storage.unboundColours(board).jobs.map((j) => `${j.shape.name}:${j.prop}`);
   return { board: board.name, bound: jobs.length - left.length, left, unknown };
+};
+
+const openPage = async (name) => {
+  const page = penpotUtils.getPages().find((p) => p.name === name);
+  if (!page) throw new Error(`page not found: ${name}`);
+  await penpot.openPage(page.id);
+  await new Promise((r) => setTimeout(r, 500));
+};
+
+const mergeUnknown = (into, from) => {
+  for (const [key, { count, samples }] of Object.entries(from)) {
+    const entry = (into[key] ??= { count: 0, samples: [] });
+    entry.count += count;
+    entry.samples.push(...samples.slice(0, 3 - entry.samples.length));
+  }
+  return into;
+};
+
+// Binds every board of a page: one page per call. Waits once before returning, so the bindings
+// land before the next call switches the page (a page switch drops bindings still in flight).
+storage.bindPage = async (name) => {
+  await openPage(name);
+  const boards = penpot.currentPage.root.children.filter((c) => c.type === "board");
+  const tokens = {};
+  const unknown = {};
+  let applied = 0;
+  for (const board of boards) {
+    penpotUtils.findShapes((s) => s.name === "base-background" && s.type === "rectangle", board).forEach((s) => s.remove());
+    const found = storage.unboundColours(board);
+    mergeUnknown(unknown, found.unknown);
+    found.jobs.forEach((j) => j.shape.applyToken((tokens[j.token] ??= penpotUtils.findTokenByName(j.token)), [j.prop]));
+    applied += found.jobs.length;
+  }
+  await new Promise((r) => setTimeout(r, 3000));
+  const left = boards.flatMap((b) => storage.unboundColours(b).jobs.map((j) => `${b.name} / ${j.shape.name}:${j.prop}`));
+  return { page: name, applied, left, unknown, suspect: storage.suspectBindings() };
+};
+
+// Checks pages against the boards they should hold ({ page: [board names] }): missing, extra and
+// duplicate boards, overlaps and the shape count. Read-only; about ten pages fit in one call.
+storage.checkPages = async (expected) => {
+  const result = {};
+  for (const [name, boards] of Object.entries(expected)) {
+    await openPage(name);
+    const have = penpot.currentPage.root.children.map((c) => c.name);
+    result[name] = {
+      missing: boards.filter((n) => !have.includes(n)),
+      extra: have.filter((n) => !boards.includes(n)),
+      dupes: have.filter((n, i) => have.indexOf(n) !== i),
+      overlaps: storage.overlaps(),
+      shapes: storage.pageBudget().shapes,
+    };
+  }
+  return result;
 };
 
 // Text bound to a rail, border or status background token outside a badge: likely a wrong role.
@@ -242,5 +308,5 @@ storage.centreLabel = async (shape) => {
 
 return [
   "tree", "board", "pageBudget", "overlaps", "setMode", "applyTokenEach", "colourToken",
-  "unboundColours", "bindColours", "suspectBindings", "trimToOverlay", "centreLabel",
+  "unboundColours", "bindColours", "bindPage", "checkPages", "suspectBindings", "trimToOverlay", "centreLabel",
 ].filter((n) => typeof storage[n] === "function");

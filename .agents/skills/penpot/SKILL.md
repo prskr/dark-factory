@@ -19,7 +19,9 @@ description: Drawing and changing boards in the PenPot file "App Design" through
 | `storage.overlaps()` | Overlapping top-level boards of the current page |
 | `await storage.setMode(name)` | Switches theme group `Mode` to `Light` or `Dark` |
 | `await storage.bindColours(board)` | Binds every unbound fill and stroke of a board (itself included) to its token and deletes `base-background` rectangles; returns the count, what is left and the colours without a rule |
-| `storage.unboundColours(board)` | Dry run of `bindColours`: `{ jobs, unknown }` |
+| `storage.unboundColours(board)` | Dry run of `bindColours`: `{ jobs, unknown }`; `unknown` holds per colour its count and up to three sample paths (`Board / card / shape`); shapes with several fills or strokes show as `fill: N paints` and need a decision by hand |
+| `await storage.bindPage(name)` | Opens the page and binds every board of it, waiting before it returns; returns the count, what is left, unknown colours and suspect bindings |
+| `await storage.checkPages({ page: [boards] })` | Per page: missing, extra and duplicate boards, overlaps, shape count; read-only |
 | `storage.colourToken(shape, hex, prop, opacity)` | The colour rules: value plus role (text, rail, agent bubble, persona or own avatar, status badge, host icon tile by monogram) to token; `null` keeps a colour raw (translucent, Forgejo logo, not UI), `undefined` means no rule |
 | `storage.suspectBindings()` | Texts on a rail, border or status background token outside a badge: likely a wrong role |
 | `await storage.applyTokenEach(tokenName, shapes, props = ["fill"])` | Binds one token to the given shapes, skipping bound ones; returns the names still unbound |
@@ -46,11 +48,19 @@ Done when every new board is exported in light and dark, no new board overlaps a
 
 ## Binding colours
 
-The web UI is the reference for every colour role: `crates/df-web/styles/input.css` holds the tokens, `crates/df-web/src` the classes per element.
+The web UI is the reference for every colour role. Where the roles live in `crates/df-web`:
 
-1. Theme on `Light` (the rules compare raw colours with the light values). Run `storage.unboundColours(board)` and read `unknown`.
-2. For each unknown colour, find the element in the web UI and the token it uses. A colour the UI draws with an existing token goes into `OFF_TOKEN` in `helpers.js`; a value whose token depends on the element gets a role rule in `storage.colourToken`. A colour the UI lacks becomes a new token in both sets. Reinstall the helpers.
-3. `await storage.bindColours(board)`, one board per call. Done when `left` and `unknown` are empty.
+| Element | Source |
+|---|---|
+| Tokens, light and dark values | `styles/input.css` |
+| Badges, status dots, verdict pills, host icon tiles (tone per provider in `components/brands.json`) | `Tone` in `src/components/badges.rs`, `src/components/host_icon.rs` |
+| Buttons (primary, secondary, ghost, danger), icon buttons | `src/components/actions.rs` |
+| Avatars | `src/components/persona_avatar.rs`, `avatar()` in `src/components/shell.rs` |
+| Events table rows, graph edges and nodes | `src/egress/log/rows.rs`, `src/egress/log/graph.rs` |
+
+1. Theme on `Light`: the rules compare raw colours with the light values, and under `Dark` every bound fill reports its dark value. Run `storage.unboundColours(board)` and read `unknown`; its sample paths name the shapes.
+2. For each unknown colour, find the element in the web UI and the token it uses. A colour the UI draws with an existing token goes into `OFF_TOKEN` in `helpers.js`; a value whose token depends on the element gets a role rule in `storage.colourToken`. A colour the UI lacks becomes a new token in both sets. Add a case to `helpers.test.js` (`node --test .agents/skills/penpot/helpers.test.js`; pre-commit runs it), then reinstall the helpers by passing the whole file: a partial reinstall drifts from it.
+3. `await storage.bindColours(board)` for one board, `await storage.bindPage(name)` for a whole page; one page per call. Done when `left` and `unknown` are empty.
 4. `storage.suspectBindings()` lists texts that landed on a rail, border or status token outside a badge; rebind each to its role (`color.text`, `color.muted`, `color.faint`).
 5. Export the board in dark. Text that vanishes or stays light marks a wrong role or an unbound shape: fix the rule in `helpers.js`, not only the shape, so the next page binds right.
 
@@ -59,9 +69,9 @@ The web UI is the reference for every colour role: `crates/df-web/styles/input.c
 For a page far over the page budget, with outdated boards or explicit dark boards:
 
 1. List the boards with their shape counts and the mapping rows of the page (`docs/design-workflow.md`). Group them by topic so each group stays within the page budget; propose the split, deletions and merges to the user. Explicit dark boards go: the theme previews dark.
-2. The user creates the pages `<Section> - <Topic>` and moves the boards (cut and paste in the PenPot UI). Check every page afterwards: all boards arrived, no stray layers, no overlaps.
+2. The user creates the pages `<Section> - <Topic>` and moves the boards (cut and paste in the PenPot UI). Check every page afterwards with `storage.checkPages`, giving it the planned boards per page: done when nothing is missing, extra or duplicated and no board overlaps.
 3. Save a version first (`await penpot.currentFile.saveVersion(label)`): the file history may hold no autosave, and the plugin can't undo. Then cut every board that changes only one part to a partial board with `storage.trimToOverlay`: dialog or modal, menu with its column, the changed column (`Details`, `Transcript`, `Main`) or a nested panel. Keep one full-screen board per page for context. Export the boards with an overlay: a menu clipped or hidden behind its base means a wrong `keep` order.
-4. Bind the colours of every board ("Binding colours").
+4. Bind the colours of every page with `storage.bindPage`, one page per call ("Binding colours").
 5. Update the page table and the page and board names in the mapping of `docs/design-workflow.md`; mark partial boards in the Data column.
 
 ## API gotchas
@@ -74,7 +84,8 @@ For a page far over the page budget, with outdated boards or explicit dark board
 | Token binding of a board times out or binds a few shapes per minute | `waitForLayoutUpdate` after each `applyToken` stalls | Apply all, then wait once: `storage.bindColours`, `storage.applyTokenEach`. After a timeout, `storage.unboundColours` shows what is left. |
 | Some cloned shapes stay unbound after `token.applyToShapes([...])` | Batch token application skips shapes silently | `storage.applyTokenEach`. |
 | A token binding disappears after `applyToken`; the raw colour stays | Applying a token the shape already carries removes the binding (a toggle); `shape.tokens` shows a new binding only after a moment | The helpers skip bound shapes and wait 2.5 s before they check. Never re-apply "to be sure". |
-| Token bindings vanish | The page changed before PenPot applied them | Check `shape.tokens` before you switch the page. |
+| Token bindings vanish | The page changed before PenPot applied them | Bind through `storage.bindPage` or `storage.applyTokenEach`, which wait before they return; in your own loops, wait before you switch the page. |
+| A call over several pages times out, though each page alone works | The call runs past the MCP time limit (about a minute) | Writes: one page per call. Reads: about ten pages per call. |
 | `openPage` fails with "Expected a Page object or a page UUID string"; `page.root` is undefined | `penpotUtils.getPages()` returns descriptors, not pages, and only the open page has a `root` | `await penpot.openPage(descriptor.id)`, then read `penpot.currentPage.root`. |
 | A board's own fill stays unbound | `penpotUtils.findShapes(pred, board)` skips `board` itself | Check `[board, ...findShapes(...)]`, as `storage.unboundColours` does. |
 | `board.removeFlexLayout is not a function` | The flex layout is removed through its object | `board.flex.remove()`. |

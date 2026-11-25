@@ -49,6 +49,11 @@ pre-commit:
     check-file-length:
       run: build/with_tools.sh cargo xtask check-file-length {staged_files}
 
+    # The PenPot helpers run in the plugin, untested there: their rules are tested against stubs.
+    penpot-helpers:
+      glob: '.agents/skills/penpot/*.js'
+      run: node --test .agents/skills/penpot/helpers.test.js
+
     check-test-names:
       glob: '*.rs'
       run: build/with_tools.sh cargo xtask check-test-names {staged_files}
