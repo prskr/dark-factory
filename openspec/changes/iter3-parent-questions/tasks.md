@@ -29,7 +29,7 @@ Container-backed tests (`df_test_postgres`) need a container socket; see `AGENTS
 ## 3. Answering
 
 - [ ] 3.1 Write failing tests, then make `decision_message` name agent deciders as `<key> (<persona>)` (design D5). Verify with `cargo test -p df-db decision_message`, covering the scenario "Parent answers" (message text).
-- [ ] 3.2 Write failing `df-agent-channel` tests, then add `to` to `ask_question` and the new `answer_question` (contract `factory-tools.v2.json`, handlers per design D2 and D5). Verify with `cargo test -p df-agent-channel ask_question answer_question`. The tests cover:
+- [ ] 3.2 Write failing `df-agent-channel` tests, then add `to` to `ask_question` and the new `answer_question` (contract `factory-tools.v2.json`, handlers per design D2 and D5). Verify with `cargo nextest run -p df-agent-channel ask_question answer_question`. The tests cover:
   - the spec `factory-tools` scenarios of "ask_question" and "answer_question", including an answer that doesn't fit the kind (the `InvalidAnswer` message of `check`);
   - the `agent-requests` scenarios "Sibling tries to answer", "Readdressed question" and "Human answers a question addressed to the parent".
 - [ ] 3.3 Write a failing test, then add `answer_question` to `CHAT_TOOLS` (design D6). Verify with the scenario "Chat answers a subtask", via `cargo test -p df-agent-channel chat_tools`.

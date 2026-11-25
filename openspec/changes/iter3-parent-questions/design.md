@@ -89,21 +89,23 @@ The author is `System { reason: "question.asked" }`, with one visible text block
 
 ```
 DF-21 "Implement login" asks you a question (request 3f2a…). It is waiting for your answer.
-Kind: single_choice, Other allowed. Options: yes: Yes, keep it | no: No, remove it
+Kind: single_choice, Other allowed. Options (id: label):
+- yes: Yes, keep it
+- no: No, remove it
 Answer with answer_question (selected: option ids, other: your own text).
 
 Question from the agent of DF-21:
 > Keep the old API?
 ```
 
-The kind line follows `question-kinds`: `single_choice` or `multi_choice` with the options as `id: label` and, for multiple choice, the limits ("choose 1 to 3"); `text` reads "Kind: text. Answer with answer_question (text: Markdown)." With `blocking: false` the second sentence reads "It continues meanwhile." The quoted text, labels and descriptions are untrusted, as is any agent output.
+The kind line follows `question-kinds`: `single_choice` or `multi_choice` with one option per line as `- id: label` (labels on one line, as `question-kinds` requires) and, for multiple choice, the hint of `QuestionSpec::limit_hint` ("Choose 1 to 3"); `text` reads "Kind: text. Answer with answer_question (text: Markdown)." With `blocking: false` the second sentence reads "It continues meanwhile." The quoted text, labels and descriptions are untrusted, as is any agent output.
 
 ### D5: Answering
 
 - **`answer_question` handler:**
   1. Loads the request.
   2. Returns `NotAddressed` unless `addressee_task_id` equals the run's task and `readdressed_at IS NULL`.
-  3. Builds a `QuestionAnswer` (`question-kinds` D2) from `selected`, `other` and `text`: `other` present means Other was chosen; `_other` is not used in the tool.
+  3. Builds a `QuestionAnswer` (`question-kinds` D2) by the stored kind: from `selected` and `other` for a choice question (`other` present means Other was chosen; `_other` is not used in the tool), from `text` for a text question. Empty fields of the other kind (`null`, `[]`, `""`) are ignored, as for `ask_question` (`question-kinds` Q8); a non-empty one is rejected with "This answer does not fit the question.".
   4. Calls `decide` with the run's agent principal, `roles = []` and `Decision::Answer(answer)`; `decide` runs `QuestionSpec::check`, as for a human.
   5. Maps the errors:
      - `AlreadyDecided`: the result names the decider, or the close reason, from the stored row.
