@@ -36,6 +36,8 @@ Spawn `subagent_type: implementer` with: change name, store id (or none), iterat
 When it reports:
 - `BLOCKED`: ask the user the question with `AskUserQuestion`, then send the answer to the same implementer with `SendMessage`. If the implementer proposes an artifact change, suggest `/openspec-update-change` and stop.
 - Any check failed or `COMMIT: none`: send it back once to fix. If it fails again, show the failure to the user and stop.
+- Take the task count from `openspec instructions apply --change <name> --json` (with `--store`), not from the report. A task the report calls done but `tasks.md` leaves open is a blocking finding (step 4).
+- A behavior claim in the report without a named test is unverified: pass it to the reviewers as a claim to check, never into the ledger as a fact.
 - Record the commit SHA as `HEAD_n` in the ledger.
 
 ## 3. Review
@@ -57,7 +59,7 @@ For every finding, decide each of the following and record it in the ledger.
 **Verify first.** Open the cited code for every finding a reviewer rates `critical` or `major`, for any finding that looks doubtful, and for every finding whose fix would change runtime behavior (what is pushed, stored, sent or deleted), whatever its severity. For those, check the fix against the spec and design as a whole, not only the sentence the reviewer quotes: a minor "the code is stricter than the spec" finding once led to a fix that let the runtime overwrite human commits. Mark false positives `rejected` with a one-line reason. Merge findings from different axes that describe the same defect into one entry and keep all IDs. Keep the axis label on each entry.
 
 **Blocking** (must be fixed before the change is done):
-- A spec requirement is missing, partial or wrong. A spec scenario has no test.
+- A spec requirement is missing, partial or wrong. A spec scenario has no test. A task in `tasks.md` is still open.
 - A correctness bug, a data-loss path, or a race.
 - A security issue: untrusted input not validated, an agent-controlled path or symlink followed, a secret logged or written under `/data`.
 - A breach of a MUST rule in `AGENTS.md` or `CODING_STANDARDS.md`: a panic, `unwrap` or `expect` on input or I/O in a production path; a lock held across `.await`; a network wait without a timeout; a spawned task without an owner; a fixed bug without a regression test.

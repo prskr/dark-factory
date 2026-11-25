@@ -60,30 +60,11 @@ This skill rewrites local history and publishes the result. Every step that push
 
 1. Check whether a PR exists: `gh pr view <branch> --json number,url,state`.
 2. Title: the squash commit subject.
-3. Body: follow the format of the recent feature PRs (for example #316). Write it in the style of `~/.claude/CLAUDE.md`: technical and concise, without filler. Sources: the proposal, `design.md`, the archived ledger (`openspec/changes/archive/<date>-<name>/review-log.md`, Finish section) and `git diff --stat`.
-   ```markdown
-   <One or two sentences: what users or operators get. OpenSpec change `<name>` (archived in this PR).>
-
-   ## Changes
-
-   - **<Area>:** <what changed, from the user's or operator's view; implementation detail only where a reviewer needs it>
-   - **Docs:** <pages added or changed>
-   - **OpenSpec:** the change is archived, its deltas are synced into the `<capability>` specs, and the follow-ups are in the roadmap backlog.
-
-   ## Breaking changes
-
-   - <one bullet per BREAKING item in the proposal, with the upgrade step; omit the section if there is none>
-
-   ## Testing
-
-   - <checks and suites that passed, with counts from the ledger: cargo tests, clippy, machete, xtask checks, Bazel build and test, docs-build, e2e>
-
-   **Not verified:**
-   - <container tests skipped, known unrelated failures, open items from an `untested` or `stopped` ledger; omit if empty>
-
-   <attribution line from the session's system reminder>
-   ```
-   Add `Closes #<n>` only when the proposal or the ledger names an issue.
+3. Body: load skill `pr` and write the body with its template. Sources: the proposal, `design.md` (its sequence diagram is a ready Summary visual), the archived ledger (`openspec/changes/archive/<date>-<name>/review-log.md`, Finish section) and `git diff --stat`. A finished change adds to that template:
+   - **Summary:** one line naming the OpenSpec change `<name>` (archived in this PR) and the specs its deltas were synced into.
+   - **Evidence:** the checks and suites that passed, with counts from the ledger (tests, clippy, machete, xtask checks, Bazel, docs-build, e2e), then **Not verified:** container tests skipped, known unrelated failures, and the open items of an `untested` or `stopped` ledger.
+   - **Merge Danger:** every BREAKING item of the proposal and every upgrade step (`docs/content/operations/upgrades.md`) the change adds.
+   - `Closes #<n>` only when the proposal or the ledger names an issue, and the attribution line from the session's system reminder last.
 4. Show the title and body, then ask "Open the PR (Recommended)" / "Change it (say what)" / "Stop". Write the body to a file in the scratchpad.
 5. Create it: `gh pr create --base main --head <branch> --title "<title>" --body-file <file>`. If a PR already exists, update it instead: `gh pr edit <number> --title … --body-file …`.
 6. Check: `gh pr view <branch> --json headRefOid,url` must match `git rev-parse HEAD`. If the SHAs differ, the push went wrong; report it, and do not force anything without asking.

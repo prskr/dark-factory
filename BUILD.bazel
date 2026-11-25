@@ -37,6 +37,7 @@ bazel_env(
         "kind": TOOLS["kind"],
         "kingfisher": TOOLS["kingfisher"],
         "lefthook": TOOLS["lefthook"],
+        "pnpm": "@pnpm",
         "kube-linter": TOOLS["kube-linter"],
         "kubeconform": TOOLS["kubeconform"],
         "rustc": "@rules_rust//tools/upstream_wrapper:rustc",

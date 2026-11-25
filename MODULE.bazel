@@ -347,6 +347,10 @@ npm.npm_translate_lock(
 )
 use_repo(npm, "npm_claude_harness", "npm_df_web", "npm_playwright_server")
 
+# pnpm for `pnpm install --frozen-lockfile` in crates/df-web (the plain cargo build reads its node_modules): `//:bazel_env`.
+pnpm = use_extension("@aspect_rules_js//npm:extensions.bzl", "pnpm")
+use_repo(pnpm, "pnpm")
+
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 NODE_VERSION = "v24.22.2"
