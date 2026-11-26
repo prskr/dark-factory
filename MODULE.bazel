@@ -375,21 +375,21 @@ http_archive(
 
 # The OpenCode release the opencode-harness image ships; `deploy/images/check_versions.sh` compares
 # it with the other copies of the version.
-OPENCODE_VERSION = "2.4.1"
+OPENCODE_VERSION = "2.4.2"
 
 OPENCODE_BUILD = 'exports_files(["opencode"], visibility = ["//visibility:public"])'
 
 http_archive(
     name = "opencode_linux_amd64_musl",
     build_file_content = OPENCODE_BUILD,
-    sha256 = "3d8d0ba66d33e1631ebe61b5539cd2ef971a724ff68eb286554093bf55ba5c9f",
+    sha256 = "18da90a43773806cb8471f74cc83143ded86ea4cfa863e9dab691cfcfd8087e7",
     url = "https://github.com/anomalyco/opencode/releases/download/v{0}/opencode-linux-x64-musl.tar.gz".format(OPENCODE_VERSION),
 )
 
 http_archive(
     name = "opencode_linux_arm64_musl",
     build_file_content = OPENCODE_BUILD,
-    sha256 = "814d92dc6ce172a382090797df7072b7fe0f2840f2440838228196789c0e352f",
+    sha256 = "0e818d340b8185938b614e0011cd845f1523533abe695f1f9a5cc2f78ddb3cf8",
     url = "https://github.com/anomalyco/opencode/releases/download/v{0}/opencode-linux-arm64-musl.tar.gz".format(OPENCODE_VERSION),
 )
 
