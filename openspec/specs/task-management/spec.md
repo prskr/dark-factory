@@ -94,11 +94,15 @@ A task SHALL have exactly one status: `awaiting_dependencies` (unsatisfied depen
 - **THEN** its status is `awaiting_dependencies`
 
 ### Requirement: Task status groups
-`awaiting_dependencies`, `waiting`, `blocked`, `in_review` and `limit_reached` SHALL form the "Waiting" group of the task list filters, `completed` and `failed` the "Done" group.
+`awaiting_dependencies`, `waiting`, `blocked`, `in_review` and `limit_reached` SHALL form the "Waiting" group, `completed`, `cancelled` and `failed` the "Done" group. The project counters and the `waiting` link filter of the task list SHALL use the "Waiting" group; the task list's Active filter SHALL cover every status outside the "Done" group.
 
 #### Scenario: Waiting group
 - **WHEN** the task list is filtered by the "Waiting" group
 - **THEN** it lists the tasks in status `awaiting_dependencies`, `waiting`, `blocked`, `in_review` and `limit_reached`
+
+#### Scenario: Active filter
+- **WHEN** the task list is filtered by Active
+- **THEN** it lists the tasks in every status except `completed`, `cancelled` and `failed`
 
 ### Requirement: Change notifications
 Writes that change a task, run, transcript or queued message SHALL publish a notification after commit, so any control plane replica can react without polling.

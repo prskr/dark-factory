@@ -147,7 +147,7 @@ At 1280 px and more, a task's page SHALL show the task list, the transcript with
 - **THEN** a bottom sheet with status line, links, project, persona, branch and runs opens over the transcript
 
 ### Requirement: Task list filters
-The task list SHALL filter by status group (Active = queued, running, rate limited; Waiting = awaiting dependencies, waiting, blocked, in review, limit reached; Done = completed, failed; All) and by project, with Active and all projects as default. The URL SHALL also accept the narrower filters `queued` (queued) and `running` (running, rate limited), which have no chip and leave all chips unselected. Filters SHALL be part of the URL and SHALL also apply to live updates.
+The task list SHALL filter by status group (Active = queued, running, rate limited, awaiting dependencies, waiting, blocked, in review, limit reached; Done = completed, cancelled, failed; All) and by project (default: Active, all projects). The URL SHALL also take narrower filters `queued` (queued), `running` (running, rate limited) and `waiting` (the "Waiting" status group), which have no chip and select none. Filters SHALL be in the URL and apply to live updates.
 
 #### Scenario: Live update respects filters
 - **WHEN** the list shows Active tasks and a listed task becomes `completed`
@@ -160,6 +160,18 @@ The task list SHALL filter by status group (Active = queued, running, rate limit
 #### Scenario: Task released from its dependencies
 - **WHEN** the list shows Waiting tasks and a listed task leaves `awaiting_dependencies` for `queued`
 - **THEN** the task leaves the list without a reload
+
+#### Scenario: Active includes tasks that wait
+- **WHEN** the task list opens with the default filter and there are tasks in `running`, `waiting`, `blocked` and `in_review`
+- **THEN** all of them are listed, and the chips are Active, Done and All
+
+#### Scenario: Waiting task stays in Active
+- **WHEN** the list shows Active tasks and a listed task goes from `running` to `waiting`
+- **THEN** the task stays in the list
+
+#### Scenario: Waiting from a project counter
+- **WHEN** `/tasks?status=waiting` is opened from a project's Waiting counter
+- **THEN** only tasks in awaiting dependencies, waiting, blocked, in review and limit reached are listed, and no status chip is marked current
 
 ### Requirement: Project filter
 From 768 px the project menu SHALL sit in the task list's title row and offer a search over project names and keys; below 768 px the list SHALL offer no project menu and is filtered by project from the Projects screen, showing the project as a removable filter.
