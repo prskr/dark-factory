@@ -34,6 +34,14 @@ _Avoid_: Suggested answer, choice, alternative
 A task whose parent task is set.
 _Avoid_: Child task, sub-task
 
+**Top-level task**:
+A task without a parent task, or whose parent task is a chat. A subtask of a chat is a top-level task.
+_Avoid_: Root task, parent-less task
+
+**Needs you**:
+A task waits for a human: its agent waits for a message, a blocking question or approval went unanswered, or its pull request is in review and no agent may merge it. A task also needs you when any task below it does.
+_Avoid_: Waiting (a status), needs me, action required
+
 **Routine**:
 A schedule that creates a new task with a fixed persona and prompt in a project each time it fires, unless the task from its previous firing is still open.
 _Avoid_: Cron job, scheduled task, recurring task
