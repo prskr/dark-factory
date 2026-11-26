@@ -27,7 +27,7 @@ The persona list SHALL be ordered by handle and show each persona as a card with
 - **THEN** its card shows "No system prompt yet"
 
 ### Requirement: Grouped persona form
-The persona's fields SHALL be shown in the groups "Identity", "Agent" and "Commits", as on the approved PenPot boards. The "New persona" modal (and phone sheet) SHALL show all three groups in this order. On the persona settings page the General tab SHALL show "Identity" and "Agent", and the Commits tab SHALL show "Commits"; the system prompt has a tab of its own ("Persona system prompt in the Markdown editor"). Each group SHALL have a heading and SHALL be a region named by it, with a horizontal separator between consecutive groups, like the grouped project form. Grouping SHALL NOT change field names, validation or what saving stores.
+The persona's fields SHALL be shown in the groups "Identity", "Agent" and "Commits". The "New persona" modal (and phone sheet) SHALL show all three in this order; on the persona settings page the General tab SHALL show "Identity" and "Agent" and the Commits tab "Commits". Each group SHALL have a heading and SHALL be a region named by it, with a separator between consecutive groups. Grouping SHALL NOT change field names, validation or what saving stores.
 
 #### Scenario: Groups of the New persona modal
 - **WHEN** a board member opens "New persona"
