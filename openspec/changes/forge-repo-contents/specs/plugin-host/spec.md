@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Capability detection
-At load time the host SHALL detect which capability interfaces (`pull-requests`, `issues`, `webhooks`, `ci`, `contents`) a component exports and SHALL refuse to load components whose imports go beyond world `plugin-base`. A component SHALL export `pull-requests` or `issues` to load; `contents` or `webhooks` alone SHALL NOT suffice. World `plugin-base` includes the host interface `webhook-signature`. Every import of world `plugin-base`, including the interfaces it pulls in transitively, SHALL be accepted.
+At load time the host SHALL detect which capability interfaces (`pull-requests`, `issues`, `webhooks`, `ci`, `contents`) a component exports and SHALL refuse to load components whose imports go beyond world `plugin-base`. A component SHALL export `pull-requests` or `issues` to load; `contents` or `webhooks` alone SHALL NOT suffice. World `plugin-base` includes the host interface `webhook-signature`. Every import of world `plugin-base`, transitive ones included, SHALL be accepted.
 
 #### Scenario: Forge plugin
 - **WHEN** the Forgejo component is loaded

@@ -22,7 +22,7 @@ Every run of a chat SHALL receive the persona's system prompt followed by fixed 
 - **THEN** the chat instructions do not name `remember`, also when memory is switched on before a reconnect of that run
 
 ### Requirement: Tools of a chat run
-A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `send_message`, `report_progress`, `request_approval`, `write_artifact`, `list_artifacts`, `read_artifact`, `list_issues`, `create_issue` and `search_history`, plus `remember`, `recall` and `forget` when memory was on for the project at the run's first `Assign`, and SHALL NOT be offered `complete_task`, `ask_question`, `update_pull_request` or `comment_on_issue`. A call to a tool not offered SHALL be answered with a tool error and change nothing.
+A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `send_message`, `report_progress`, `request_approval`, `write_artifact`, `list_artifacts`, `read_artifact`, `list_issues`, `create_issue` and `search_history`, plus `remember`, `recall` and `forget` if the project had memory on at the run's first `Assign`, and SHALL NOT be offered `complete_task`, `ask_question`, `update_pull_request` or `comment_on_issue`. Other tool calls SHALL get a tool error and change nothing.
 
 #### Scenario: Delegation from a chat
 - **WHEN** the agent of `DF-12-CHAT` calls `create_task` for persona Linus

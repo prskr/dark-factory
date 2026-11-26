@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Configuration forms as modals
-Creating a project or a model provider, and creating and editing a persona, credential reference or routine, SHALL happen in a modal over the corresponding list (a full-height sheet below 768 px). A validation error SHALL keep the modal open with the entered values and the error at the field. Saving a persona, credential reference or routine SHALL close the modal and update the list without a full page load. Creating a project or a model provider SHALL close the modal and open the new item's settings page.
+Creating a project or a model provider, and creating and editing a persona, credential reference or routine, SHALL happen in a modal over the corresponding list (a full-height sheet below 768 px). A validation error SHALL keep the modal open with the entered values and the error at the field. Saving a persona, credential reference or routine SHALL close the modal and update the list without a page load. Creating a project or a model provider SHALL close the modal and open its settings page.
 
 #### Scenario: Validation error in the modal
 - **WHEN** a credential reference is submitted without a key

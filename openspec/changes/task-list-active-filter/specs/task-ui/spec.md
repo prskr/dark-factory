@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Task list filters
-The task list SHALL filter by status group (Active = queued, running, rate limited, awaiting dependencies, waiting, blocked, in review, limit reached; Done = completed, failed; All) and by project, with Active and all projects as default. The URL SHALL also accept the narrower filters `queued` (queued), `running` (running, rate limited) and `waiting` (awaiting dependencies, waiting, blocked, in review, limit reached), which have no chip and leave all chips unselected. Filters SHALL be part of the URL and SHALL also apply to live updates.
+The task list SHALL filter by status group (Active = queued, running, rate limited, awaiting dependencies, waiting, blocked, in review, limit reached; Done = completed, failed; All) and by project (default: Active, all projects). The URL SHALL also take narrower filters `queued` (queued), `running` (running, rate limited) and `waiting` (awaiting dependencies, waiting, blocked, in review, limit reached), which have no chip and select none. Filters SHALL be in the URL and apply to live updates.
 
 #### Scenario: Live update respects filters
 - **WHEN** the list shows Active tasks and a listed task becomes `completed`
