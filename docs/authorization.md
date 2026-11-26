@@ -14,6 +14,21 @@ Contributor reference: who can act in Dark Factory, how each kind of caller is i
 | Forge | `POST /webhooks/{plugin}` | Signature over the body with the per-project webhook secret, checked by the forge plugin | `df-web/src/webhooks.rs`, `dark-factory/src/forge.rs`; the secret is shown in `df-web/src/project_webhook.rs` |
 | Anyone | `/healthz`, `/readyz`, static assets, `/lifecycle-events/public-key`, `/login`, `/auth/callback`, `/logout`; `/webhooks/{plugin}` (signature checked, row above) | Nothing: these routes are outside `require_board_member` (`base_routes` and the `ui` router in `df-web/src/lib.rs`; the webhook router is merged in `dark-factory/src/main.rs`) | `df-web/src/lib.rs` |
 
+### Routes without login
+
+Checked on 2026-11-26. Each of these must work without a session:
+
+| Route | Why it is public |
+|---|---|
+| `/healthz`, `/readyz` | Kubernetes probes cannot log in. `/readyz` pings the database with a timeout. Both are on the UI port, so they are also reachable through the ingress (low risk; a separate probe port like the gateway's `health_port` would remove that). |
+| `/assets/{*path}`, `/assets/code-theme.css` | Embedded static files (CSS, scripts, icons), looked up by name in the embedded set; the login and error pages need them. |
+| `/lifecycle-events/public-key` | The public key subscribers use to verify signed lifecycle events; it is not secret. |
+| `/login`, `/auth/callback` | The OIDC login flow, before a session exists. |
+| `/logout` | `POST`, behind the CSRF guard; it only ends the caller's own session. |
+| `/webhooks/{plugin}` | Forge deliveries; authenticated by their signature (table above). |
+
+Every other UI route is merged into the pages router behind `require_board_member`. Without `auth` in the instance configuration, only the base routes and `/webhooks/{plugin}` are served. The other ports are not part of the web UI: the agent port and the internal gRPC ports use mTLS (table above), the gateway's proxy and Git ports identify the sandbox by pod IP, and the metrics port is reachable only from the scraper (network policy).
+
 An agent never has a role. What an agent may do is decided by its run (task, project, persona) and by the factory tools offered in `Assign`; instance operations with permission modes come with `iter4-permissions`.
 
 ## Human roles
