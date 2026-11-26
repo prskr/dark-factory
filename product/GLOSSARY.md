@@ -39,7 +39,7 @@ A task without a parent task, or whose parent task is a chat. A subtask of a cha
 _Avoid_: Root task, parent-less task
 
 **Needs you**:
-A task waits for a human: its agent waits for a message, a blocking question or approval went unanswered, or its pull request is in review and no agent may merge it. A task also needs you when any task below it does.
+A task or chat waits for a human. A task needs you when its agent waits for a message or ran into a limit, a blocking question or approval went unanswered, or its pull request is in review and no agent may merge it. A chat needs you while one of its requests waits for a decision.
 _Avoid_: Waiting (a status), needs me, action required
 
 **Routine**:

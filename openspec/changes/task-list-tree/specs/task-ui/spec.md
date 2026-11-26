@@ -29,11 +29,15 @@ A task row in the task list SHALL show a done/total chip when the task has subta
 ## ADDED Requirements
 
 ### Requirement: Top-level tasks in the task list
-With a status chip selected (Active, Done or All), the task list SHALL list only top-level tasks, and the status and project filters SHALL select among them. The link-only status filters (`queued`, `running`, `waiting`) SHALL list every matching task, subtasks included, as rows without disclosure control.
+With a status chip selected (Active, Done or All), the task list SHALL list only top-level tasks, and the status and project filters SHALL select among them. Active SHALL also list a top-level task in a final status while a task below it needs you. The link-only status filters (`queued`, `running`, `waiting`) SHALL list every matching task, subtasks included, as rows without disclosure control.
 
 #### Scenario: Default list
 - **WHEN** `DF-30` (top-level) has subtask `DF-31`, and `DF-40` was created by chat `DF-12-CHAT`
 - **THEN** the default list shows `DF-30` and `DF-40`, and not `DF-31`
+
+#### Scenario: Done parent with a waiting subtask
+- **WHEN** a board member marked `DF-30` done while its subtask `DF-31` is still open, and `DF-31` becomes `waiting`
+- **THEN** Active lists `DF-30` with the needs-you dot until `DF-31` no longer needs you
 
 #### Scenario: Project counter link
 - **WHEN** `/tasks?status=waiting` is opened and subtask `DF-31` is `waiting`
@@ -55,19 +59,49 @@ A top-level task row with subtasks SHALL have a disclosure control that opens or
 - **THEN** its row has no disclosure control
 
 ### Requirement: List scoped to a subtask
-A subtask row with subtasks of its own SHALL have a control that opens the task list scoped to that subtask (`parent` in the URL): the subtask first, then its direct subtasks indented one level, and a breadcrumb of "Tasks" and every ancestor up to the top-level task, each a link. The scoped list SHALL hide the status chips and the project filter and SHALL update live.
+A row listed below an open task or in a scoped list, whose task has subtasks, SHALL have a control that scopes the task list to that task (`parent` in the URL): the task first, then its direct subtasks indented one level, and a breadcrumb of "Tasks", every ancestor and the task's key. The scoped list SHALL hide the status chips and the project filter and SHALL update live.
 
 #### Scenario: Second level
 - **WHEN** `DF-12` is open and a board member activates the control of its subtask `DF-17`, whose subtasks are `DF-21` and `DF-22`
 - **THEN** the list shows `DF-17` with `DF-21` and `DF-22` below it and the breadcrumb "Tasks › DF-12 › DF-17"
 
-#### Scenario: Back up
-- **WHEN** the list is scoped to `DF-17` and a board member activates "DF-12" in the breadcrumb
-- **THEN** the list is scoped to `DF-12`
+#### Scenario: Back up one level
+- **WHEN** the list is scoped to `DF-22`, a subtask of `DF-17`, and a board member activates "DF-17" in the breadcrumb
+- **THEN** the list is scoped to `DF-17`
 
-#### Scenario: Back to the full list
-- **WHEN** the list is scoped to `DF-17` and a board member activates "Tasks"
-- **THEN** the list shows the top-level tasks with the previous status and project filters
+#### Scenario: Back to the top-level task
+- **WHEN** the list is scoped to `DF-17` and a board member activates "DF-12" in the breadcrumb
+- **THEN** the list shows the top-level tasks with the previous status and project filters and `DF-12` open
+
+### Requirement: Breadcrumb links
+In the breadcrumb of a scoped list, "Tasks" SHALL link to the top-level list with the previous status, project and sort, the top-level task SHALL link to that list with the task open, every other ancestor SHALL link to the list scoped to it, and the scoped task's own key SHALL NOT be a link.
+
+#### Scenario: Breadcrumb of a third-level task
+- **WHEN** the list is scoped to `DF-22` under `DF-17` under `DF-12`, with status filter Done
+- **THEN** "Tasks" leads to `/tasks?status=done`, "DF-12" to `/tasks?status=done&open=DF-12`, "DF-17" to the list scoped to `DF-17`, and "DF-22" is plain text
+
+### Requirement: Needs you
+A task SHALL need you when it is `waiting`, `blocked` or `limit_reached`, or when it is `in_review`, unless it has a parent task and no pull request or pending pull-request job, or its project has `subtask_merge: parent-agent`, its base task is its parent and the parent is not final.
+
+#### Scenario: Subtask in review, humans merge
+- **WHEN** project `DF` has `subtask_merge: human` and subtask `DF-16` of `DF-12` is `in_review` with a PR
+- **THEN** `DF-16` needs you
+
+#### Scenario: Subtask in review, parent agent merges
+- **WHEN** project `DF` has `subtask_merge: parent-agent` and subtask `DF-31` of the running `DF-30`, with base task `DF-30`, is `in_review` with a PR
+- **THEN** `DF-31` does not need you
+
+#### Scenario: Parent agent gone
+- **WHEN** the same `DF-31` is `in_review` with a PR and `DF-30` was cancelled
+- **THEN** `DF-31` needs you
+
+#### Scenario: Research subtask without PR
+- **WHEN** subtask `DF-22` of `DF-20` is `in_review` without PR and without pending PR job
+- **THEN** `DF-22` does not need you
+
+#### Scenario: Limit reached
+- **WHEN** `DF-14` is `limit_reached`
+- **THEN** `DF-14` needs you
 
 ### Requirement: Status cues on task rows
 A task row SHALL show no status badge for `running` and for `completed`; a `completed` task's title SHALL be struck through. A task that needs you SHALL show the needs-you dot in place of its badge. Every other status SHALL keep its badge.
@@ -85,15 +119,15 @@ A task row SHALL show no status badge for `running` and for `completed`; a `comp
 - **THEN** its row shows the failed badge
 
 ### Requirement: Needs-you dot
-A task SHALL need you when it is `waiting` or `blocked`, or `in_review` unless its project has `subtask_merge: parent-agent` and its base task is its parent. A row SHALL show the needs-you dot when its task or any task below it needs you; when only tasks below it do, its status line SHALL read "N subtask(s) need(s) you". The dot SHALL update live.
+A row SHALL show the needs-you dot when its task or any task below it needs you, next to the task's own cue (badge or struck-through title). When only tasks below it need you, its status line SHALL read "1 subtask needs you" or "N subtasks need you", unless the row shows a resume time. The dot SHALL update live.
 
-#### Scenario: Subtask in review, humans merge
-- **WHEN** project `DF` has `subtask_merge: human` and subtask `DF-16` of `DF-12` is `in_review`
-- **THEN** `DF-16` and `DF-12` show the dot, and the status line of `DF-12` reads "1 subtask needs you"
+#### Scenario: Running parent
+- **WHEN** `DF-12` is `running` and one task below it needs you
+- **THEN** `DF-12` shows the dot and the status line "1 subtask needs you"
 
-#### Scenario: Subtask in review, parent agent merges
-- **WHEN** project `DF` has `subtask_merge: parent-agent` and subtask `DF-31` of `DF-30`, with base task `DF-30`, is `in_review`
-- **THEN** `DF-31` shows the in review badge and `DF-30` shows no dot for it
+#### Scenario: Failed parent
+- **WHEN** `DF-8` is `failed` and two tasks below it need you
+- **THEN** `DF-8` shows the failed badge, the dot and "2 subtasks need you"
 
 #### Scenario: Two levels down
 - **WHEN** `DF-22`, a subtask of `DF-17`, which is a subtask of `DF-12`, becomes `blocked`
