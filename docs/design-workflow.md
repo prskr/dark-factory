@@ -71,7 +71,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Tasks - Subtasks | Task tree: Subtasks tab with progress and per-subtask chips, done/total chip on task rows |
 | Tasks - Filter and new task | New task (full screen); project filter, sort tooltip and menu (partial boards: task list and menu); new task options and branch held (dialog only) |
 | Request Inbox | Request inbox, deny always, create-issue request states; phone |
-| Config - Projects | Projects: two-line list rows, project settings general (full screen); saved, security, context (partial boards: main column only); new-project modal (modal only); phone |
+| Config - Projects | Projects: two-line list rows, project settings general (full screen); saved, security (partial boards: main column only); new-project modal (modal only); phone |
 | Config - Project integrations | Integrations tab (full screen) and its subscription states (partial boards: main column only) |
 | Config - Project integrations off | Integrations tab without the feature, publicUrl, webhook support or forge integration, with unrestricted URLs (partial boards: main column only); phone |
 | Config - Project egress | Egress tab (full screen) and its states (partial boards: main column only); phone |
@@ -130,11 +130,10 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 - After *Create rule* the traffic page shows the "Rule created" toast only; rows keep their verdict (no "Rule added" state): a row is an event that already happened.
 - Approval cards show the summary line and the scope picker only for a registered approval type. `serve` registers none yet, so approvals render with the reason, the comment field and the buttons only.
 - Tool rows show title, kind and status. The values on the right of the board's tool rows (duration "0.1s", `+1 −1` of an edit, "2 failed · 18s") are not built; the transcript carries no timings or diff statistics per tool call.
-- The tab "Context" (board "Projects · settings page, context") is not built (`iter3-project-context`); the page has four tabs (General, Security, Egress, Integrations).
 - The key panel of the "Lifecycle events" group uses the white panel surface with a border; the boards fill it grey. The primary button of the subscription editor is the accent button of the form footer; the boards draw it dark.
 - After a rejected subscription (422) submitted with Enter, the focused URL input keeps its previous value, not the submitted one. This is the htmx morph behavior of every form of the dialog (the project form behaves the same); the submit button keeps the value.
 - The task counts of the project list stay underlined accent links in mono; the board "Settings · projects, two-line rows (1350)" draws them as plain numbers in status tones (`ui-settings-list-rows`).
-- The "Context" panel in the Overview of the Chat boards (and "Project context" link) is not built (`iter3-project-context`, undecided).
+- The "Context" panel in the Overview of the Chat boards (and its "Project context" link) is obsolete: `iter3-project-context` is rejected (#146), and planning knowledge comes from project skills (`iter4-skills`). Do not build it. Drop the panel from the Chat boards (at least "Chat · conversation" and "Phone · chat details") the next time they are changed.
 - To be filled in during the first comparisons: segmented control style, "Rows" selector, panel titles, subtitle and button icons on the traffic page.
 
 ## Mapping views to boards
@@ -207,7 +206,6 @@ The boards of a change in progress are listed in its `openspec/changes/<name>/de
 | Config - Projects / Projects · settings page, saved | `/projects/<key>` | as above; "Save project" clicked without changes. Partial board: main column only | 1440 |
 | Config - Projects / Projects · settings page, security | `/projects/<key>?tab=security` | as Projects · settings page, general; default policy; groups "Push checks" and "Branches" (branch rewrites `with-lease`, agent branches `renovate/**`, `dependabot/**`). Partial board: main column only | 1440 |
 | Config - Projects / Projects · settings page, security, invalid glob | `/projects/<key>?tab=security` | as above; `deploy/[` added as fifth glob and saved. Partial board: main column only | 1440 |
-| Config - Projects / Projects · settings page, context | `/projects/<key>` | not built (`iter3-project-context`). Partial board: main column only | 1440 |
 | Config - Project integrations / Projects · settings page, integrations | `/projects/<key>?tab=integrations` | `just serve-local`, login as `admin@example.com`; two subscriptions (all event types, last delivery `HTTP 204`; three event types, last delivery `HTTP 503`; needs receivers that answer so); `publicUrl` set, forgejo plugin with a webhook secret | 1440 |
 | Config - Project integrations / Projects · settings page, integrations, secret revealed | `/projects/<key>?tab=integrations` | as above; "Show secret" clicked. Partial board: main column only | 1440 |
 | Config - Project integrations / Projects · settings page, integrations, secret copied | `/projects/<key>?tab=integrations` | as above over HTTPS or a loopback host; "Copy secret" clicked (within 2 s). Partial board: main column only | 1440 |

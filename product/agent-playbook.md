@@ -1,12 +1,12 @@
 # Agent Playbook
 
-> How agents are expected to work in Dark Factory: principles that apply everywhere, and patterns for recurring situations. Audience: people writing skills, persona prompts and project context. Status: **living document**.
+> How agents are expected to work in Dark Factory: principles that apply everywhere, and patterns for recurring situations. Audience: people writing skills and persona prompts. Status: **living document**.
 
 ## How this document is used
 - **It is the source, not the runtime input.** Agents don't read this file; skills derived from it do the work at runtime.
 - **Principles (§1)** become a built-in skill shipped with Dark Factory (e.g. `dark-factory-basics`) that every persona gets.
 - **Patterns (§2)** become individual skills, enabled per persona or project (e.g. a `dependency-updates` skill for a maintenance persona).
-- **Project-specific conventions** (commit message format, test commands, architecture rules) belong in the repository's `AGENTS.md`, not here. The project context holds planning knowledge for chats only (ADR-0026).
+- **Project-specific conventions** (commit message format, test commands, architecture rules) belong in the repository's `AGENTS.md`, not here. Planning knowledge for chats belongs in project skills (ADR-0026, amended 2026-11-26).
 - A pattern that depends on a capability not built yet links the ADR or future option it needs; the skill is written once the capability exists.
 
 ## 1. Principles

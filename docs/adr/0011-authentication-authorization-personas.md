@@ -1,6 +1,6 @@
 # ADR-0011: Authentication, authorization and agent personas
 
-- **Status:** Accepted
+- **Status:** Accepted (amended on 2026-11-26, #146: `project:context:write` dropped)
 - **Date:** 2026-10-16
 - **Related:** [ADR-0006](0006-agent-dial-back-grpc-mtls.md), [ADR-0013](0013-single-tenant-instances.md)
 
@@ -25,7 +25,8 @@ A handful of human users and many agent personas act in the system. Humans log i
 
 **Permissions**
 - One vocabulary for humans and agents; one check `can(principal, action, resource)`.
-- Initial permissions include `task:create`, `task:assign`, `transcript:read`, `approval:decide`, `agent:configure`, `credential:manage`, `project:context:write`; instance-management operations (CRUD on personas, skills, tool grants, routines, projects) will follow.
+- Initial permissions include `task:create`, `task:assign`, `transcript:read`, `approval:decide`, `agent:configure`, `credential:manage`, ~~`project:context:write`~~; instance-management operations (CRUD on personas, skills, tool grants, routines, projects) will follow.
+  Amended 2026-11-26 (#146): `project:context:write` is dropped, because the project context of ADR-0026 is rejected.
 - Instance-management permissions for agents have three modes: deny, requires approval, allow.
 - Configurable per instance: role → permission mapping for humans (defaults in code, overridable in instance config) and a ceiling on what may be granted to agents at all.
 - No privilege escalation (not to be confused with escalating a question to a parent task, ADR-0043): an agent can only grant a subset of its own permissions; credential management and human roles are never grantable to agents.
