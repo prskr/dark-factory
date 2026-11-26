@@ -4,12 +4,11 @@
 
 use anyhow::{Context, Result};
 use df_core::TaskStatus;
-use df_e2e::browser::button;
 use df_e2e::data;
 use df_e2e::fixture;
 use df_e2e::wait::{RUN_TIMEOUT, UI_TIMEOUT, eventually};
 use playwright_rs::expect;
-use playwright_rs::protocol::SelectOption;
+use playwright_rs::protocol::{AriaRole, GetByRoleOptions};
 
 #[tokio::test]
 #[ignore = "needs the cluster of `just e2e-local`"]
@@ -23,42 +22,32 @@ async fn a_new_persona_commits_under_its_identity_and_authors_the_transcript() -
             let email = format!("{handle}@example.org");
 
             // The form: avatar preview, then the three identity fields.
-            page.goto(&format!("{}/personas", world.env.base_url), None)
-                .await?;
-            page.locator("button[hx-get='/personas/new']:visible")
-                .first()
-                .click(None)
-                .await?;
+            world.session.open_new_persona_modal(&world.env).await?;
             // Scenario "Avatar preview": typing the name changes the preview without a reload.
             let preview = page.locator("#form [role=img][aria-label]");
             page.locator("#display_name")
                 .fill("Code Reviewer", None)
                 .await?;
             expect(preview).to_contain_text("CR").await?;
-            page.locator("#display_name")
-                .fill(&display_name, None)
-                .await?;
-            page.locator("#handle").fill(&handle, None).await?;
-            page.locator("#commit_email").fill(&email, None).await?;
-            page.locator("#system_prompt")
-                .fill("Commit as yourself.", None)
-                .await?;
-            page.locator("#model_provider_id")
-                .select_option(
-                    SelectOption::Label(data::MODEL_PROVIDER_NAME.to_string()),
-                    None,
-                )
-                .await?;
-            page.locator("#model")
-                .select_option(
-                    SelectOption::Label(format!("{} (Anthropic Messages)", data::PERSONA_MODEL)),
-                    None,
-                )
-                .await?;
-            button(page, "Create persona").click(None).await?;
+            // The new persona's page opens on the System prompt tab, where the prompt is written.
             world
                 .session
-                .expect_text(&format!("@{handle}"), UI_TIMEOUT)
+                .create_persona(&world.env, &display_name, &handle, &email)
+                .await?;
+            world
+                .session
+                .write_system_prompt("Commit as yourself.")
+                .await?;
+            world.session.save_persona().await?;
+            // The General tab holds the identity the persona was created with.
+            page.get_by_role(
+                AriaRole::Tab,
+                Some(GetByRoleOptions::default().name("General").exact(true)),
+            )
+            .click(None)
+            .await?;
+            expect(page.locator("#handle"))
+                .to_have_value(&handle)
                 .await?;
 
             // A task of that persona: the draft PR script commits with the runtime's identity.

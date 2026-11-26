@@ -258,7 +258,7 @@ On macOS use a case-sensitive APFS volume for the output base (`bazel --output_u
 
 ## Pinned linters (`bazel_env` + `rules_multitool`)
 
-`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `cargo-machete`, `cargo-nextest`, `helm`, `helm-unittest`, `hugo`, `kind`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `jq`, `swc`, `tailwindcss` and `yq` come from Bazel, so the
+`buf`, `buildifier`, `cargo`, `cargo-clippy`, `cargo-deny`, `cargo-machete`, `cargo-nextest`, `helm`, `helm-unittest`, `hugo`, `kind`, `kingfisher`, `kube-linter`, `kubeconform`, `lefthook`, `rustc`, `shellcheck`, `jq`, `swc`, `tailwindcss`, `esbuild` and `yq` come from Bazel, so the
 lefthook hooks use the same versions on every machine. The exceptions run through `npx` and need Node.js and, on first use, network access: the `openspec-validate` hook runs `npx @fission-ai/openspec@<version>` with the version pinned in `.github/workflows/openspec.yaml`, and the `web-typecheck` hook runs `tsc` from `typescript@<version>`, pinned in `lefthook.yml` and `.github/workflows/ci.yaml`. A Renovate regex manager updates both copies of each version in one PR.
 
 | Task | Command |
@@ -276,14 +276,16 @@ lefthook hooks use the same versions on every machine. The exceptions run throug
 
 ## Web assets (TypeScript and Tailwind)
 
-`crates/df-web` serves scripts compiled from `crates/df-web/scripts/*.ts` (one minified `<name>.js` each, by `swc` with `crates/df-web/.swcrc`), a stylesheet compiled from `crates/df-web/styles/input.css` (`tailwindcss`) and the third-party scripts Mermaid, htmx (with its SSE extension) and Alpine from the npm packages pinned in `crates/df-web/package.json`. None of them is checked in.
+`crates/df-web` serves scripts compiled from `crates/df-web/scripts/*.ts` (one minified `<name>.js` each, by `swc` with `crates/df-web/.swcrc`), a stylesheet compiled from `crates/df-web/styles/input.css` (`tailwindcss`), the third-party scripts Mermaid, htmx (with its SSE extension) and Alpine from the npm packages pinned in `crates/df-web/package.json`, and the editor bundle `editor.js`: the entry `crates/df-web/editor/markdown-editor.ts` and the CodeMirror packages of `package.json`, bundled by `esbuild` into one minified classic script (the one bundled asset; it exposes `window.DfMarkdownEditor` and the Markdown field loads it on demand). None of them is checked in.
 
 | Build | How the assets are built |
 |-------|--------------------------|
-| Bazel (CI, images, releases) | The genrules `:web_scripts` and `:app_css` of `//crates/df-web` use the pinned tools; `:vendor_scripts` copies the files of the npm packages from `pnpm-lock.yaml`. The build script gets the outputs through `WEB_SCRIPTS`, `TAILWIND_APP_CSS` and `VENDOR_SCRIPTS` and fails if one is missing (`DF_WEB_REQUIRE_ASSETS=1`). |
-| Plain `cargo` | `build.rs` runs `swc` and `tailwindcss` from `PATH` (`SWC_BIN` / `TAILWIND_BIN` override). Put the pinned versions there with `bazel run //:bazel_env` (see above). A tool that is not found gives a `cargo:warning`; the build succeeds and embeds nothing of that kind. Installing or updating a tool in a `PATH` directory reruns the build script on the next build. The third-party scripts come from `crates/df-web/node_modules`: run `pnpm install --frozen-lockfile` there (`bazel run //:bazel_env` puts `pnpm` on `PATH`, from `aspect_rules_js`; it switches to the version in `packageManager` itself). Without it the build warns and embeds none of them; the UI does not work. |
+| Bazel (CI, images, releases) | The genrules `:web_scripts`, `:app_css` and `:editor_bundle` of `//crates/df-web` use the pinned tools (`:editor_bundle` resolves the imports from the `node_modules` tree that `npm_link_all_packages` creates under `bazel-bin`, `NODE_PATH`); `:vendor_scripts` copies the files of the npm packages from `pnpm-lock.yaml`. The build script gets the outputs through `WEB_SCRIPTS`, `TAILWIND_APP_CSS`, `EDITOR_BUNDLE` and `VENDOR_SCRIPTS` and fails if one is missing (`DF_WEB_REQUIRE_ASSETS=1`). |
+| Plain `cargo` | `build.rs` runs `swc`, `tailwindcss` and `esbuild` from `PATH` (`SWC_BIN` / `TAILWIND_BIN` / `ESBUILD_BIN` override). Put the pinned versions there with `bazel run //:bazel_env` (see above). A tool that is not found gives a `cargo:warning`; the build succeeds and embeds nothing of that kind. Installing or updating a tool in a `PATH` directory reruns the build script on the next build. The third-party scripts and the CodeMirror packages come from `crates/df-web/node_modules`: run `pnpm install --frozen-lockfile` there (`bazel run //:bazel_env` puts `pnpm` on `PATH`, from `aspect_rules_js`; it switches to the version in `packageManager` itself). Without the third-party scripts the build warns and embeds none of them; the UI does not work. Without `esbuild` or the CodeMirror packages the warning names the missing one and the editor bundle is not embedded: the page has no `data-editor-src`, and the Markdown field stays a text field with its preview. |
 
-`build.rs` sets the cfgs `df_web_scripts`, `df_web_styles` and `df_web_vendor` for the kinds it staged. Tests that read them are ignored without the matching cfg, so `cargo test -p df-web` without the tools or the npm packages passes and lists them as `ignored`. Bazel always provides all three, so `bazel test //crates/df-web/...` runs them. `just serve-local` stops early when `swc` or `tailwindcss` is missing.
+`build.rs` sets the cfgs `df_web_scripts`, `df_web_styles`, `df_web_editor` and `df_web_vendor` for the kinds it staged. Tests that read them are ignored without the matching cfg, so `cargo test -p df-web` without the tools or the npm packages passes and lists them as `ignored`. Bazel always provides all four, so `bazel test //crates/df-web/...` runs them. `just serve-local` stops early when `swc` or `tailwindcss` is missing. The tests of the bundle check that it defines `DfMarkdownEditor` and stays below 300 KiB gzip-compressed (level 9).
+
+`esbuild` is pinned in `multitool.lock.json` like the other tools, but it is published only as npm tarballs (`@esbuild/<platform>`): `cargo xtask update-tools` reads the latest version and the `dist.tarball` of each platform package from the npm registry and computes the sha256 of the download (`tools/xtask/src/npm_tool.rs`). The CodeMirror packages (`@codemirror/*`, `@lezer/highlight`) must resolve to one copy of `@codemirror/state`, so Renovate bumps them in one group.
 
 Type check (strict `tsc`, no emit; Node.js needed). Use the version pinned in the `web-typecheck` command of `lefthook.yml`:
 
@@ -292,6 +294,8 @@ npx --yes -p typescript@<version> tsc -p crates/df-web
 ```
 
 The `web-typecheck` pre-commit hook and the CI step run the same command. The Alpine API the components use is declared in `crates/df-web/scripts/types/alpine.d.ts`.
+
+The editor entry has its own project, `crates/df-web/editor/tsconfig.json`, which needs the types of the CodeMirror packages: install them first (`pnpm install --frozen-lockfile` in `crates/df-web`, no install script runs), then `npx --yes -p typescript@<version> tsc -p crates/df-web/editor`. CI does both in one step; the hook runs the check when `crates/df-web/node_modules` exists and otherwise prints a message that names the install command and skips it.
 
 ## Dependency freshness
 

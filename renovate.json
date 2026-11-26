@@ -164,6 +164,17 @@
   ],
   "packageRules": [
     {
+      "description": "CodeMirror (the Markdown editor bundle of crates/df-web): the packages must resolve to one copy of @codemirror/state, so they move together",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "/^@codemirror//",
+        "/^@lezer//"
+      ],
+      "groupName": "CodeMirror"
+    },
+    {
       "description": "OpenCode: set the archive checksums in MODULE.bazel for the new version; replaces the global postUpgradeTasks, so it repeats `bazel mod tidy`",
       "matchDepNames": [
         "anomalyco/opencode"

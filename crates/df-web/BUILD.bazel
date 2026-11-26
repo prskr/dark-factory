@@ -81,6 +81,29 @@ alias(
     actual = "@multitool//tools/swc",
 )
 
+alias(
+    name = "esbuild",
+    actual = "@multitool//tools/esbuild",
+)
+
+# The editor bundle `editor.js`: the one bundled script (`editor/markdown-editor.ts` and the
+# CodeMirror packages, design D5 of `markdown-editor`). The entry is a source file, so esbuild
+# does not find a `node_modules` next to it: `NODE_PATH` names the tree that `npm_link_all_packages`
+# creates under bazel-bin (symlinks into the pnpm store, which esbuild follows).
+genrule(
+    name = "editor_bundle",
+    srcs = [
+        "editor/markdown-editor.ts",
+        ":node_modules",
+    ],
+    outs = ["editor.js"],
+    cmd = """
+        NODE_PATH="$$PWD/$(RULEDIR)/node_modules" $(execpath :esbuild) $(location editor/markdown-editor.ts) \
+            --bundle --minify --format=iife --target=es2022 --log-level=warning --outfile=$@
+    """,
+    tools = [":esbuild"],
+)
+
 # One minified `.js` per `scripts/<name>.ts`, in `web_scripts/`; `build.rs` embeds them as `<name>.js`.
 filegroup(
     name = "ts_srcs",
@@ -130,6 +153,7 @@ cargo_build_script(
     ],
     build_script_env = {
         "DF_WEB_REQUIRE_ASSETS": "1",
+        "EDITOR_BUNDLE": "$(execpath :editor_bundle)",
         "TAILWIND_APP_CSS": "$(execpath :app_css)",
         "VENDOR_SCRIPTS": "$(execpaths :vendor_scripts)",
         "WEB_SCRIPTS": "$(execpaths :web_scripts)",
@@ -137,6 +161,7 @@ cargo_build_script(
     crate_root = "build.rs",
     data = glob(["assets/**"]) + [
         ":app_css",
+        ":editor_bundle",
         ":vendor_scripts",
         ":web_scripts",
     ],
@@ -158,6 +183,8 @@ rust_library(
         "assets/**",
         "scripts/**",
     ]) + [
+        # The tests read the editor source (`editor/markdown-editor.ts`).
+        "editor/markdown-editor.ts",
         "package.json",
         "src/components/brands.json",
     ],

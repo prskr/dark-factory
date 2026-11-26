@@ -10,6 +10,12 @@
 //! The third-party scripts (`VENDOR`) come from the npm packages pinned in `package.json` and
 //! `pnpm-lock.yaml`: Bazel's files (`VENDOR_SCRIPTS`), otherwise `node_modules` of the crate
 //! (`pnpm install --frozen-lockfile`). They are staged all or none.
+//!
+//! The editor bundle (`editor.js`, the one bundled script) is the output Bazel built
+//! (`EDITOR_BUNDLE`), otherwise `esbuild` (`ESBUILD_BIN`, otherwise `PATH`) bundles
+//! `editor/markdown-editor.ts` when the `CodeMirror` packages (`EDITOR_PACKAGES`) are installed in
+//! `node_modules`. A missing tool or package is a warning that names it and no `df_web_editor`
+//! cfg; with `DF_WEB_REQUIRE_ASSETS=1` it is an error.
 
 use std::env;
 use std::error::Error;
@@ -38,8 +44,11 @@ pub(crate) struct Config {
     pub(crate) tailwind_app_css: Option<PathBuf>,
     /// Bazel's files of the npm packages of [`VENDOR`].
     pub(crate) vendor_scripts: Option<Vec<PathBuf>>,
+    /// Bazel's bundled editor.
+    pub(crate) editor_bundle: Option<PathBuf>,
     pub(crate) swc: Tool,
     pub(crate) tailwind: Tool,
+    pub(crate) esbuild: Tool,
 }
 
 /// What `build.rs` has to tell Cargo.
@@ -61,7 +70,34 @@ const STYLES: Kind = Kind {
     missing: "the stylesheet is",
 };
 
+const EDITOR: Kind = Kind {
+    cfg: "df_web_editor",
+    tool: "esbuild",
+    missing: "the editor bundle is",
+};
+
 const VENDOR_CFG: &str = "df_web_vendor";
+
+/// The entry module of the editor bundle.
+pub(crate) const EDITOR_ENTRY: &str = "editor/markdown-editor.ts";
+
+/// The `CodeMirror` packages the entry imports, as in `package.json`: all must be installed to
+/// bundle it.
+pub(crate) const EDITOR_PACKAGES: [&str; 13] = [
+    "@codemirror/commands",
+    "@codemirror/lang-javascript",
+    "@codemirror/lang-json",
+    "@codemirror/lang-markdown",
+    "@codemirror/lang-python",
+    "@codemirror/lang-rust",
+    "@codemirror/lang-sql",
+    "@codemirror/lang-yaml",
+    "@codemirror/language",
+    "@codemirror/legacy-modes",
+    "@codemirror/state",
+    "@codemirror/view",
+    "@lezer/highlight",
+];
 
 /// The third-party scripts the UI serves: served path, npm package (as in `package.json`) and the
 /// file of the published package. htmx and its SSE extension are one package, so they move
@@ -103,10 +139,12 @@ pub(crate) fn resolve_path(raw: &str, manifest_dir: &Path, pwd: Option<&Path>) -
 pub(crate) fn rerun_inputs(config: &Config, path: Option<&OsStr>) -> Vec<PathBuf> {
     let mut inputs: Vec<PathBuf> = config.web_scripts.iter().flatten().cloned().collect();
     inputs.extend(config.tailwind_app_css.clone());
+    inputs.extend(config.editor_bundle.clone());
     let mut path_lookup = false;
     for (tool, used) in [
         (&config.swc, config.web_scripts.is_none()),
         (&config.tailwind, config.tailwind_app_css.is_none()),
+        (&config.esbuild, config.editor_bundle.is_none()),
     ] {
         match (used, tool.override_var) {
             (false, _) => {}
@@ -136,7 +174,27 @@ pub(crate) fn rerun_inputs(config: &Config, path: Option<&OsStr>) -> Vec<PathBuf
             inputs.push(config.manifest_dir.clone());
         }
     }
+    if config.editor_bundle.is_none() {
+        inputs.push(config.manifest_dir.join(EDITOR_ENTRY));
+        if missing_editor_packages(config).is_empty() {
+            inputs.extend(EDITOR_PACKAGES.map(|package| editor_package_manifest(config, package)));
+        } else {
+            inputs.push(config.manifest_dir.clone());
+        }
+    }
     inputs
+}
+
+fn editor_package_manifest(config: &Config, package: &str) -> PathBuf {
+    node_modules_file(config, package, "package.json")
+}
+
+/// The packages of [`EDITOR_PACKAGES`] that are not installed in `node_modules`.
+fn missing_editor_packages(config: &Config) -> Vec<&'static str> {
+    EDITOR_PACKAGES
+        .into_iter()
+        .filter(|package| !editor_package_manifest(config, package).is_file())
+        .collect()
 }
 
 fn node_modules_file(config: &Config, package: &str, file: &str) -> PathBuf {
@@ -176,8 +234,46 @@ pub(crate) fn stage_assets(config: &Config, staged: &Path) -> Result<Report> {
             ));
         }
     }
+    match stage_editor(config, staged)? {
+        None => report.cfgs.push(EDITOR.cfg),
+        Some(why) if config.require_assets => {
+            return Err(format!("{why}, but DF_WEB_REQUIRE_ASSETS is set").into());
+        }
+        Some(why) => report.warnings.push(why),
+    }
     stage_vendor(config, staged, &mut report)?;
     Ok(report)
+}
+
+/// Stages `editor.js`: Bazel's bundle, otherwise the output of `esbuild`. `Ok(Some(why))` when it
+/// cannot be built here: the warning names what is missing and how to get it.
+fn stage_editor(config: &Config, staged: &Path) -> Result<Option<String>> {
+    let out = staged.join("editor.js");
+    if let Some(built) = &config.editor_bundle {
+        fs::copy(built, &out)?;
+        return Ok(None);
+    }
+    let missing = missing_editor_packages(config);
+    if !missing.is_empty() {
+        return Ok(Some(format!(
+            "CodeMirror packages not found ({}): the editor bundle is not embedded and the editor is off; run `pnpm install --frozen-lockfile` in crates/df-web",
+            missing.join(", ")
+        )));
+    }
+    let mut command = Command::new(&config.esbuild.program);
+    command
+        .current_dir(&config.manifest_dir)
+        .arg(EDITOR_ENTRY)
+        .args(["--bundle", "--minify", "--format=iife", "--target=es2022"])
+        .arg("--log-level=warning")
+        .arg(format!("--outfile={}", out.display()));
+    if run_tool(&mut command, &EDITOR, &config.esbuild)? {
+        return Ok(None);
+    }
+    Ok(Some(format!(
+        "{} not found: {} not embedded and the editor is off; run `bazel run //:bazel_env` and put .bazel_env/bin on PATH, or set ESBUILD_BIN (docs/development.md)",
+        EDITOR.tool, EDITOR.missing
+    )))
 }
 
 /// Copies the third-party scripts to their served paths, all or none.
@@ -345,9 +441,38 @@ mod tests {
             fs::create_dir_all(root.join("scripts")).unwrap();
             fs::write(root.join("scripts/tabs.ts"), "").unwrap();
             fs::write(root.join("scripts/notes.md"), "").unwrap();
+            fs::create_dir_all(root.join("editor")).unwrap();
+            fs::write(root.join(EDITOR_ENTRY), "").unwrap();
             let fixture = Self { dir };
             fixture.install_vendor_packages();
+            fixture.install_editor_packages();
             fixture
+        }
+
+        /// The `CodeMirror` packages as `pnpm install` leaves them.
+        fn install_editor_packages(&self) {
+            for package in EDITOR_PACKAGES {
+                let path = self
+                    .dir
+                    .path()
+                    .join("node_modules")
+                    .join(package)
+                    .join("package.json");
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, "{}").unwrap();
+            }
+        }
+
+        /// A stand-in for `esbuild` that writes `bundle of <entry>` to its `--outfile`.
+        fn esbuild(&self) -> String {
+            let path = self.dir.path().join("esbuild");
+            fs::write(
+                &path,
+                "#!/bin/sh\nfor arg in \"$@\"; do case \"$arg\" in --outfile=*) out=\"${arg#--outfile=}\";; esac; done\necho \"bundle of $1\" > \"$out\"\n",
+            )
+            .unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            path.to_str().unwrap().to_owned()
         }
 
         /// The packages of `VENDOR` as `pnpm install` leaves them; each file holds its package.
@@ -375,12 +500,17 @@ mod tests {
                 web_scripts: None,
                 tailwind_app_css: None,
                 vendor_scripts: None,
+                editor_bundle: None,
                 swc: Tool {
                     program: swc.into(),
                     override_var: None,
                 },
                 tailwind: Tool {
                     program: tailwind.into(),
+                    override_var: None,
+                },
+                esbuild: Tool {
+                    program: self.esbuild().into(),
                     override_var: None,
                 },
             }
@@ -395,7 +525,7 @@ mod tests {
             &fixture.staged(),
         )
         .unwrap();
-        assert_eq!(report.cfgs, ["df_web_vendor"]);
+        assert_eq!(report.cfgs, ["df_web_editor", "df_web_vendor"]);
         assert_eq!(report.warnings.len(), 2);
         assert!(
             report.warnings[0].starts_with("swc not found"),
@@ -424,12 +554,20 @@ mod tests {
         let fixture = Fixture::new();
         let scripts_only =
             stage_assets(&fixture.config("true", NOT_INSTALLED), &fixture.staged()).unwrap();
-        assert_eq!(scripts_only.cfgs, ["df_web_scripts", "df_web_vendor"]);
+        assert_eq!(
+            scripts_only.cfgs,
+            ["df_web_scripts", "df_web_editor", "df_web_vendor"]
+        );
         assert_eq!(scripts_only.warnings.len(), 1);
         let both = stage_assets(&fixture.config("true", "true"), &fixture.staged()).unwrap();
         assert_eq!(
             both.cfgs,
-            ["df_web_scripts", "df_web_styles", "df_web_vendor"]
+            [
+                "df_web_scripts",
+                "df_web_styles",
+                "df_web_editor",
+                "df_web_vendor"
+            ]
         );
         assert!(both.warnings.is_empty());
     }
@@ -459,7 +597,12 @@ mod tests {
         let report = stage_assets(&config, &fixture.staged()).unwrap();
         assert_eq!(
             report.cfgs,
-            ["df_web_scripts", "df_web_styles", "df_web_vendor"]
+            [
+                "df_web_scripts",
+                "df_web_styles",
+                "df_web_editor",
+                "df_web_vendor"
+            ]
         );
         assert_eq!(
             fs::read_to_string(fixture.staged().join("tabs.js")).unwrap(),
@@ -688,6 +831,7 @@ mod tests {
     fn missing_third_party_scripts_are_an_error_when_the_assets_are_required() {
         let fixture = Fixture::new();
         fs::remove_dir_all(fixture.dir.path().join("node_modules")).unwrap();
+        fixture.install_editor_packages();
         let mut config = fixture.config("true", "true");
         config.require_assets = true;
 
@@ -737,5 +881,160 @@ mod tests {
         }
         fs::remove_dir_all(fixture.dir.path().join("node_modules")).unwrap();
         assert!(rerun_inputs(&config, None).contains(&fixture.dir.path().to_owned()));
+    }
+
+    #[test]
+    fn the_editor_packages_are_dependencies_of_package_json() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("package.json")).unwrap();
+        let dependencies = manifest["dependencies"].as_object().unwrap();
+        for package in EDITOR_PACKAGES {
+            assert!(dependencies.contains_key(package), "{package}");
+        }
+        // The packages of the Renovate group `CodeMirror` are exactly these.
+        let codemirror = dependencies
+            .keys()
+            .filter(|name| name.starts_with("@codemirror/") || name.starts_with("@lezer/"))
+            .count();
+        assert_eq!(codemirror, EDITOR_PACKAGES.len());
+    }
+
+    #[test]
+    fn bazels_editor_bundle_is_staged_as_editor_js_without_running_a_tool() {
+        let fixture = Fixture::new();
+        let built = fixture.dir.path().join("built.js");
+        fs::write(&built, "bazel bundle").unwrap();
+        let mut config = fixture.config(NOT_INSTALLED, NOT_INSTALLED);
+        config.editor_bundle = Some(built);
+        config.esbuild.program = NOT_INSTALLED.into();
+        fs::remove_dir_all(fixture.dir.path().join("node_modules/@codemirror")).unwrap();
+
+        let report = stage_assets(&config, &fixture.staged()).unwrap();
+
+        assert!(report.cfgs.contains(&"df_web_editor"), "{report:?}");
+        assert_eq!(served(&fixture.staged(), "editor.js"), "bazel bundle");
+    }
+
+    #[test]
+    fn esbuild_bundles_the_entry_when_the_packages_are_installed() {
+        let fixture = Fixture::new();
+
+        let report = stage_assets(
+            &fixture.config(NOT_INSTALLED, NOT_INSTALLED),
+            &fixture.staged(),
+        )
+        .unwrap();
+
+        assert!(report.cfgs.contains(&"df_web_editor"), "{report:?}");
+        assert_eq!(
+            served(&fixture.staged(), "editor.js"),
+            format!("bundle of {EDITOR_ENTRY}\n")
+        );
+    }
+
+    #[test]
+    fn a_missing_esbuild_warns_by_name_and_embeds_no_editor() {
+        let fixture = Fixture::new();
+        let mut config = fixture.config("true", "true");
+        config.esbuild.program = NOT_INSTALLED.into();
+
+        let report = stage_assets(&config, &fixture.staged()).unwrap();
+
+        assert!(!report.cfgs.contains(&"df_web_editor"), "{report:?}");
+        let warning = report
+            .warnings
+            .iter()
+            .find(|w| w.starts_with("esbuild not found"))
+            .unwrap_or_else(|| panic!("{report:?}"));
+        assert!(warning.contains("ESBUILD_BIN"), "{warning}");
+        assert!(!fixture.staged().join("editor.js").exists());
+    }
+
+    #[test]
+    fn missing_codemirror_packages_warn_with_their_names_and_the_install_command() {
+        let fixture = Fixture::new();
+        fs::remove_dir_all(fixture.dir.path().join("node_modules/@codemirror/view")).unwrap();
+        fs::remove_dir_all(fixture.dir.path().join("node_modules/@lezer")).unwrap();
+
+        let report = stage_assets(&fixture.config("true", "true"), &fixture.staged()).unwrap();
+
+        assert!(!report.cfgs.contains(&"df_web_editor"), "{report:?}");
+        let warning = report
+            .warnings
+            .iter()
+            .find(|w| w.starts_with("CodeMirror packages not found"))
+            .unwrap_or_else(|| panic!("{report:?}"));
+        assert!(
+            warning.contains("@codemirror/view") && warning.contains("@lezer/highlight"),
+            "{warning}"
+        );
+        assert!(!warning.contains("@codemirror/state"), "{warning}");
+        assert!(
+            warning.contains("pnpm install --frozen-lockfile"),
+            "{warning}"
+        );
+    }
+
+    #[test]
+    fn a_missing_editor_is_an_error_when_the_assets_are_required() {
+        let fixture = Fixture::new();
+        let mut config = fixture.config("true", "true");
+        config.require_assets = true;
+        config.esbuild.program = NOT_INSTALLED.into();
+
+        let err = stage_assets(&config, &fixture.staged()).unwrap_err();
+
+        assert!(err.to_string().starts_with("esbuild not found"), "{err}");
+        assert!(err.to_string().contains("DF_WEB_REQUIRE_ASSETS"), "{err}");
+    }
+
+    #[test]
+    fn esbuild_that_fails_is_an_error() {
+        let fixture = Fixture::new();
+        let mut config = fixture.config("true", "true");
+        config.esbuild.program = "false".into();
+
+        let err = stage_assets(&config, &fixture.staged()).unwrap_err();
+
+        assert!(err.to_string().starts_with("esbuild exited"), "{err}");
+    }
+
+    #[test]
+    fn the_entry_and_the_installed_packages_are_rerun_inputs() {
+        let fixture = Fixture::new();
+        let config = fixture.config("true", "true");
+
+        let inputs = rerun_inputs(&config, None);
+
+        assert!(inputs.contains(&fixture.dir.path().join(EDITOR_ENTRY)));
+        for package in EDITOR_PACKAGES {
+            assert!(
+                inputs.contains(
+                    &fixture
+                        .dir
+                        .path()
+                        .join("node_modules")
+                        .join(package)
+                        .join("package.json")
+                ),
+                "{package}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_override_of_esbuild_is_a_rerun_input_unless_bazel_built_the_bundle() {
+        let fixture = Fixture::new();
+        let mut config = fixture.config("true", "true");
+        config.esbuild = Tool {
+            program: "/tools/esbuild".into(),
+            override_var: Some("ESBUILD_BIN"),
+        };
+        assert!(rerun_inputs(&config, None).contains(&PathBuf::from("/tools/esbuild")));
+
+        config.editor_bundle = Some("/built/editor.js".into());
+        let inputs = rerun_inputs(&config, None);
+        assert!(inputs.contains(&PathBuf::from("/built/editor.js")));
+        assert!(!inputs.contains(&PathBuf::from("/tools/esbuild")));
     }
 }

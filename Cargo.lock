@@ -2037,6 +2037,7 @@ dependencies = [
  "df-sandbox-contract",
  "df-telemetry",
  "df-test-postgres",
+ "flate2",
  "futures",
  "getrandom 0.4.3",
  "hex",

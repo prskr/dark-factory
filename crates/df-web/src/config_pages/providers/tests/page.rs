@@ -146,7 +146,7 @@ async fn the_list_row_is_a_two_line_cover_link_to_the_page_with_its_own_delete()
     let cell = &table[..table.find("hx-delete=").unwrap()];
     assert!(cell.ends_with("<div class=\"relative z-10 flex items-center justify-end gap-1\"><button type=\"button\" "), "{cell}");
     assert!(
-        !table.contains("Edit model provider") && !html.contains("/edit"),
+        !table.contains("Edit model provider") && !html.contains("/edit\""),
         "{html}"
     );
 }

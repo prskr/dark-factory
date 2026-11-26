@@ -635,6 +635,27 @@ async fn disabled_landlock_leaves_the_system_prompt_without_a_sandbox_section() 
     Ok(())
 }
 
+// Scenario "Optional system prompt" of `configuration-management`: a persona without a system
+// prompt gets no prompt file (and, without a sandbox section, nothing else for the harness).
+#[tokio::test]
+async fn a_persona_without_a_system_prompt_gets_no_system_prompt_file() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let mut env = Env::new(pool.clone()).await;
+    sqlx::query("UPDATE personas SET system_prompt = ''")
+        .execute(&pool)
+        .await?;
+    env.ctx.config = std::sync::Arc::new(ChannelConfig {
+        landlock: LandlockMode::Disabled,
+        ..ChannelConfig::default()
+    });
+
+    let (_, files) = assign_of(&env).await?;
+
+    let path = harness::profile("claude-code").unwrap().system_prompt_path;
+    assert!(files.iter().all(|(file, _)| file != path), "{files:?}");
+    Ok(())
+}
+
 #[tokio::test]
 async fn follow_up_run_carries_session_id_and_summary() -> anyhow::Result<()> {
     let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;

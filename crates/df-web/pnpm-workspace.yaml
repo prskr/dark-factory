@@ -1,2 +1,3 @@
-# The packages only provide the third-party scripts the UI serves; none runs install scripts.
+# The packages only provide the third-party scripts the UI serves (Mermaid, htmx, Alpine) and the
+# sources of the editor bundle (CodeMirror, bundled by esbuild); none runs install scripts.
 allowBuilds: {}

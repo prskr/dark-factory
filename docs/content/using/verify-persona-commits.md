@@ -25,8 +25,8 @@ whose author and committer are the run's persona, and each one is written to the
 
 ## Copy the key and the email
 
-1. Open **Settings → Personas** and edit the persona.
-2. Scroll to the group **Commits**. It shows the **Commit email**, the **Public key** (OpenSSH
+1. Open **Settings → Personas** and open the persona's page.
+2. Open the **Commits** tab. Its group **Commits** shows the **Commit email**, the **Public key** (OpenSSH
    format, `ssh-ed25519 AAAA…`) and its **Fingerprint** (`SHA256:…`).
 3. Use the copy buttons next to the fields. They appear where the browser has a secure clipboard
    (HTTPS, or `localhost`); elsewhere select the value by hand.
@@ -60,8 +60,8 @@ page offers this only when the instance loads the `forgejo` forge plugin.
 1. In Forgejo, signed in as the bot account, open **Settings → SSH / GPG Keys**, choose
    **Verify** next to the key and copy the token. Note the value after `-n` in the command
    Forgejo shows: it is the domain of the Forgejo instance.
-2. In Dark Factory, edit the persona and choose **Verify key on Forgejo** in the group
-   **Commits**. Paste the token into **Token**, check **Forgejo domain** and choose
+2. In Dark Factory, open the **Commits** tab of the persona's page and choose **Verify key on
+   Forgejo**. Paste the token into **Token**, check **Forgejo domain** and choose
    **Sign token**. The domain is prefilled from the `forgejo` plugin's `hosts`: of the claimed
    hosts, the first in alphabetical order, taking the host of its `apiUrl` when it has one and
    else the claimed host itself. It is empty for a default `forgejo` plugin without `hosts`. Replace it with the value after `-n` if it differs.
@@ -93,7 +93,7 @@ Both steps apply to the bot account (a machine user) that owns the project's tok
 
 Rotate the key when it may have leaked or when your policy asks for it.
 
-1. Edit the persona and choose **Rotate key** in the group **Commits**.
+1. Open the **Commits** tab of the persona's page and choose **Rotate key**.
 2. Read the confirmation. If runs of the persona are active, it names how many: their commits that
    are not pushed yet were signed with the old key and are rejected by the next push (`df:signature`,
    "signed by another key"). The agent is told to sign them again with `git rebase --exec 'git commit

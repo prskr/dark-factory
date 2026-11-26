@@ -75,9 +75,17 @@ pre-commit:
       run: build/with_tools.sh helm-unittest deploy/helm/dark-factory
 
     # Same command and version as the "Type-check web scripts" step of .github/workflows/ci.yaml; Renovate updates both in one PR.
+    # The editor entry (`crates/df-web/editor`) imports the CodeMirror packages: without
+    # `crates/df-web/node_modules` its check is skipped here and CI enforces it.
     web-typecheck:
-      glob: ['crates/df-web/scripts/**', 'crates/df-web/tsconfig.json']
-      run: npx --yes -p typescript@7.0.2 tsc -p crates/df-web
+      glob: ['crates/df-web/scripts/**', 'crates/df-web/tsconfig.json', 'crates/df-web/editor/**']
+      run: |
+        npx --yes -p typescript@7.0.2 tsc -p crates/df-web
+        if [ -d crates/df-web/node_modules ]; then
+          npx --yes -p typescript@7.0.2 tsc -p crates/df-web/editor
+        else
+          echo "web-typecheck: editor check skipped, run 'pnpm install --frozen-lockfile' in crates/df-web"
+        fi
 
     # Same command and version as .github/workflows/openspec.yaml; Renovate updates both in one PR.
     openspec-validate:

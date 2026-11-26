@@ -29,6 +29,7 @@ bazel_env(
         "cargo-deny": TOOLS["cargo-deny"],
         "cargo-machete": TOOLS["cargo-machete"],
         "cargo-nextest": TOOLS["cargo-nextest"],
+        "esbuild": TOOLS["esbuild"],
         "hadolint": TOOLS["hadolint"],
         "helm": TOOLS["helm"],
         "helm-unittest": TOOLS["helm-unittest"],

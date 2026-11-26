@@ -13,6 +13,8 @@ extend-exclude = [
 ]
 
 [default]
+# The `flate2` crate.
+extend-ignore-identifiers-re = ["flate2"]
 extend-ignore-re = [
     # Verbatim linker error message.
     "mis-aligned",

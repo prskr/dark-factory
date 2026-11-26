@@ -37,7 +37,10 @@ ADR-0011, ADR-0035, ADR-0037 and `openspec/changes/iter1-control-plane-web`.
 | `/egress/allowlist` | Egress rules (`?highlight=host:port` marks rows; the Scope column shows "Everywhere", "Project <KEY>" or "Task <KEY>"; `POST /egress/allowlist/host` and `/service` add instance and project entries, `DELETE /egress/allowlist/{id}` removes an entry of any scope). Cluster services are checked against the cluster when saved, but only in the namespaces of `clusterTargets` (the control plane's RBAC); other namespaces are rejected. Desktop navigation only. |
 | `/egress/log`, `/egress/log/events` | Network traffic (SSE): connection graph, events table, filters (`q`, `verdict`, `sandbox`, `persona`, `project`, `task`; `denied` and `host` still work) and a request details panel; see `docs/design-system.md`, "Network traffic page". The panel cannot show URL, query or headers: TLS tunnels are not inspected. Needs `gateway.headlessService`. Desktop navigation only. |
 | `GET /egress/log/allow?host=&port=&task=&project=`, `POST /egress/log/allow` | "Allow egress" dialog of a blocked row or graph node (modal fragment; a plain request redirects to the log) and the entry it creates. The form posts `host`, `port` and `scope` (`task`, `project` or `instance`) with the `task` and `project` keys. The handler checks the scope itself (the task or project must exist), accepts only an exact host (no wildcard) and creates the entry like the allowlist form: validated, audited, announced to the gateways, and pending `network-access` requests it covers are approved. Answers 422 with the dialog and its error otherwise. |
-| `GET .../new`, `GET .../{id}/edit` (credentials, personas), `POST .../{key or id}` | Form fragments (modal; a plain request redirects to the list) and update. `/projects/new` is a modal; a project is edited on its page. The persona form has the groups "Identity", "Agent" and "Commits"; saving a persona creates its signing key. |
+| `GET .../new` (projects, personas, credentials), `GET /credentials/{id}/edit`, `POST .../{key or id}` | Form fragments (modal; a plain request redirects to the list) and update. A project and a persona are edited on their pages. The "New persona" modal has the groups "Identity", "Agent" (no system prompt) and "Commits"; creating answers `HX-Redirect: /personas/{id}?tab=system-prompt`. Saving a persona creates its signing key. |
+| `GET /personas/{id}?tab=`, `POST /personas/{id}` | The persona settings page (full page; tabs General with the groups "Identity" and "Agent", System prompt with the Markdown field in the split layout, Commits with the group "Commits"; an unknown `tab` opens General; an unknown id and `/personas/{id}/edit` answer `404`) and its save (answers the form with the stored values and, as htmx partials, the heading and the status "Persona saved"; `422` with the form opened on the tab of the first error). The system prompt is optional and stored as typed (CRLF of a browser submit becomes LF). |
+| `POST /personas/refresh` | A change of the harness or the model provider: answers `#agent-fields` (harness, model provider and model) as typed, with the lists of the new choice. |
+| `POST /markdown/preview` | The preview of a Markdown field: the form field `source` rendered by `markdown::render`, wrapped in `<div class="md-body">`; "Nothing to preview" for an empty text. Board members only, behind the CSRF guard (`HX-Request`). `413` for a decoded text over 256 KiB or a body over 1 MiB. Stores and logs nothing. |
 | `POST /personas/{id}/rotate-key` | Rotates the persona's signing key after the confirmation in the group "Commits". Answers `#signing-key` with the new public key and fingerprint and the status "Key rotated…"; `422` with the same region and the confirmation open (`x-init="$el.showModal()"`) and the error when the Secret could not be written; `404` for an unknown persona. Board members only, like every page. |
 | `POST /personas/{id}/verify-key` | Signs the Forgejo verification token (`token`) with the persona's key in the namespace of the Forgejo domain (`domain`), for "Verify key on Forgejo" in the group "Commits". Answers the dialog body `#forge-verify-body` with the armored signature; `422` with the dialog body that keeps token and domain and shows the reason when the token or the domain is invalid or the key's Secret cannot be read; `404` when the instance does not load the `forgejo` plugin, for an unknown persona and for a persona without a stored key (nothing is signed or audited then). Board members only, like every page. Writes the audit entry `persona.signing_key.forge_verify` with the persona, the fingerprint and the domain. |
 | `GET /projects/forge?repo_url=&issue_tracker_url=` | Forge icons and hint of the project form (htmx partials). |
@@ -167,10 +170,13 @@ Added after the spike:
 
 ## Assets and styles
 
-The stylesheet (`styles/input.css`) and the component scripts (`scripts/*.ts`) are compiled, not
-checked in: Bazel builds them with the pinned `tailwindcss` and `swc`; plain `cargo` runs the tools
-from `PATH` (`TAILWIND_BIN` / `SWC_BIN`) in `build.rs` and warns when one is missing. How and what
-the tests do then: `docs/development.md`, "Web assets".
+The stylesheet (`styles/input.css`), the component scripts (`scripts/*.ts`) and the editor bundle
+(`editor/markdown-editor.ts` with the CodeMirror packages of `package.json`, served as
+`/assets/editor.js`) are compiled, not checked in: Bazel builds them with the pinned `tailwindcss`,
+`swc` and `esbuild`; plain `cargo` runs the tools from `PATH` (`TAILWIND_BIN` / `SWC_BIN` /
+`ESBUILD_BIN`) in `build.rs` and warns when one is missing. The page names the bundle in
+`data-editor-src` of `<body>` only when it is embedded. How and what the tests do then:
+`docs/development.md`, "Web assets".
 
 Alpine attributes with `@` are not valid in maud; use `x-on:click`. Attribute names with `.`
 (`x-on:event.window`) are written as strings.

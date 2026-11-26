@@ -34,6 +34,7 @@ use crate::responses::{htmx_location, internal_error, invalid, not_found};
 use crate::{project_subscriptions, project_webhook};
 
 mod branches;
+mod persona_page;
 mod personas;
 mod project_page;
 mod providers;

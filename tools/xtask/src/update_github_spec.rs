@@ -158,7 +158,7 @@ fn verified_source(pin: Pin, description: &[u8]) -> Result<Source> {
     clippy::format_collect,
     reason = "32 bytes: readability over one allocation per byte"
 )]
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))

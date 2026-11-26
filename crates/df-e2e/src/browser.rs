@@ -48,6 +48,13 @@ struct SharedLogin {
     generation: u64,
 }
 
+/// The emulated device of [`Session::start_logged_in_tablet`].
+#[derive(Debug, Clone, Copy)]
+struct Tablet {
+    width: u32,
+    height: u32,
+}
+
 /// A task creation that was submitted without the UI opening the task.
 #[derive(Debug, Clone)]
 pub struct UnlandedTask {
@@ -77,7 +84,7 @@ pub struct Session {
 impl Session {
     /// Connects to the Playwright server and opens a page in a new context.
     pub async fn start(env: &E2eEnv) -> Result<Self> {
-        Self::open(env, None).await
+        Self::open(env, None, None).await
     }
 
     /// Like [`Session::start`] followed by [`Session::login`], but the Dex form is submitted at
@@ -86,12 +93,22 @@ impl Session {
     /// context that still lands on the login form (the session expired or was removed) logs in
     /// again and replaces the stored state. Tests that start together wait for that one login.
     pub async fn start_logged_in(env: &E2eEnv) -> Result<Self> {
+        Self::start_logged_in_on(env, None).await
+    }
+
+    /// [`Session::start_logged_in`] on a tablet with only a touch screen (`hasTouch`, `isMobile`)
+    /// of `width` x `height` pixels: a second viewer of the same user. The caller closes its page.
+    pub async fn start_logged_in_tablet(env: &E2eEnv, width: u32, height: u32) -> Result<Self> {
+        Self::start_logged_in_on(env, Some(Tablet { width, height })).await
+    }
+
+    async fn start_logged_in_on(env: &E2eEnv, tablet: Option<Tablet>) -> Result<Self> {
         let (stored, generation) = {
             let shared = SHARED_LOGIN.lock().await;
             (shared.state.clone(), shared.generation)
         };
         let has_stored_state = stored.is_some();
-        let mut session = Box::pin(Self::open(env, stored)).await?;
+        let mut session = Box::pin(Self::open(env, stored, tablet)).await?;
         if has_stored_state && session.try_stored_login(env).await? {
             return Ok(session);
         }
@@ -102,7 +119,7 @@ impl Session {
         // fails the test that runs it and releases the lock.
         let mut shared = SHARED_LOGIN.lock().await;
         if shared.generation != generation {
-            let newer = Box::pin(Self::open(env, shared.state.clone())).await?;
+            let newer = Box::pin(Self::open(env, shared.state.clone(), tablet)).await?;
             if newer.try_stored_login(env).await? {
                 return Ok(newer);
             }
@@ -126,7 +143,11 @@ impl Session {
         Ok(session)
     }
 
-    async fn open(env: &E2eEnv, state: Option<StorageState>) -> Result<Self> {
+    async fn open(
+        env: &E2eEnv,
+        state: Option<StorageState>,
+        tablet: Option<Tablet>,
+    ) -> Result<Self> {
         let playwright = within(
             "start the local Playwright driver (`just e2e-local` installs it)",
             Playwright::launch(),
@@ -137,18 +158,24 @@ impl Session {
             playwright.chromium().connect(&env.playwright_ws, None),
         )
         .await?;
-        let context = match state {
-            Some(state) => {
-                let options = BrowserContextOptions::builder()
-                    .storage_state(state)
-                    .build();
-                within(
-                    "open a browser context with the stored login",
-                    browser.new_context_with_options(options),
-                )
-                .await?
+        let context = if state.is_none() && tablet.is_none() {
+            within("open a browser context", browser.new_context()).await?
+        } else {
+            let mut options = BrowserContextOptions::builder();
+            if let Some(state) = state {
+                options = options.storage_state(state);
             }
-            None => within("open a browser context", browser.new_context()).await?,
+            if let Some(Tablet { width, height }) = tablet {
+                options = options
+                    .viewport(playwright_rs::Viewport { width, height })
+                    .has_touch(true)
+                    .is_mobile(true);
+            }
+            within(
+                "open a browser context with the stored login or the emulated device",
+                browser.new_context_with_options(options.build()),
+            )
+            .await?
         };
         let page = within("open a page", context.new_page()).await?;
         Ok(Self {
@@ -628,8 +655,158 @@ impl Session {
             .context("wait for the approval to be recorded")
     }
 
-    /// Signs `token` with the key of the persona `display_name` through "Verify key on Forgejo" of
-    /// its edit dialog; returns the armored signature the dialog shows.
+    /// Opens the settings page of the persona `display_name` from the list, on the tab `tab`
+    /// (`General`, `System prompt` or `Commits`: the name of the tab).
+    pub async fn open_persona_page(
+        &self,
+        env: &E2eEnv,
+        display_name: &str,
+        tab: &str,
+    ) -> Result<()> {
+        let page = &self.page;
+        page.goto(&format!("{}/personas", env.base_url), None)
+            .await
+            .context("open the personas")?;
+        // `.first()`: the list has the link once per layout (desktop and phone).
+        page.get_by_role(
+            AriaRole::Link,
+            Some(
+                GetByRoleOptions::default()
+                    .name(format!("Edit persona {display_name}"))
+                    .exact(true),
+            ),
+        )
+        .first()
+        .click(None)
+        .await
+        .context("edit the persona")?;
+        expect_page(page)
+            .to_have_url_regex(r"/personas/[0-9a-f-]+$")
+            .await
+            .context("the settings page of the persona opens")?;
+        page.get_by_role(
+            AriaRole::Tab,
+            Some(GetByRoleOptions::default().name(tab).exact(true)),
+        )
+        .click(None)
+        .await
+        .with_context(|| format!("open the tab {tab}"))
+    }
+
+    /// Opens the "New persona" modal of the persona list.
+    pub async fn open_new_persona_modal(&self, env: &E2eEnv) -> Result<()> {
+        let page = &self.page;
+        page.goto(&format!("{}/personas", env.base_url), None)
+            .await
+            .context("open the personas")?;
+        // Role and name only match the visible button: the phone's floating button is "New task".
+        button(page, "New persona")
+            .click(None)
+            .await
+            .context("open the New persona modal")
+    }
+
+    /// Creates the persona with `display_name`, `handle` and `commit_email`, the seeded model
+    /// provider and model in the "New persona" modal; returns when the settings page of the new
+    /// persona is open on its System prompt tab.
+    pub async fn create_persona(
+        &self,
+        env: &E2eEnv,
+        display_name: &str,
+        handle: &str,
+        commit_email: &str,
+    ) -> Result<()> {
+        let page = &self.page;
+        self.open_new_persona_modal(env).await?;
+        page.locator("#display_name")
+            .fill(display_name, None)
+            .await?;
+        page.locator("#handle").fill(handle, None).await?;
+        page.locator("#commit_email")
+            .fill(commit_email, None)
+            .await?;
+        page.locator("#model_provider_id")
+            .select_option(
+                playwright_rs::protocol::SelectOption::Label(
+                    crate::data::MODEL_PROVIDER_NAME.to_string(),
+                ),
+                None,
+            )
+            .await?;
+        page.locator("#model")
+            .select_option(
+                playwright_rs::protocol::SelectOption::Label(format!(
+                    "{} (Anthropic Messages)",
+                    crate::data::PERSONA_MODEL
+                )),
+                None,
+            )
+            .await?;
+        button(page, "Create persona")
+            .click(None)
+            .await
+            .context("create the persona")?;
+        expect_page(page)
+            .to_have_url_regex(r"/personas/[0-9a-f-]+\?tab=system-prompt$")
+            .await
+            .context("the new persona opens on its System prompt tab")
+    }
+
+    /// Types `text` into the System prompt field of the open persona page, in the highlighting
+    /// editor: the build of the suite has the editor bundle, which takes the textarea's place from
+    /// 768 px. Waits for the editor, which attaches once the bundle has loaded.
+    pub async fn write_system_prompt(&self, text: &str) -> Result<()> {
+        let page = &self.page;
+        let editor = self.system_prompt_editor();
+        expect(editor.clone())
+            .with_timeout(UI_TIMEOUT)
+            .to_be_visible()
+            .await
+            .context("the highlighting editor of the System prompt")?;
+        editor.click(None).await?;
+        page.keyboard()
+            .type_text(text, None)
+            .await
+            .context("type the system prompt")
+    }
+
+    /// The highlighting editor of the System prompt: a text box named by the field's label.
+    /// (Without an editor the textarea has the same role and name.)
+    pub fn system_prompt_editor(&self) -> Locator {
+        self.page.get_by_role(
+            AriaRole::Textbox,
+            Some(
+                GetByRoleOptions::default()
+                    .name("System prompt")
+                    .exact(true),
+            ),
+        )
+    }
+
+    /// Saves the persona page with "Save persona" and waits for the status "Persona saved", which
+    /// is a live region, so screen readers announce it.
+    pub async fn save_persona(&self) -> Result<()> {
+        let page = &self.page;
+        // `.first()`: the page has the button in its header and again for phones.
+        button(page, "Save persona")
+            .first()
+            .click(None)
+            .await
+            .context("save the persona")?;
+        let status = page.locator("#save-status");
+        expect(status.clone())
+            .with_timeout(UI_TIMEOUT)
+            .to_contain_text("Persona saved")
+            .await
+            .context("the page says the persona is saved")?;
+        expect(status)
+            .to_have_attribute("aria-live", "polite")
+            .await
+            .context("the status is announced")
+    }
+
+    /// Signs `token` with the key of the persona `display_name` through "Verify key on Forgejo" on
+    /// the Commits tab of its settings page; returns the armored signature the dialog shows.
     pub async fn sign_forgejo_token(
         &self,
         env: &E2eEnv,
@@ -638,17 +815,7 @@ impl Session {
         token: &str,
     ) -> Result<String> {
         let page = &self.page;
-        page.goto(&format!("{}/personas", env.base_url), None)
-            .await
-            .context("open the personas")?;
-        // `.first()`: the list has the button once per layout (desktop and phone).
-        page.locator(format!(
-            "button[aria-label='Edit persona {display_name}']:visible"
-        ))
-        .first()
-        .click(None)
-        .await
-        .context("edit the persona")?;
+        self.open_persona_page(env, display_name, "Commits").await?;
         button(page, "Verify key on Forgejo")
             .click(None)
             .await

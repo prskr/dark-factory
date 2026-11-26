@@ -3,9 +3,9 @@
 use axum::http::StatusCode;
 use df_db::DbError;
 
-use super::{assert_saved, audit};
+use super::{assert_persona_created, assert_persona_saved, audit, persona_page};
 use crate::config_pages::personas::save_error;
-use crate::testkit::{TestApp, form, seed, seed_provider, tag_around, text};
+use crate::testkit::{TestApp, form, header_str, seed, seed_provider, tag_around, text};
 
 /// A provider "Go" with `glm-5.3` on Chat Completions, `minimax-m3` on Anthropic Messages and
 /// `gpt-6-luna` on Responses; returns its id.
@@ -207,27 +207,29 @@ async fn the_form_offers_both_harnesses_and_a_required_model_with_its_explanatio
 }
 
 #[tokio::test]
-async fn refreshing_the_persona_form_keeps_its_create_or_edit_mode() {
+async fn refreshing_the_persona_form_renders_only_the_group_agent() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let provider = seed_provider(&app.pool).await.to_string();
-    let id = uuid::Uuid::now_v7().to_string();
     let body = persona("claude-code", &provider, "claude-sonnet-5-5");
 
-    let created = text(app.post("/personas/refresh", &body, &cookie).await).await;
-    let edited = text(
-        app.post(
-            "/personas/refresh",
-            &format!("{body}&entity_id={id}"),
-            &cookie,
-        )
-        .await,
-    )
-    .await;
+    let html = text(app.post("/personas/refresh", &body, &cookie).await).await;
 
-    assert!(created.contains("hx-post=\"/personas\"") && created.contains("Create persona"));
+    // The selects swap `#agent-fields` and nothing else: no form, no other field.
+    assert!(html.starts_with("<div id=\"agent-fields\">"), "{html}");
     assert!(
-        edited.contains(&format!("hx-post=\"/personas/{id}\"")) && edited.contains("Save persona")
+        !html.contains("<form") && !html.contains("system_prompt"),
+        "{html}"
+    );
+    assert!(
+        !html.contains("display_name") && !html.contains("commit_email"),
+        "{html}"
+    );
+    let select = tag_around(&html, "id=\"harness\"");
+    assert!(
+        select.contains("hx-post=\"/personas/refresh\"")
+            && select.contains("hx-target=\"#agent-fields\""),
+        "{select}"
     );
 }
 
@@ -293,7 +295,7 @@ async fn the_card_shows_the_description_in_place_of_the_start_of_the_system_prom
 
     let card = |name: &str| {
         page.split("<li ")
-            .find(|card| card.contains(&format!(">{name} <span")))
+            .find(|card| card.contains(&format!(">{name}</a> <span")))
             .unwrap_or_else(|| panic!("{name}: {page}"))
     };
     let reviewer = card("Reviewer");
@@ -372,7 +374,7 @@ async fn the_form_has_a_description_with_a_counter_between_name_and_system_promp
         .await
         .unwrap();
 
-    let html = text(app.get_htmx(&format!("/personas/{id}/edit"), &cookie).await).await;
+    let html = persona_page(&app, &cookie, id, "").await;
 
     let at = |needle: &str| {
         html.find(needle)
@@ -400,7 +402,7 @@ async fn persona_is_created_selectable_and_edits_are_audited() {
         ("model_provider_id", &provider),
     ]);
     let response = app.post("/personas", &body, &cookie).await;
-    assert_saved(&response);
+    assert_persona_created(&response);
     let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas WHERE handle = 'torvalds'")
         .fetch_one(&app.pool)
         .await
@@ -417,7 +419,7 @@ async fn persona_is_created_selectable_and_edits_are_audited() {
         ("model_provider_id", &provider),
     ]);
     let response = app.post(&format!("/personas/{id}"), &edited, &cookie).await;
-    assert_saved(&response);
+    assert_persona_saved(&response);
     let updates = audit(&app, "persona.update").await;
     assert_eq!(updates[0]["before"]["system_prompt"], "old prompt");
     assert_eq!(updates[0]["after"]["system_prompt"], "new prompt");
@@ -438,7 +440,7 @@ async fn the_persona_form_says_which_model_providers_it_offers() {
 }
 
 #[tokio::test]
-async fn persona_requires_identity_prompt_and_a_known_model_provider() {
+async fn persona_requires_identity_and_a_known_model_provider_but_no_system_prompt() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let body = form(&[
@@ -453,9 +455,125 @@ async fn persona_requires_identity_prompt_and_a_known_model_provider() {
         html.contains("Display name is required.")
             && html.contains("Handle is required.")
             && html.contains("Commit email is required.")
-            && html.contains("System prompt is required.")
             && html.contains("Choose a model provider.")
     );
+    assert!(!html.contains("System prompt is required."), "{html}");
+}
+
+#[tokio::test]
+async fn a_persona_is_created_without_a_system_prompt_and_opens_its_system_prompt_tab() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
+    // What the "New persona" modal posts: no system prompt field.
+    let body = form(&[
+        ("display_name", "Linus"),
+        ("handle", "linus"),
+        ("commit_email", "linus@example.org"),
+        ("harness", "claude-code"),
+        ("model_provider_id", &provider),
+        ("model", "claude-sonnet-5-5"),
+    ]);
+
+    let response = app.post("/personas", &body, &cookie).await;
+
+    assert_persona_created(&response);
+    let (id, prompt): (uuid::Uuid, String) =
+        sqlx::query_as("SELECT id, system_prompt FROM personas WHERE handle = 'linus'")
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    assert_eq!(prompt, "");
+    assert_eq!(
+        header_str(&response, "hx-redirect"),
+        format!("/personas/{id}?tab=system-prompt")
+    );
+}
+
+#[tokio::test]
+async fn the_new_persona_modal_has_no_system_prompt_and_the_groups_identity_agent_and_commits() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    seed_provider(&app.pool).await;
+
+    let html = text(app.get_htmx("/personas/new", &cookie).await).await;
+
+    assert!(
+        !html.contains("system_prompt") && !html.contains("System prompt"),
+        "{html}"
+    );
+    let identity = html.find(">Identity</h3>").expect("Identity");
+    let agent = html.find(">Agent</h3>").expect("Agent");
+    let commits = html.find(">Commits</h3>").expect("Commits");
+    assert!(identity < agent && agent < commits, "{html}");
+    assert!(html.contains("No signing key yet. Save the persona to create it."));
+    assert!(html.contains(">Create persona</button>"));
+}
+
+#[tokio::test]
+async fn saving_with_an_empty_system_prompt_succeeds_and_clears_it() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
+    let body = identity_form(&app, "Linus", "linus", "linus@example.org").await;
+    assert_persona_created(&app.post("/personas", &body, &cookie).await);
+    let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    let cleared = form(&[
+        ("display_name", "Linus"),
+        ("handle", "linus"),
+        ("commit_email", "linus@example.org"),
+        ("system_prompt", ""),
+        ("harness", "claude-code"),
+        ("model_provider_id", &provider),
+        ("model", "claude-sonnet-5-5"),
+        ("tab", "system-prompt"),
+    ]);
+
+    let response = app
+        .post(&format!("/personas/{id}"), &cleared, &cookie)
+        .await;
+
+    assert_persona_saved(&response);
+    let prompt: String = sqlx::query_scalar("SELECT system_prompt FROM personas")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(prompt, "");
+}
+
+#[tokio::test]
+async fn the_system_prompt_is_stored_as_typed() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let provider = seed_provider(&app.pool).await.to_string();
+    let body = identity_form(&app, "Linus", "linus", "linus@example.org").await;
+    assert_persona_created(&app.post("/personas", &body, &cookie).await);
+    let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    // A browser submits the line breaks of a textarea as CRLF; leading and trailing space stay.
+    let typed = "  ## Rules\r\n\r\n- one\r\n";
+    let body = form(&[
+        ("display_name", "Linus"),
+        ("handle", "linus"),
+        ("commit_email", "linus@example.org"),
+        ("system_prompt", typed),
+        ("harness", "claude-code"),
+        ("model_provider_id", &provider),
+        ("model", "claude-sonnet-5-5"),
+    ]);
+
+    assert_persona_saved(&app.post(&format!("/personas/{id}"), &body, &cookie).await);
+
+    let prompt: String = sqlx::query_scalar("SELECT system_prompt FROM personas")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(prompt, "  ## Rules\n\n- one\n");
 }
 
 /// The form of persona `handle` with the given identity fields; everything else is valid.
@@ -479,7 +597,7 @@ async fn a_valid_identity_is_stored_with_a_lowercased_email() {
 
     let response = app.post("/personas", &body, &cookie).await;
 
-    assert_saved(&response);
+    assert_persona_created(&response);
     let stored: (String, String, String) =
         sqlx::query_as("SELECT handle, display_name, commit_email FROM personas")
             .fetch_one(&app.pool)
@@ -538,7 +656,7 @@ async fn an_email_or_handle_of_another_persona_is_rejected_naming_it() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let linus = identity_form(&app, "Linus", "linus", "linus@example.org").await;
-    assert_saved(&app.post("/personas", &linus, &cookie).await);
+    assert_persona_created(&app.post("/personas", &linus, &cookie).await);
 
     let email = identity_form(&app, "Ada", "ada", "linus@example.org").await;
     let handle = identity_form(&app, "Other", "linus", "other@example.org").await;
@@ -556,7 +674,7 @@ async fn an_email_or_handle_of_another_persona_is_rejected_naming_it() {
         "{rejected}"
     );
     // A display name may be shared.
-    assert_saved(&app.post("/personas", &same_name, &cookie).await);
+    assert_persona_created(&app.post("/personas", &same_name, &cookie).await);
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM personas")
         .fetch_one(&app.pool)
         .await
@@ -605,13 +723,13 @@ async fn the_edit_form_previews_the_avatar_of_the_persona_with_its_color_and_nam
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let body = identity_form(&app, "Code Reviewer", "reviewer", "reviewer@example.org").await;
-    assert_saved(&app.post("/personas", &body, &cookie).await);
+    assert_persona_created(&app.post("/personas", &body, &cookie).await);
     let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas")
         .fetch_one(&app.pool)
         .await
         .unwrap();
 
-    let html = text(app.get_htmx(&format!("/personas/{id}/edit"), &cookie).await).await;
+    let html = persona_page(&app, &cookie, id, "").await;
 
     let preview = tag_around(&html, "x-text=\"initials\"");
     assert!(
@@ -664,12 +782,12 @@ async fn personas_are_cards_with_harness_model_prompt_excerpt_and_model_provider
 
     let html = text(app.get("/personas", &cookie).await).await;
     let card = |name: &str| {
-        let at = html.find(&format!(">{name} <span")).unwrap();
+        let at = html.find(&format!(">{name}</a> <span")).unwrap();
         let start = html[..at].rfind("<li ").unwrap();
         html[start..start + html[start..].find("</li>").unwrap()].to_string()
     };
     // Ordered by handle: ada before linus.
-    assert!(html.find(">Ada <span").unwrap() < html.find(">Linus <span").unwrap());
+    assert!(html.find(">Ada</a> <span").unwrap() < html.find(">Linus</a> <span").unwrap());
     let linus = card("Linus");
     assert!(linus.contains(">L</span>"), "initial: {linus}");
     assert!(
@@ -680,7 +798,16 @@ async fn personas_are_cards_with_harness_model_prompt_excerpt_and_model_provider
     assert!(linus.contains("Claude Code · claude-sonnet-5-5"), "{linus}");
     assert!(linus.contains("line-clamp-3") && linus.contains("Be Linus."));
     assert!(linus.contains(">Claude subscription<"), "{linus}");
-    assert!(linus.contains("aria-label=\"Edit persona Linus\"") && linus.contains("/edit\""));
+    // The name and the edit action are links to the settings page, not buttons of a modal.
+    assert!(
+        linus.contains("aria-label=\"Edit persona Linus\""),
+        "{linus}"
+    );
+    assert_eq!(linus.matches("href=\"/personas/").count(), 2, "{linus}");
+    assert!(
+        !linus.contains("/edit\"") && !linus.contains("hx-get"),
+        "{linus}"
+    );
     let ada = card("Ada");
     assert!(
         ada.contains("Claude Code · claude-sonnet-5-5") && ada.contains(">Claude subscription<"),
@@ -694,14 +821,10 @@ async fn the_persona_form_pairs_harness_and_model() {
     let cookie = app.login().await;
     let html = text(app.get_htmx("/personas/new", &cookie).await).await;
     assert!(html.contains("md:grid-cols-2"));
-    for full in ["system_prompt", "model"] {
-        assert!(
-            html.contains(&format!(
-                "<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label for=\"{full}\""
-            )),
-            "{full}"
-        );
-    }
+    assert!(
+        html.contains("<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label for=\"model\""),
+        "model takes the full row"
+    );
     for half in ["harness", "model_provider_id"] {
         assert!(!html.contains(&format!("<div class=\"md:col-span-2\"><div class=\"space-y-1\"><label class=\"block text-sm font-medium text-muted\" for=\"{half}\"")), "{half}");
         assert!(html.contains(&format!("for=\"{half}\"")));

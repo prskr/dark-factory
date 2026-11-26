@@ -26,6 +26,7 @@ pub mod egress;
 pub mod layout;
 mod lifecycle_events;
 pub mod markdown;
+mod markdown_preview;
 mod project_subscriptions;
 mod project_webhook;
 mod requests;
@@ -142,6 +143,7 @@ pub fn router(state: WebState) -> Router {
         .merge(chat_pages::routes())
         .merge(requests::routes())
         .merge(config_pages::routes())
+        .merge(markdown_preview::routes())
         .merge(project_subscriptions::routes())
         .merge(project_webhook::routes())
         .merge(egress::routes())

@@ -97,22 +97,96 @@ A **persona** is an agent with a role. **Settings → Personas → New persona**
 | Handle | The unique short name of the persona: lowercase letters, digits and hyphens, at most 39 characters, starting with a letter or digit. Shown as `@linus`. Agents address the persona by it (`create_task`, [delegation](delegation.md)). |
 | Commit email | The author and committer email of the persona's commits: one address (`linus@example.org`), at most 254 characters, stored in lower case. Unique across personas. See [Give a persona its identity](#give-a-persona-its-identity). |
 | Description | Optional, at most 500 characters: the role and strengths of the persona. The persona card shows it, and agents read it through `list_personas` when they choose whom to [delegate](delegation.md) to. |
-| System prompt | The role and the working rules of this agent. |
 | Harness | The coding agent that runs in the sandbox: `claude-code` or `opencode` ([guide](opencode.md)). |
 | Model provider | The [model provider](model-providers.md) the harness talks to. Only providers that offer a wire API of the harness are listed. |
 | Model | Required. One of the models of the provider whose wire API the harness can use. |
 
-The form groups its fields under the headings **Identity** (avatar, display name, handle,
-description), **Agent** (system prompt, harness, model provider, model) and **Commits** (commit
-email and the signing key, see [Sign a persona's commits](#sign-a-personas-commits)).
+The modal groups its fields under the headings **Identity** (avatar, display name, handle,
+description), **Agent** (harness, model provider, model) and **Commits** (commit email; the
+signing key comes with the first save, see [Sign a persona's commits](#sign-a-personas-commits)).
+**Create persona** opens the page of the new persona on its **System prompt** tab, where you write
+the prompt next. A persona is valid without a system prompt: its runs then start with the defaults
+of the harness, and its card says "No system prompt yet" while it has neither a description nor a
+prompt.
 
 Changing the harness or the model provider updates the other selects. A persona has no adapter
 command; a project can set one ([Projects](#projects)).
 
-Every task is assigned to one persona; the persona's harness, model and prompt apply to all runs of
-the task.
+### Edit a persona
 
-The form shows a preview of the persona's **avatar** left of the display name and the handle: the
+Choose a persona's name or edit action on **Personas** to open its **settings page**
+(`/personas/<id>`). It has three tabs and one **Save persona** button for all of them; saving keeps
+the open tab and says "Persona saved". The open tab is part of the URL (`?tab=system-prompt`,
+`?tab=commits`), so a link opens it. If a field is rejected, the page shows the tab of the first
+error with all your input kept, including the system prompt.
+
+| Tab | Holds |
+| --- | --- |
+| General | The groups **Identity** and **Agent** of the table above. |
+| System prompt | The role and the working rules of this agent, as Markdown. See [Write the system prompt](#write-the-system-prompt). |
+| Commits | The commit email and the signing key (see [Sign a persona's commits](#sign-a-personas-commits)). |
+
+Every task is assigned to one persona; the persona's harness, model and prompt apply to all runs of
+the task. A run of a persona without a system prompt starts with the defaults of the harness: the
+instructions file holds only the sandbox section, or is not written when there is none.
+
+### Write the system prompt
+
+The **System prompt** tab is a Markdown field. A switch above it chooses the view:
+
+| View | Shows |
+| --- | --- |
+| Editor | The text field at the full width of the page. |
+| Split | The text field on the left and the rendered preview on the right, each half of the width. From 1280 px width only; the tab opens on it. |
+| Preview | The rendered preview at the full width. |
+
+Below 1280 px the switch offers **Editor** and **Preview**, and the tab opens on **Editor**. The
+view is not remembered: the tab opens on its default view after a reload. The text field uses a
+monospace font, grows with its text up to 70 % of the window height and scrolls beyond that; its
+text is 16 px below 1024 px and on touch-only devices, so the browser does not zoom in.
+
+The preview comes from the control plane and is rendered like all Markdown in the UI: HTML in the
+text is shown as text, links get `rel="noopener noreferrer nofollow"`, fenced code is highlighted
+by its language with the configured code theme, and a `mermaid` fence is drawn as a diagram in its
+sandbox. A single line break is a soft break. An empty text shows "Nothing to preview".
+
+- **Split** follows the text: the preview is requested 500 ms after the last change. A diagram that
+  did not change stays drawn while you edit the text around it. When the request fails, the last
+  preview stays with the note "Preview not up to date" and the next change tries again.
+- **Preview** requests the rendering when you open it and the text changed since the last one. When
+  it fails, it says "Preview not available" with a **Retry** button.
+- A text over 256 KiB is not rendered: the preview says "Text too long for a preview (max 256
+  KiB)"; saving still works.
+- When your session has ended, the preview says so ("Preview not available: your session has ended.
+  Copy your text, then reload."); the page stays where it is and the text stays in the field.
+
+Without the field's script (it failed to load) the System prompt is a plain labelled text field.
+The text is saved exactly as typed.
+
+**Highlighting while you type.** From 768 px width the text field is an editor that highlights
+Markdown (headings, emphasis, links, list and quote markers, inline code) and fenced code in Rust,
+TypeScript and JavaScript, JSON, YAML, TOML, shell, Python, SQL, Markdown and diff. A fence in
+another language stays plain. The colors come from the UI tokens and, for headings and inside
+fences, from the configured code theme (`web.codeTheme`; a heading takes the color of a function
+name there, its `#` stays a faint marker), so a fence looks the same in the editor and in the preview
+and follows the light or dark color scheme of the browser without a reload.
+
+- **Tab and Escape.** Tab and Shift+Tab move the focus to the next or previous control and never
+  insert a tab character; the hint below the editor says so ("Tab moves to the next field. Indent
+  with Ctrl+] and Ctrl+[.", with `Cmd` on macOS). Indent a line with `Ctrl+]` and `Ctrl+[`. Escape
+  is left alone, so a dialog around the field closes as usual.
+- **Screen readers.** The editor is named by the field's label and described by its hint and error.
+  If it does not suit you, turn the switch **Highlighting** at the right end of the view switch off:
+  the field is the plain text field again, in this browser, also after a reload.
+- **Where it is off.** A phone (below 768 px) always has the plain text field, without the switch,
+  and does not load the editor. A tablet from 768 px gets the editor with or without a keyboard.
+  The text is 16 px below 1024 px and on devices with only a touch screen, so the browser does not
+  zoom in.
+- **Build without the editor.** The editor is a separate script that the control plane serves when
+  it was built with it. Without it, or when it fails to load, the field is the plain text field with
+  its preview and no switch; everything else works.
+
+The modal and the **General** tab show a preview of the persona's **avatar** left of the display name and the handle: the
 initials of the display name (up to two words) on one of eight colors. The color comes from the
 persona's id, so it stays the same when you rename the persona; a persona that is not saved yet has a
 neutral preview. Avatars are generated by the control plane: there is no upload and no request to
@@ -127,7 +201,7 @@ commits of the harness and for the WIP snapshots of the runtime, and the
 [Git proxy](../security/git-proxy.md) rejects a push with any other author (`df:identity`). Forge
 actions of the factory (pushes, pull requests, comments) still use the project's forge credential.
 
-1. Open **Settings → Personas** and edit the persona.
+1. Open **Settings → Personas** and open the persona's page, **Commits** tab.
 2. Set **Commit email** to an address that suits your forge, for example `linus@example.org`.
    A persona that was created by an upgrade has `<handle>@dark-factory.localhost`
    ([upgrade notes](../operations/upgrades.md#persona-identity)); change it if the commits should
@@ -146,7 +220,7 @@ Every persona has its own Ed25519 signing key, which Dark Factory creates when y
 (or before its first run, for a persona created earlier). The agent's commits are signed with it at
 commit time, and the [Git proxy](../security/git-proxy.md) rejects a task-branch commit without a
 valid signature (`df:signature`). There is nothing to configure and no way for an agent to switch
-signing off. The group **Commits** of the persona form shows the public key and its fingerprint
+signing off. The group **Commits** on the **Commits** tab of the persona's page shows the public key and its fingerprint
 with copy buttons, and **Rotate key** replaces the key after a confirmation. To have the forge show
 the commits as verified, register the key and the commit email on the bot account:
 [Verify persona commits on the forge](verify-persona-commits.md).
