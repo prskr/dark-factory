@@ -358,22 +358,22 @@
         "cpu": "x86_64",
         "kind": "file",
         "os": "linux",
-        "sha256": "58ac74a30cf455ffa5dbd5740aa7a7eef72888a2dd724ae6dce5eee5db15ddce",
-        "url": "https://github.com/evilmartians/lefthook/releases/download/v2.2.3/lefthook_2.2.3_Linux_x86_64"
+        "sha256": "77fd1a6b843dba7e6c609d53c9e38b61501045bf0a5244895a95b65dceb255ee",
+        "url": "https://github.com/evilmartians/lefthook/releases/download/v2.2.4/lefthook_2.2.4_Linux_x86_64"
       },
       {
         "cpu": "arm64",
         "kind": "file",
         "os": "linux",
-        "sha256": "433614a87b0764e1c3012af302bf671c1b9d6bfa650d29e2c551ef6787c891c0",
-        "url": "https://github.com/evilmartians/lefthook/releases/download/v2.2.3/lefthook_2.2.3_Linux_arm64"
+        "sha256": "ef58fcd0c86ff402cb41b30db298d54856a23ecb516987857501c5b374b364dc",
+        "url": "https://github.com/evilmartians/lefthook/releases/download/v2.2.4/lefthook_2.2.4_Linux_arm64"
       },
       {
         "cpu": "arm64",
         "kind": "file",
         "os": "macos",
-        "sha256": "f4c2e91e0dd77fee15faf6a94bd5e2668d6d223a2c798e41989318e86c9f05df",
-        "url": "https://github.com/evilmartians/lefthook/releases/download/v2.2.3/lefthook_2.2.3_MacOS_arm64"
+        "sha256": "1390fe469ffbe7464cb6febde0def687c1cc1684269431408e5d6be2d25e1e02",
+        "url": "https://github.com/evilmartians/lefthook/releases/download/v2.2.4/lefthook_2.2.4_MacOS_arm64"
       }
     ]
   },
