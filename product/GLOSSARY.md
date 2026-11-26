@@ -88,10 +88,6 @@ _Avoid_: Closed chat, completed chat, deleted chat
 
 ### Projects
 
-**Project context**:
-Human-approved planning knowledge for one project that every chat in it receives; tasks don't. Agents can only propose changes to it, and a human approves each one.
-_Avoid_: Project document, project memory, project instructions, AGENTS.md
-
 **Protected path**:
 A repository path whose content agents can read but may not change in what they push.
 _Avoid_: Read-only path, locked path

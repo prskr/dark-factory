@@ -124,11 +124,11 @@ When the harness has a skill directory and a run's skills include `dark-factory-
 - **THEN** the system prompt names `dark-factory-basics`, asks the agent to load it before its first action, and says that `~/.claude/skills` is managed by Dark Factory
 
 ### Requirement: Chat instructions take precedence over the basics
-In a chat run, the Skills section SHALL come before the project context and the chat instructions, and the chat instructions SHALL state that they take precedence over `dark-factory-basics` and that its sections about branches, commits, pushes, pull requests and `complete_task` do not apply.
+In a chat run, the Skills section SHALL come after the persona prompt and before the chat instructions, and the chat instructions SHALL state that they take precedence over `dark-factory-basics` and that its sections about branches, commits, pushes, pull requests and `complete_task` do not apply.
 
 #### Scenario: Chat prompt order
-- **WHEN** a chat run of project `DF` with project context starts
-- **THEN** the system prompt has the persona prompt, the Skills section, the project context and the chat instructions in this order, and the chat instructions say they take precedence over `dark-factory-basics`
+- **WHEN** a chat run of project `DF` starts
+- **THEN** the system prompt has the persona prompt, the Skills section and the chat instructions in this order, and the chat instructions say they take precedence over `dark-factory-basics`
 
 ### Requirement: Harness without a skill directory
 When `Assign.harness.acp.skills_dir` is empty, the runtime SHALL write no skill files and SHALL emit a `skills.unsupported` notice (level `WARNING`) listing every skill of `Assign` by name and version. The control plane SHALL append the body of every skill that applies to every run to the system prompt as a section.

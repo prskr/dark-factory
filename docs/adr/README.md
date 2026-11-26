@@ -14,7 +14,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0008](0008-configuration-split-provisioning-protocol.md) | Configuration split between provisioning and protocol | Accepted |
 | [ADR-0009](0009-agent-managed-workspaces-git-durable.md) | Agent-managed workspaces with Git as the only durable state | Accepted |
 | [ADR-0010](0010-credentials-in-the-sandbox.md) | Credentials in the sandbox | Accepted (amended by ADR-0050) |
-| [ADR-0011](0011-authentication-authorization-personas.md) | Authentication, authorization and agent personas | Accepted |
+| [ADR-0011](0011-authentication-authorization-personas.md) | Authentication, authorization and agent personas | Accepted (amended on 2026-11-26: `project:context:write` dropped) |
 | [ADR-0012](0012-postgresql-and-blob-store.md) | PostgreSQL plus a blob store abstraction | Accepted |
 | [ADR-0013](0013-single-tenant-instances.md) | Single-tenant instances | Accepted |
 | [ADR-0014](0014-tasks-authoritative-issues-linked.md) | Tasks are authoritative; issues are linked | Accepted |
@@ -29,7 +29,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0023](0023-kata-isolation-no-nested-containers.md) | Kata isolation, no nested containers | Accepted |
 | [ADR-0024](0024-build-tooling-and-dev-loop.md) | Build tooling and development loop | Accepted |
 | [ADR-0025](0025-pr-and-branch-handling.md) | Pull request and branch handling | Accepted (amended by ADR-0033 and on 2026-11-03: existing branches, attached PRs, stored branch) |
-| [ADR-0026](0026-chats-dependencies-project-context.md) | Chats per persona and project, task dependencies, project context | Accepted (planned for iteration 3, amended by ADR-0041, ADR-0043, ADR-0052, ADR-0053 and on 2026-11-03: project context) |
+| [ADR-0026](0026-chats-dependencies-project-context.md) | Chats per persona and project, task dependencies, project context | Accepted (planned for iteration 3, amended by ADR-0041, ADR-0043, ADR-0052, ADR-0053 and on 2026-11-03: project context; project context rejected on 2026-11-26) |
 | [ADR-0027](0027-agent-protocol-delivery-and-typed-tool-calls.md) | Agent protocol delivery semantics and typed tool calls | Accepted |
 | [ADR-0028](0028-integrations-wit-capability-interfaces.md) | Integration plugins as capability interfaces | Accepted |
 | [ADR-0029](0029-egress-gateway-and-generated-network-policies.md) | Egress gateway and generated network policies | Accepted |
@@ -43,7 +43,7 @@ One file per decision, numbered in order. ADR-0001 to ADR-0026 correspond to D1â
 | [ADR-0037](0037-tailwind-css-standalone-binary.md) | Tailwind CSS via its standalone binary | Accepted |
 | [ADR-0038](0038-agent-questions-and-approval-requests.md) | Agent questions and typed approval requests | Accepted (planned for iteration 2, amended by ADR-0039, ADR-0043 and change `question-kinds`) |
 | [ADR-0039](0039-repository-configuration-activated-by-approval.md) | Repository configuration file, activated by approval | Accepted (future option F11) |
-| [ADR-0040](0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned for iteration 6) |
+| [ADR-0040](0040-agent-memory-built-in-on-postgresql.md) | Agent memory built in, on PostgreSQL, explicit memories first | Accepted (planned for iteration 6; amended on 2026-11-26: project skills replace the project context) |
 | [ADR-0041](0041-tasks-based-on-another-tasks-branch.md) | Tasks based on another task's branch | Accepted (planned for iteration 3, amended by ADR-0052) |
 | [ADR-0042](0042-live-views-resume-only-from-an-authoritative-sequence.md) | Live views resume only from an authoritative sequence | Accepted |
 | [ADR-0043](0043-delegation-chain-chats-as-tasks.md) | Delegation chain, chats as tasks and waiting on subtasks | Accepted (planned for iteration 3, amended by ADR-0052, ADR-0053 and change `question-kinds`) |

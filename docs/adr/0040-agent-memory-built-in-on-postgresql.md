@@ -1,12 +1,12 @@
 # ADR-0040: Agent memory built in, on PostgreSQL, explicit memories first
 
-- **Status:** Accepted (planned for iteration 6)
+- **Status:** Accepted (planned for iteration 6; amended on 2026-11-26, #146: project skills replace the project context)
 - **Date:** 2026-10-19
 - **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0012](0012-postgresql-and-blob-store.md), [ADR-0026](0026-chats-dependencies-project-context.md), [ADR-0027](0027-agent-protocol-delivery-and-typed-tool-calls.md), [ADR-0028](0028-integrations-wit-capability-interfaces.md), [ADR-0032](0032-upstream-mcp-through-gateway-with-tool-catalog.md), [ADR-0038](0038-agent-questions-and-approval-requests.md)
 
 ## Context
 
-Agents should carry facts they learned from one task into later ones ("test `foo` is flaky under RBE, retry once"). Harness-native memory doesn't do this: `HOME` lives on the task PVC, so it ends with the task. Two related needs are already covered: instructions and conventions (project context document, ADR-0026; `AGENTS.md`; skills), and the history of earlier tasks (transcripts with full-text search, ADR-0012).
+Agents should carry facts they learned from one task into later ones ("test `foo` is flaky under RBE, retry once"). Harness-native memory doesn't do this: `HOME` lives on the task PVC, so it ends with the task. Two related needs are already covered: instructions and conventions (~~project context document, ADR-0026;~~ `AGENTS.md`; skills), and the history of earlier tasks (transcripts with full-text search, ADR-0012).
 
 Memory is also a persistence channel for prompt injection: an instruction planted in an issue and stored as a memory affects every later task of the project, bypassing per-task isolation. Only Dark Factory knows the project, persona and run behind a write.
 
@@ -18,7 +18,8 @@ Options were PostgreSQL with pgvector, dedicated vector databases (Qdrant, Chrom
 - **Scopes:** `project` (shared by all personas of the project) and `project + persona` (one persona within one project, like chats, ADR-0026). Nothing crosses project boundaries; no instance scope. The control plane derives the scope from the run binding; agents choose only between the two, never the project or persona.
 - **Two levels of trust:**
   - *Memories* are written by agents and treated as hints, not instructions. Each records its provenance (run, task, persona, time) and is visible, editable and deletable in the UI.
-  - *Project context* stays human-approved instructions. Promoting a memory into it is an approval request (ADR-0038) decided with `project:context:write` (ADR-0011).
+  - ~~*Project context* stays human-approved instructions. Promoting a memory into it is an approval request (ADR-0038) decided with `project:context:write` (ADR-0011).~~
+    Amended 2026-11-26 (#146): the project context of ADR-0026 is rejected. *Project skills* (change `iter4-skills`) are the instructions. Humans change them; agents only as the ADR-0011 permissions allow (deny, requires approval, allow), so under "allow" an agent changes a skill without an approval request. Promoting a memory into a project skill is an `instance-operation` approval request (ADR-0011, ADR-0038).
 - **Phases:**
   1. `search_history` factory tool over tasks and transcripts, using the existing full-text search.
   2. Explicit memories: factory tools `remember`, `recall`, `forget`; full-text search; pinned memories injected into the first prompt of every run in scope; memory writes pass the same secret scanning as pushes; the run record lists the memories injected into it.
