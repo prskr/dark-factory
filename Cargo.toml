@@ -135,9 +135,9 @@ regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 ring = { version = "0.17", default-features = false, features = ["alloc"] }
 rmcp = { version = "3.9.0", default-features = false, features = ["client", "server", "transport-async-rw"] }
-rpi-agent = "=0.27.1"
-rpi-ai = { version = "=0.27.1", features = ["providers"] }
-rpi-tools = "=0.27.1"
+rpi-agent = "=0.29.0"
+rpi-ai = { version = "=0.29.0", features = ["providers"] }
+rpi-tools = "=0.29.0"
 rsa = "0.10"
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path", "debug-embed"] }
