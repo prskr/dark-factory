@@ -1173,7 +1173,7 @@ fn default_adapter_command() -> Vec<String> {
 
 /// The `OpenCode` version is the tag of the harness image (`deploy/images/opencode-harness`).
 fn default_opencode_image() -> String {
-    "ghcr.io/prskr/dark-factory/opencode-harness:2.4.1".to_string()
+    "ghcr.io/prskr/dark-factory/opencode-harness:2.4.2".to_string()
 }
 
 fn default_opencode_adapter_command() -> Vec<String> {
