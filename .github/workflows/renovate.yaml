@@ -60,6 +60,6 @@ jobs:
           RENOVATE_REQUIRE_CONFIG: required
           RENOVATE_BINARY_SOURCE: global
           RENOVATE_ALLOWED_COMMANDS: '["^bazel mod tidy$", "^cargo xtask update-opencode-checksums$"]'
-          # the bazel-module manager updates MODULE.bazel.lock with `bazel mod deps --lockfile_mode=update`
-          RENOVATE_ALLOWED_UNSAFE_EXECUTIONS: '["bazelModDeps"]'
+          # No `bazelModDeps`: `bazel mod deps` fails on the lockfile-less crate extension of protobuf's
+          # module; the `bazel mod tidy` post-upgrade task updates MODULE.bazel.lock instead.
           LOG_LEVEL: info
