@@ -10,8 +10,7 @@ fn query_param(url: &str, name: &str) -> String {
         .unwrap()
         .query_pairs()
         .find(|(k, _)| k == name)
-        .map(|(_, v)| v.into_owned())
-        .unwrap_or_default()
+        .map_or_default(|(_, v)| v.into_owned())
 }
 
 /// The `Cookie` header value for the `Set-Cookie` of a response.

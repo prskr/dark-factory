@@ -188,11 +188,7 @@ impl<T: Transport, C: Clock, L: Log> GitHub<T, C, L> {
             let last_page = prs.len() < LIST_PAGE_SIZE;
             for pr in prs.into_iter().filter(|pr| pr.state == "open") {
                 let labels: Vec<String> = pr.labels.iter().map(|l| l.name.clone()).collect();
-                let author = pr
-                    .user
-                    .as_ref()
-                    .map(|u| u.login.clone())
-                    .unwrap_or_default();
+                let author = pr.user.as_ref().map_or_default(|u| u.login.clone());
                 let candidate = Candidate {
                     head: &pr.head.branch,
                     head_repo: pr.head.repo.as_ref().map(|r| r.full_name.as_str()),

@@ -286,8 +286,7 @@ fn test_stems(tests: &Path) -> std::io::Result<Vec<String>> {
 
 fn file_name(path: &Path) -> String {
     path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
+        .map_or_default(|n| n.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]

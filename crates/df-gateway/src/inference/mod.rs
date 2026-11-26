@@ -130,8 +130,7 @@ impl Inference {
         let query = parts
             .uri
             .query()
-            .map(|query| format!("?{query}"))
-            .unwrap_or_default();
+            .map_or_default(|query| format!("?{query}"));
         let target_uri = format!("{}{path}{query}", url.uri().path().trim_end_matches('/'));
         let Ok(target_uri) = target_uri.parse::<Uri>() else {
             return text(StatusCode::NOT_FOUND, NOT_FOUND);

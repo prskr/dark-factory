@@ -215,7 +215,7 @@ struct Roles<'a, T, L> {
 
 impl<T: Transport, L: Log> Roles<'_, T, L> {
     fn author(&mut self, user: Option<ApiUser>) -> Result<Author, Error> {
-        let login = user.map(|u| u.login).unwrap_or_default();
+        let login = user.map_or_default(|u| u.login);
         let role = self.role(&login)?;
         Ok(Author { login, role })
     }

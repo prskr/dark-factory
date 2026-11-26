@@ -182,15 +182,13 @@ impl TranscriptTranslator {
         let raw_input_str = call
             .raw_input
             .as_ref()
-            .map(|v| serde_json::to_string(v).unwrap_or_default())
-            .unwrap_or_default();
+            .map_or_default(|v| serde_json::to_string(v).unwrap_or_default());
         let (raw_input_json, input_trunc) = truncate_raw_io(&raw_input_str);
 
         let raw_output_str = call
             .raw_output
             .as_ref()
-            .map(|v| serde_json::to_string(v).unwrap_or_default())
-            .unwrap_or_default();
+            .map_or_default(|v| serde_json::to_string(v).unwrap_or_default());
         let (raw_output_json, output_trunc) = truncate_raw_io(&raw_output_str);
 
         let status = map_status(call.status);

@@ -94,7 +94,7 @@ fn ignore_list(root: &toml::Table) -> BTreeMap<String, String> {
         .and_then(|m| m.get("outdated"))
         .and_then(|o| o.get("ignore"))
         .and_then(toml::Value::as_table)
-        .map(|t| {
+        .map_or_default(|t| {
             t.iter()
                 .map(|(k, v)| {
                     (
@@ -104,7 +104,6 @@ fn ignore_list(root: &toml::Table) -> BTreeMap<String, String> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// Registry dependencies in the table at `path`, keyed by the name used in the manifest.

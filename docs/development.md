@@ -4,7 +4,7 @@ This guide covers setting up a local development environment for Dark Factory, r
 
 ## 1. Prerequisites
 
-- **Rust toolchain**: pinned via [`rust-toolchain.toml`](../rust-toolchain.toml) (1.99.1, edition 2024, with targets `x86_64-unknown-linux-musl` and `wasm32-wasip2`, and `llvm-tools-preview`).
+- **Rust toolchain**: pinned via [`rust-toolchain.toml`](../rust-toolchain.toml) (1.100.0, edition 2024, with targets `x86_64-unknown-linux-musl` and `wasm32-wasip2`, and `llvm-tools-preview`).
 - **Protobuf compiler**: `protoc` (`>= 29.x`) on `PATH` (or set via `PROTOC`).
 - **C compiler** for plain `cargo` (`cc`/`gcc`/`clang`, as for any Rust project): `cargo` on aarch64 Linux links with it, using the `rust-lld` of the Rust toolchain instead of GNU ld (`.cargo/cc-lld.sh`, [ADR-0058](adr/0058-hermetic-c-toolchain.md)). Bazel needs no C compiler or linker on Linux.
 - **Cargo subcommands**:

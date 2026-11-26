@@ -398,8 +398,7 @@ fn url_prefix(url: &str) -> Option<String> {
 pub fn rewrite_git_config(repo_dir: &Path, params: &GitConfigParams<'_>) -> std::io::Result<()> {
     let ca = params
         .ssl_ca_info
-        .map(|p| p.display().to_string())
-        .unwrap_or_default();
+        .map_or_default(|p| p.display().to_string());
     for value in [
         params.repo_url,
         &ca,

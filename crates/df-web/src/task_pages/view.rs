@@ -115,7 +115,7 @@ impl Filters {
         Self {
             status: StatusFilter::parse(status),
             project: project.filter(|p| !p.is_empty()).map(str::to_string),
-            sort: sort.map(TaskSort::from_query).unwrap_or_default(),
+            sort: sort.map_or_default(TaskSort::from_query),
         }
     }
 
@@ -593,7 +593,7 @@ pub(crate) fn details_region(
             url,
             format!(
                 "Pull request{}",
-                task.pr_number.map(|n| format!(" #{n}")).unwrap_or_default()
+                task.pr_number.map_or_default(|n| format!(" #{n}"))
             ),
         )
     });
@@ -663,7 +663,7 @@ pub(crate) fn details_region(
                         div class="flex flex-col gap-2 text-sm" {
                             @if let Some(url) = &task.pr_url {
                                 div class="flex items-center gap-2" {
-                                    (external_link(url, &format!("PR{}", task.pr_number.map(|n| format!(" #{n}")).unwrap_or_default()), task.pr_title.as_deref(), Icon::PullRequest))
+                                    (external_link(url, &format!("PR{}", task.pr_number.map_or_default(|n| format!(" #{n}"))), task.pr_title.as_deref(), Icon::PullRequest))
                                     @if task.pr_attached { (attached_badge()) }
                                 }
                             }
@@ -1022,8 +1022,7 @@ pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Ch
         choices
             .projects
             .first()
-            .map(|(id, _)| id.as_str())
-            .unwrap_or_default()
+            .map_or_default(|(id, _)| id.as_str())
     } else {
         values.project.as_str()
     };
@@ -1031,8 +1030,7 @@ pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Ch
         choices
             .personas
             .first()
-            .map(|(id, _)| id.as_str())
-            .unwrap_or_default()
+            .map_or_default(|(id, _)| id.as_str())
     } else {
         values.persona.as_str()
     };

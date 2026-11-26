@@ -38,12 +38,10 @@ impl ModelRow {
             wire_api: model.wire_api.as_str().to_string(),
             context: model
                 .limits
-                .map(|l| l.context_window_tokens.to_string())
-                .unwrap_or_default(),
+                .map_or_default(|l| l.context_window_tokens.to_string()),
             output: model
                 .limits
-                .map(|l| l.max_output_tokens.to_string())
-                .unwrap_or_default(),
+                .map_or_default(|l| l.max_output_tokens.to_string()),
         }
     }
 

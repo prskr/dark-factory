@@ -330,11 +330,7 @@ fn result(call_id: &str, outcome: &Outcome) -> ToolCallResult {
             .content
             .clone()
             .unwrap_or_else(|| vec![text_block(outcome.text.clone())]),
-        structured_content_json: outcome
-            .structured
-            .as_ref()
-            .map(Value::to_string)
-            .unwrap_or_default(),
+        structured_content_json: outcome.structured.as_ref().map_or_default(Value::to_string),
         end_run_after_turn: outcome.end_run_after_turn,
         await_input_after_turn: outcome.await_input_after_turn,
     }
@@ -520,13 +516,12 @@ async fn ask_question(
     let answers: Vec<String> = args
         .get("suggested_answers")
         .and_then(Value::as_array)
-        .map(|a| {
+        .map_or_default(|a| {
             a.iter()
                 .filter_map(Value::as_str)
                 .map(str::to_owned)
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     let blocking = args
         .get("blocking")
         .and_then(Value::as_bool)

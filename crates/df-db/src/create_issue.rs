@@ -141,9 +141,7 @@ impl ApprovalType for CreateIssue {
     }
 
     fn describe(&self, request: &RequestRow) -> String {
-        let title = issue_payload(&request.payload)
-            .map(|p| p.title)
-            .unwrap_or_default();
+        let title = issue_payload(&request.payload).map_or_default(|p| p.title);
         format!("Create issue \"{title}\"")
     }
 }

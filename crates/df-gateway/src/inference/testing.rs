@@ -133,15 +133,13 @@ async fn answer(
     let body = body
         .collect()
         .await
-        .map(http_body_util::Collected::to_bytes)
-        .unwrap_or_default();
+        .map_or_default(http_body_util::Collected::to_bytes);
     seen.lock().unwrap().push(Seen {
         method: parts.method.clone(),
         path_and_query: parts
             .uri
             .path_and_query()
-            .map(ToString::to_string)
-            .unwrap_or_default(),
+            .map_or_default(ToString::to_string),
         headers: parts.headers,
         body: body.clone(),
     });

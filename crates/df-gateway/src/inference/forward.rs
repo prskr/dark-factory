@@ -130,11 +130,7 @@ impl UsageBody {
         let Some(outcome) = self.outcome.take() else {
             return;
         };
-        let measured = self
-            .parser
-            .take()
-            .map(UsageParser::finish)
-            .unwrap_or_default();
+        let measured = self.parser.take().map_or_default(UsageParser::finish);
         outcome.complete(self.status, measured);
     }
 }

@@ -48,7 +48,7 @@ pub enum TelemetryError {
     /// An `OTEL_*` variable has a value that is not supported.
     #[error(
         "invalid {var} value `{value}`{}",
-        .reason.as_ref().map(|r| format!(": {r}")).unwrap_or_default()
+        .reason.as_ref().map_or_default(|r| format!(": {r}"))
     )]
     InvalidVariable {
         var: &'static str,
@@ -867,7 +867,7 @@ mod tests {
 
     impl Recording {
         fn names(&self) -> Vec<String> {
-            self.0.lock().map(|g| g.clone()).unwrap_or_default()
+            self.0.lock().map_or_default(|g| g.clone())
         }
     }
 

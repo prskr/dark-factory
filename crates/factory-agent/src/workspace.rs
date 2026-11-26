@@ -945,8 +945,7 @@ async fn write_wip_tree(git: &Git, wip_index: &Path, hidden: &GlobSet) -> anyhow
     let head_files_out = git
         .run_ok(&["ls-tree", "-r", "-z", "--name-only", "HEAD"])
         .await
-        .map(|out| out.stdout)
-        .unwrap_or_default();
+        .map_or_default(|out| out.stdout);
     let head_tracked_files: HashSet<&OsStr> = nul_separated(&head_files_out).collect();
 
     // Drop secret files from wip.index

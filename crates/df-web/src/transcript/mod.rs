@@ -233,13 +233,13 @@ impl Folder {
             event::Kind::TurnStarted(_) => Vec::new(),
             event::Kind::UserMessage(m) => self.apply_user_message(id, turn, m),
             event::Kind::AgentMessageChunk(c) => {
-                let text = c.content.as_ref().map(block_text).unwrap_or_default();
+                let text = c.content.as_ref().map_or_default(block_text);
                 // Message ids restart with every run.
                 let dom_id = format!("msg-r{}-{}", self.run, dom_safe(&c.message_id));
                 vec![self.append_stream(dom_id, turn, &text, false)]
             }
             event::Kind::AgentThoughtChunk(c) => {
-                let text = c.content.as_ref().map(block_text).unwrap_or_default();
+                let text = c.content.as_ref().map_or_default(block_text);
                 let dom_id = format!("thought-r{}-{}", self.run, dom_safe(&c.message_id));
                 vec![self.append_stream(dom_id, turn, &text, true)]
             }

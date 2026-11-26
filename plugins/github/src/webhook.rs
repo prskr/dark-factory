@@ -108,7 +108,7 @@ fn check_suite(body: &[u8]) -> Result<Vec<ParsedEvent>, Error> {
         event: WebhookEvent::CiFailed(CiFailed {
             repo,
             head,
-            check: p.check_suite.app.map(|a| a.name).unwrap_or_default(),
+            check: p.check_suite.app.map_or_default(|a| a.name),
             // A check suite has no web URL of its own.
             url: String::new(),
         }),
