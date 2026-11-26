@@ -1,7 +1,7 @@
 {
   "name": "df-web-vendor",
   "private": true,
-  "packageManager": "pnpm@12.22.0",
+  "packageManager": "pnpm@12.23.0",
   "dependencies": {
     "@codemirror/commands": "6.11.1",
     "@codemirror/lang-javascript": "6.2.5",
