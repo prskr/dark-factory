@@ -161,11 +161,15 @@ When the upstream cannot be connected to, the TLS handshake fails, or it answers
 - **THEN** the call fails with outcome `upstream-error`
 
 ### Requirement: Credential injection
-The gateway SHALL build every upstream request itself and SHALL forward no header of the sandbox's request. It SHALL inject the server's credential as defined by its scheme, and SHALL never return the credential or upstream response headers to the client, or write the credential to logs.
+The gateway SHALL build every upstream request itself and SHALL forward no header of the sandbox's request. It SHALL inject the server's credential as defined by its scheme (header or query parameter), and SHALL never return the credential, the upstream URL or upstream response headers to the client, or write the credential or the upstream URL's query to logs.
 
 #### Scenario: Sandbox sends its own credential
 - **WHEN** a request to `/mcp` carries `Authorization: Bearer stolen` and `CONTEXT7_API_KEY: x`
 - **THEN** the upstream request carries only the server's configured credential header and neither value from the sandbox
+
+#### Scenario: Query credential not leaked
+- **WHEN** server `penpot` has scheme `query` and its upstream answers a call with 500
+- **THEN** the harness receives the fixed message "upstream error (500)" without the URL, and no log line contains the token
 
 #### Scenario: Credential missing from the snapshot
 - **WHEN** the server's credential is not in the snapshot (unresolvable Secret)

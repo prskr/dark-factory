@@ -12,7 +12,7 @@ What exists today (observed in the code):
 - **Credentials.** `credential_refs` point at a Kubernetes Secret name and key; `SecretStore` resolves them at use time (`credential-resolution`).
 - **Runtime.** `factory-agent/src/harness.rs` `setup_session()` passes one stdio server, `factory` (`/opt/factory/factory-agent mcp --socket <path>`), to `session/new` and `session/load`. `factory-agent mcp` (`mcp.rs`) is an `rmcp` stdio server that relays to the runtime over a Unix socket; factory tool calls then go over gRPC to the control plane. The harness reads the instance CA from `INSTANCE_CA_PATH`. Landlock restricts files, not network. The transcript marks tool calls `mcp__factory__*` as factory calls, all others as harness calls, and truncates raw input and output at 64 KiB.
 - **`rmcp` 3.9** is a workspace dependency with features `client`, `server`, `transport-async-rw`. No Streamable HTTP transport is enabled.
-- **Authorization.** Settings pages sit behind `require_board_member`. There is no `admin` role or tool permission yet.
+- **Authorization.** Every page sits behind `require_board_member` (role `board-member`). The role `admin` exists already (`df-web/src/auth/mod.rs`, `ADMIN_ROLE`): `require_admin` guards the project webhook and lifecycle subscription routes, and only admins see and save the "Integrations" tab of the project settings (`config_pages.rs`, `Editing::AsAdmin`). Roles come from the ID token's `auth.rolesClaim`. There is no tool permission yet. `docs/authorization.md` (added by this change) describes the concept for contributors.
 
 ## Goals / Non-Goals
 
@@ -46,7 +46,7 @@ Alternatives: permissions and catalog first (the original plan): larger first ch
 
 | Table | Columns (main) | Notes |
 |---|---|---|
-| `mcp_servers` | `id`, `name` UNIQUE, `url`, `credential_ref_id` → `credential_refs` ON DELETE RESTRICT, `credential_scheme` CHECK `bearer`\|`header`, `credential_header`, `credential_prefix`, `private_network` bool, `config_version`, timestamps | Name immutable (D6). `config_version` increases on every edit; gateways end upstream sessions when it changes. |
+| `mcp_servers` | `id`, `name` UNIQUE, `url` (with path and query), `credential_ref_id` → `credential_refs` ON DELETE RESTRICT, `credential_scheme` CHECK `bearer`\|`header`\|`query`, `credential_header`, `credential_prefix`, `credential_query_param`, `private_network` bool, `config_version`, timestamps | Name immutable (D6). A CHECK ties the scheme to its columns (`header` needs `credential_header`, `query` needs `credential_query_param`, the others are NULL). `config_version` increases on every edit; gateways end upstream sessions when it changes. |
 | `project_mcp_servers` | `project_id`, `server_id` → `mcp_servers` (RESTRICT); PK both | Enablement. Delete refused while rows exist. |
 | `mcp_calls` | `call_id` UUID PK, `run_id` → `runs` ON DELETE CASCADE, `server_name`, `tool`, `outcome`, `started_at`, `duration_ms`, `request_bytes`, `response_bytes` | `server_name` instead of an FK, so records survive a server deletion. PK makes retried reports idempotent, as `model_usage.request_id`. |
 
@@ -56,7 +56,7 @@ Queries live in a new `df-db` module `mcp_servers`.
 
 The gateway sits in a privileged place: its network policy limits only ingress, so it reaches the control plane's internal port, PostgreSQL, other services and private networks. A tool call is a request body the agent chooses, and the answer comes back to the agent. If a third party controls a public server's DNS, it can point the name at an internal address later (DNS rebinding) and turn the gateway into a client for internal services.
 
-That attack needs a name the board member did not choose to resolve somewhere unexpected. For a server the board member registers on a private address on purpose, it does not apply. So the check is a per-server switch:
+That attack needs a name the admin did not choose to resolve somewhere unexpected. For a server the admin registers on a private address on purpose, it does not apply. So the check is a per-server switch:
 
 - **"Private network" off (default):** the gateway resolves the host with `SystemResolver`, refuses the connection if `BlockedRanges` covers **any** resolved address (as `proxy.rs`), and connects to a checked address with the original host for SNI.
 - **"Private network" on:** no address check; the gateway connects to whatever the name resolves to. For internal servers, and later for stdio → HTTP bridges in the cluster. Use it only for names in DNS you control: it also turns off the rebinding protection, and with it on, the server's name may point at `localhost` or the gateway's own ports. The security page says so.
@@ -91,7 +91,7 @@ On `tools/list` the gateway asks each enabled server for `tools/list` (all pages
 - `Mcp-Session-Id` is `df-<run id>-<random>`. A gateway pod accepts it when the run id equals the source pod's run. The downstream session holds no state on the gateway: `tools/list` and `tools/call` are answered from the snapshot by pod IP. So every gateway replica serves every request and no session affinity is needed. The pod IP authenticates, as for `/inference`.
 - Upstream sessions are state, but per gateway pod: opened on first use, closed when the run leaves the snapshot, when `config_version` changes, or after 10 min idle.
 - Cancellation: if the client closes the connection of a call, the pod cancels the upstream request (outcome `cancelled`). This deliberately departs from Streamable HTTP's "disconnection SHOULD NOT be interpreted as cancellation": the endpoint offers no resumable stream, so a result whose connection is gone can never be delivered. `notifications/cancelled` may reach another pod, which ignores it. The concurrency limit (8) is per run and gateway pod.
-- Enablement changes apply at once, in both directions: the gateway checks the run's current enabled servers on every call and list. A server enabled during a run is callable at once and appears in the next `tools/list`; a harness that does not list again (`listChanged` is false) does not see it until its next session, and a run whose `Assign` had no endpoint has no `ext` until its next run. Keeping each run's start-time server set and intersecting it was considered (CodeRabbit review) and rejected: enabling a server for a project is the board member's decision for that project, so letting a running run use it grants nothing beyond that decision, and the start-time set would need its own storage per run.
+- Enablement changes apply at once, in both directions: the gateway checks the run's current enabled servers on every call and list. A server enabled during a run is callable at once and appears in the next `tools/list`; a harness that does not list again (`listChanged` is false) does not see it until its next session, and a run whose `Assign` had no endpoint has no `ext` until its next run. Keeping each run's start-time server set and intersecting it was considered (CodeRabbit review) and rejected: enabling a server for a project is the admin's decision for that project, so letting a running run use it grants nothing beyond that decision, and the start-time set would need its own storage per run.
 
 ### D7: Contracts
 
@@ -115,14 +115,21 @@ message SandboxEntry {
 message McpServer {
   string id = 1;
   string name = 2;
-  string url = 3;
+  string url = 3;                // may contain path and query parameters
   string credential_ref = 4;     // key into Snapshot.provider_credentials
-  CredentialScheme scheme = 5;   // CREDENTIAL_SCHEME_BEARER or CREDENTIAL_SCHEME_HEADER only
-  string credential_header = 6;
-  string credential_prefix = 7;
+  // How the credential is sent; exactly one is set.
+  oneof credential_scheme {
+    McpBearerScheme bearer = 5;  // Authorization: Bearer <value>
+    McpHeaderScheme header = 6;  // <name>: <prefix><value>
+    McpQueryScheme query = 7;    // ?<parameter>=<value>, URL-encoded
+  }
   bool private_network = 8;      // skip the private-address check
   uint64 config_version = 9;     // upstream sessions end when it changes
 }
+
+message McpBearerScheme {}
+message McpHeaderScheme { string name = 1; string prefix = 2; }
+message McpQueryScheme { string parameter = 1; }
 
 service GatewayMcp {
   rpc Report(McpCallBatch) returns (ReportMcpCallsResponse);
@@ -153,7 +160,9 @@ enum McpCallOutcome {
 message ReportMcpCallsResponse {}
 ```
 
-Credential values reuse `Snapshot.provider_credentials` (keyed by credential reference id, already generic); its comment becomes "inference and MCP credentials". Without tool definitions in the snapshot, its size grows by a few hundred bytes per server.
+The scheme is a `oneof` (Peter Kurfer's review) instead of the inference route's flat `CredentialScheme` enum plus `credential_header` / `credential_prefix` fields: each scheme carries only its own fields, and an invalid combination cannot be expressed. The inference route keeps its enum in this change. Credential values reuse `Snapshot.provider_credentials` (keyed by credential reference id, already generic); its comment becomes "inference and MCP credentials".
+
+**URLs with query parameters.** `UpstreamUrl::parse` rejects a query, which is right for inference and Git. The MCP client gets its own URL type that keeps path and query, adds a `query` credential as the last parameter, and is never logged or returned with its query (its `Debug` prints scheme, host and path only). Some servers need this: PenPot's MCP server, for example, takes a JWT as a query parameter. Without tool definitions in the snapshot, its size grows by a few hundred bytes per server.
 
 `darkfactory.agent.v1`: `AcpHarness.mcp_endpoint = <n3>` (string, empty = none; final number assigned at implementation). It sits on `AcpHarness` because registering MCP servers is an ACP session concern.
 
@@ -176,16 +185,28 @@ The gateway reuses the usage reporter's pattern (bounded queue of 10,000, batche
 
 ### D10: UI and authorization
 
-- Settings area: "MCP servers" page next to "Model providers": list and form (name, URL, credential reference select, scheme with the same preview as model providers, "Private network" switch with a one-line explanation, the write-tools warning).
-- Project settings: tab "MCP servers" with one checkbox per server.
-- Run view: "Tool calls (MCP)" table.
-- Board members only (`require_board_member`), like model providers. With `iter4-permissions`: registration maps to `credential:manage` (the `admin` role), enablement to the project's configuration permission. Only the route guards change.
+- Settings area: "MCP servers" page next to "Model providers": list and form (name, URL with the note that it is not secret, credential reference select, scheme `bearer` / `header` / `query` with the same preview as model providers, "Private network" switch with a one-line explanation, the write-tools warning).
+- Project settings: tab "MCP servers" with one checkbox per server, shown to admins only, like "Integrations".
+- Run view: "Tool calls (MCP)" table, for every board member.
+- **Admins only** for the MCP servers page (`require_board_member` + `require_admin`) and the project tab (`Editing::AsAdmin`): both decide what a shared credential reaches, like the webhook secret and the lifecycle subscriptions that already need `admin`. With `iter4-permissions`, both map to `credential:manage`; only the route guards change.
+
+### D11: Repository MCP configurations
+
+This change does not touch MCP servers a repository defines for its harness (Claude Code's `.mcp.json`, the `mcp` section of `opencode.json`). Nothing in the runtime or the generated harness configuration enables or disables them today, so each harness applies its own rule:
+
+- **Claude Code** asks the user to approve project-scoped `.mcp.json` servers before it starts them, unless its settings approve them (`enableAllProjectMcpServers`, `enabledMcpjsonServers`). Under the ACP adapter there is no interactive prompt, and the runtime auto-approves ACP permission requests; whether the adapter loads, skips or auto-approves `.mcp.json` servers is not verified (spike 1.2).
+- **OpenCode** reads `mcp` entries of the repository's `opencode.json` as configuration, without a separate approval; the generated configuration does not override `mcp` (spike 1.2 confirms).
+- Either way, a repository server gets no credential from the factory: a stdio server runs in the sandbox under Landlock, and a remote one goes through the egress proxy and needs an allowlist entry.
+
+The planned `repository-mcp-server` approval (`iter4-mcp-catalog`, decision 8) needs the factory to decide this: block repository servers by default (Claude Code: settings without project MCP approval or with `enabledMcpjsonServers: []`; OpenCode: `enabled: false` per entry in the generated configuration) and enable approved entries. Spike 1.2 records the current behavior so that the catalog change starts from facts. If a harness loads repository servers unasked today, that is a gap to close in the catalog change or earlier, not by this change.
 
 ## Security
 
 - **Untrusted descriptions and results.** In this slice, tool descriptions come live from the upstream and reach the model unreviewed (tool poisoning), and results pass unchanged (prompt injection). The gateway limits what an upstream can do beyond text: no sampling, elicitation or roots, size and time limits, only five tool fields served. Review and pinning of descriptions come with `iter4-mcp-catalog`. Until then: register only servers whose operator you trust.
 - **Write tools bypass the factory's controls.** A write tool acts directly on the upstream system. For a forge server (forgejo-mcp) that means commits, merges, file changes and issues **without** the Git proxy's push checks, secret rules and task-branch rules, and without the `create-issue` approval of `chat-issue-tools`; in chats, too, nothing asks a human. Any tool argument also leaves to the upstream, read-only tools included. **Rule for this slice** (docs and form warning): the credential's scope is the permission. Use read-only tokens where possible; register no forge server with a write-capable token until filters and "ask" exist. One technical guard: an MCP server cannot use a credential reference that a project uses as its forge credential or a model provider uses (and the other way round), so the factory's own forge token cannot be selected by mistake. A separate write-capable token remains possible; the warning covers it. Do not enable a server that reads private data together with one that writes to a public place in the same project: an injected result can drive the other server's tools.
 - **Credentials.** In the control plane and in gateway memory only. The gateway builds upstream requests itself and forwards no sandbox header. Nothing from upstream response headers goes back. The relay carries no credential.
+- **Query credentials** (scheme `query`) are weaker than header credentials outside our control: the upstream, and any proxy in front of it, may write full URLs to its access logs. On our side the URL's query is never logged, never put into an error message and never returned; redirects are not followed, so the URL cannot leak to a third host. The form recommends `bearer` or `header` when the server supports them.
+- **The URL is not secret.** It is stored in the database and shown in the UI. A token pasted into the URL instead of the credential reference would be exposed; the form says so.
 - **One credential per server per instance.** The upstream sees all projects' calls under one identity. Any project that enables a server reaches everything the credential reaches, and the upstream's audit log cannot tell projects apart. One run can use up the credential's rate limit for all projects. Per-project credentials and rate limits: backlog.
 - **Any process in the sandbox** can call `/mcp`, as with `/inference`: the trust boundary is the sandbox, not the harness.
 - **SSRF.** D3: public servers checked, private ones by explicit switch, no redirects.
@@ -215,7 +236,7 @@ Taken on 2026-11-25 (Peter Kurfer): gateway first with all tools forwarded (D1);
 | Q1 | Enable servers per project or per persona, opt-in or opt-out? | Per project, opt-in (D1, amends ADR-0032). A server is an external system with its own data; which projects may reach it is the blast-radius decision, and it matches the egress rules. Persona grants later intersect with it. |
 | Q2 | Write tools until the catalog? | No block of write tools; the form warning, the documented rule (read-only tokens, no forge write tokens), and the guard that the factory's own forge and model credentials cannot be used for MCP servers. |
 | Q3 | Store call arguments or results? | No. Size and outcome only; the transcript has the payloads. |
-| Q4 | Who registers servers? | Board members now; `admin` (`credential:manage`) after `iter4-permissions`. |
+| Q4 | Who registers servers and enables them per project? | Users with the existing `admin` role, for both (D10); `credential:manage` after `iter4-permissions`. |
 | Q5 | One credential per server per instance? | Yes, with the consequences documented. Per-project credentials and rate limits to the backlog. |
 | Q6 | Apply the private-address check to inference and Git upstreams too? | No, not in this change; in-cluster model routers are a real case there. |
 | Q7 | Limits fixed or configurable? | Fixed constants (as for inference). |
