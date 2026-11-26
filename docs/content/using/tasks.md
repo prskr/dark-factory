@@ -151,8 +151,10 @@ text.
 | `cancelled` | Cancelled by a human |
 | `failed` | The run failed and automatic retries are exhausted |
 
-The list's filters group them: *Active*, *Waiting* (`awaiting_dependencies`, `waiting`, `blocked`,
-`in_review`, `limit_reached`) and *Done* (`completed`, `cancelled`, `failed`).
+The list's filters group them: *Active* (the default) is every task that is not done, *Done*
+(`completed`, `cancelled`, `failed`) holds the rest, and *All* shows both. The *Waiting* counter of a
+project (`awaiting_dependencies`, `waiting`, `blocked`, `in_review`, `limit_reached`) links to the
+narrower `?status=waiting` filter, which has no chip.
 
 ## Sort order
 

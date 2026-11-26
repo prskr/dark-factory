@@ -39,6 +39,7 @@ const SEND_SHORTCUT: &str = "(editing ? $refs.save : document.querySelector('#co
 pub(crate) enum StatusFilter {
     #[default]
     Active,
+    /// Only reachable by link (project counters): no chip, all chips unselected.
     Waiting,
     Done,
     All,
@@ -50,7 +51,7 @@ pub(crate) enum StatusFilter {
 
 impl StatusFilter {
     /// The filters that have a chip.
-    pub(crate) const CHIPS: [Self; 4] = [Self::Active, Self::Waiting, Self::Done, Self::All];
+    pub(crate) const CHIPS: [Self; 3] = [Self::Active, Self::Done, Self::All];
     const VALUES: [Self; 6] = [
         Self::Active,
         Self::Waiting,
@@ -236,7 +237,7 @@ fn empty_list(filters: &Filters) -> Markup {
         (status, _) => format!("No {} tasks", status.label().to_lowercase()),
     };
     let sentence = match filters.status {
-        StatusFilter::Active => "Queued, running and rate-limited tasks show up here.",
+        StatusFilter::Active => "Tasks that are queued, running or waiting show up here.",
         StatusFilter::Waiting => "Tasks that wait for you or hit a limit show up here.",
         StatusFilter::Done => "Completed, cancelled and failed tasks show up here.",
         StatusFilter::Queued => "Tasks waiting for a run show up here.",

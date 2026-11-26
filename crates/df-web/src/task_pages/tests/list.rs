@@ -84,10 +84,7 @@ async fn sort_created_orders_by_creation_and_appears_in_chip_project_and_row_lin
         "{html}"
     );
     let default = text(app.get("/tasks?sort=updated&status=done", &cookie).await).await;
-    assert!(
-        default.contains("href=\"/tasks?status=waiting\""),
-        "{default}"
-    );
+    assert!(default.contains("href=\"/tasks?status=all\""), "{default}");
     assert!(!default.contains("sort=updated\""), "{default}");
     assert!(!default.contains("sort=updated&"), "{default}");
 }
@@ -266,17 +263,18 @@ async fn list_filters_by_status_group_and_project_and_keeps_them_in_the_urls() {
     let default = text(app.get("/tasks", &cookie).await).await;
     assert!(
         default.contains("queued df")
-            && !default.contains("waiting web")
+            && default.contains("waiting web")
             && !default.contains("done web")
     );
     // Chips for every group, the current one marked; the project menu lists projects with counts.
-    for label in ["Active", "Waiting", "Done", "All"] {
+    for label in ["Active", "Done", "All"] {
         assert!(default.contains(&format!(">{label}</a>")), "{label}");
     }
+    assert!(!default.contains(">Waiting</a>"));
     assert!(default.contains("href=\"/tasks?status=done\""));
-    // Counts follow the status filter: WEB has no active task.
+    // Counts follow the status filter: WEB has one active task (the waiting one), not the done one.
     assert!(
-        default.contains("data-search=\"website web · 0\""),
+        default.contains("data-search=\"website web · 1\""),
         "{default}"
     );
 
@@ -424,11 +422,7 @@ async fn narrower_status_filters_from_links_select_their_statuses_and_no_chip() 
             && !queued.contains("running one")
             && !queued.contains("limited one")
     );
-    for label in ["Active", "Waiting", "Done", "All"] {
-        let at = queued.find(&format!(">{label}</a>")).unwrap();
-        let chip = &queued[queued[..at].rfind("<a ").unwrap()..at];
-        assert!(!chip.contains("aria-current"), "{label} is current: {chip}");
-    }
+    assert_no_status_chip_is_current(&queued);
     assert!(queued.contains("hx-sse:connect=\"/tasks/events?status=queued\""));
     let running = text(app.get("/tasks?status=running", &cookie).await).await;
     assert!(running.contains("running one") && running.contains("limited one"));
@@ -447,8 +441,7 @@ async fn a_list_row_has_key_status_and_time_on_the_top_line_before_the_title() {
         .await
         .unwrap();
     let html = text(app.get("/tasks?status=all", &cookie).await).await;
-    let row = &html[html.find("<li id=\"row-DF-1\"").unwrap()..];
-    let row = &row[..row.find("</li>").unwrap()];
+    let row = row(&html, "DF-1");
     let at = |needle: &str| {
         row.find(needle)
             .unwrap_or_else(|| panic!("{needle}: {row}"))
@@ -476,7 +469,7 @@ async fn the_empty_states_follow_the_mockup() {
     let list = &html[html.find("No active tasks").unwrap()..];
     let list = &list[..list.find("</li>").unwrap()];
     assert!(
-        list.contains("Queued, running and rate-limited tasks show up here."),
+        list.contains("Tasks that are queued, running or waiting show up here."),
         "{list}"
     );
     let link = tag_around(list, "Show all tasks");
@@ -561,7 +554,7 @@ async fn a_list_row_title_is_one_truncated_line_with_the_full_title_on_hover() {
     )
     .await;
     let html = text(app.get("/tasks?status=all", &cookie).await).await;
-    let row = &html[html.find("<li id=\"row-DF-1\"").unwrap()..];
+    let row = row(&html, "DF-1");
     let title = tag_around(row, "A very long title");
     assert!(
         title.contains("truncate") && !title.contains("break-words"),
@@ -585,7 +578,7 @@ async fn the_selected_row_has_an_accent_edge_and_the_others_a_transparent_one() 
     new_task(&app.pool, &seed, "first").await;
     new_task(&app.pool, &seed, "second").await;
     let html = text(app.get("/tasks/DF-2", &cookie).await).await;
-    let row = &html[html.find("<li id=\"row-DF-1\"").unwrap()..];
+    let row = row(&html, "DF-1");
     let a_tag = tag_around(row, "hx-push-url");
     for class in [
         "border-l-[3px]",
@@ -627,7 +620,98 @@ async fn in_review_has_its_own_badge_and_belongs_to_the_waiting_filter() {
         "{waiting}"
     );
     let active = text(app.get("/tasks", &cookie).await).await;
-    assert!(!active.contains("review me"));
+    assert!(active.contains("review me"));
+}
+
+#[tokio::test]
+async fn the_chips_are_active_done_and_all_in_that_order() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    new_task(&app.pool, &seed, "any").await;
+    let html = text(app.get("/tasks", &cookie).await).await;
+    let at: Vec<_> = ["Active", "Done", "All"]
+        .iter()
+        .map(|l| html.find(&format!(">{l}</a>")).unwrap())
+        .collect();
+    assert!(at[0] < at[1] && at[1] < at[2], "{at:?}");
+}
+
+#[tokio::test]
+async fn active_lists_running_waiting_blocked_and_in_review_tasks_but_not_done_ones() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    for (title, status) in [
+        ("is running", "running"),
+        ("is waiting", "waiting"),
+        ("is blocked", "blocked"),
+        ("is in review", "in_review"),
+        ("is finished", "completed"),
+    ] {
+        task_in(&app, &seed, seed.project, title, status).await;
+    }
+    let html = text(app.get("/tasks", &cookie).await).await;
+    for title in ["is running", "is waiting", "is blocked", "is in review"] {
+        assert!(html.contains(title), "{title}");
+    }
+    assert!(!html.contains("is finished"));
+}
+
+#[tokio::test]
+async fn a_live_update_from_running_to_waiting_keeps_the_row_in_the_active_list() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    task_in(&app, &seed, seed.project, "keeps its row", "running").await;
+    let mut sse = crate::testkit::SseReader::new(app.get("/tasks/events", &cookie).await);
+    let first = sse.next().await;
+    assert!(first.data.contains("keeps its row"), "{}", first.data);
+
+    let task: df_core::TaskId = sqlx::query_scalar("SELECT id FROM tasks")
+        .fetch_one(&app.pool)
+        .await
+        .map(df_core::TaskId::from_uuid)
+        .unwrap();
+    crate::testkit::set_task_status(&app.pool, task, df_core::TaskStatus::Waiting).await;
+    let frame = sse.next_within(std::time::Duration::from_secs(2)).await;
+    let row = row(&frame.data, "DF-1");
+    assert!(
+        row.contains("keeps its row") && row.contains("waiting"),
+        "{row}"
+    );
+}
+
+/// The `<li id="row-<key>">` of a task in a list page or stream frame, up to its `</li>`.
+fn row<'a>(html: &'a str, key: &str) -> &'a str {
+    let from = html
+        .find(&format!("<li id=\"row-{key}\""))
+        .unwrap_or_else(|| panic!("no row {key}: {html}"));
+    let row = &html[from..];
+    &row[..row
+        .find("</li>")
+        .map_or(row.len(), |end| end + "</li>".len())]
+}
+
+/// The status chips (Active, Done, All) of a list page: none carries `aria-current`.
+fn assert_no_status_chip_is_current(html: &str) {
+    for label in ["Active", "Done", "All"] {
+        let at = html.find(&format!(">{label}</a>")).unwrap();
+        let chip = &html[html[..at].rfind("<a ").unwrap()..at];
+        assert!(!chip.contains("aria-current"), "{label} is current: {chip}");
+    }
+}
+
+#[tokio::test]
+async fn the_waiting_link_filter_lists_only_the_waiting_group_and_marks_no_chip() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let seed = seed(&app.pool).await;
+    task_in(&app, &seed, seed.project, "is running", "running").await;
+    task_in(&app, &seed, seed.project, "is waiting", "waiting").await;
+    let html = text(app.get("/tasks?status=waiting", &cookie).await).await;
+    assert!(html.contains("is waiting") && !html.contains("is running"));
+    assert_no_status_chip_is_current(&html);
 }
 
 #[tokio::test]

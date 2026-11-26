@@ -20,10 +20,12 @@ pub struct ParseEnumError {
     pub value: String,
 }
 
-/// Coarse grouping of task statuses used by the task list filters.
+/// The three coarse groups of task statuses ([`TaskStatus::group`]). The task list's Active
+/// filter is not this group's `Active`: it is [`StatusSet::Active`], every open status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StatusGroup {
-    /// Queued, running or rate limited: the work is moving without a human.
+    /// Queued, running or rate limited: the work is moving without a human. Not the list's
+    /// Active filter ([`StatusSet::Active`]).
     Active,
     /// Awaiting dependencies, waiting, blocked, in review or limit reached: the work waits for
     /// a human or for other tasks.
@@ -32,11 +34,12 @@ pub enum StatusGroup {
     Done,
 }
 
-/// The sets of statuses the task list, its live updates and the project counters select: the
-/// coarse [`StatusGroup`]s plus two narrower sets that only links select (`queued`, `running`).
+/// The sets of statuses the task list, its live updates and the project counters select: every
+/// open status (`Active`), the [`StatusGroup`]s `Waiting` and `Done`, and two narrower sets that
+/// only links select (`queued`, `running`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StatusSet {
-    /// Queued, running, rate limited.
+    /// Every status outside [`TaskStatus::DONE`].
     Active,
     /// Awaiting dependencies, waiting, blocked, in review, limit reached.
     Waiting,
@@ -53,9 +56,14 @@ impl StatusSet {
     pub const fn statuses(self) -> &'static [TaskStatus] {
         match self {
             Self::Active => &[
+                TaskStatus::AwaitingDependencies,
                 TaskStatus::Queued,
                 TaskStatus::Running,
+                TaskStatus::Waiting,
+                TaskStatus::Blocked,
+                TaskStatus::InReview,
                 TaskStatus::RateLimited,
+                TaskStatus::LimitReached,
             ],
             Self::Waiting => &[
                 TaskStatus::AwaitingDependencies,
@@ -67,16 +75,6 @@ impl StatusSet {
             Self::Done => TaskStatus::DONE,
             Self::Queued => &[TaskStatus::Queued],
             Self::Running => &[TaskStatus::Running, TaskStatus::RateLimited],
-        }
-    }
-}
-
-impl From<StatusGroup> for StatusSet {
-    fn from(group: StatusGroup) -> Self {
-        match group {
-            StatusGroup::Active => Self::Active,
-            StatusGroup::Waiting => Self::Waiting,
-            StatusGroup::Done => Self::Done,
         }
     }
 }
@@ -778,9 +776,18 @@ mod tests {
             ]
         );
         assert_eq!(StatusSet::Done.statuses(), [Completed, Cancelled, Failed]);
-        // The groups are made of the statuses `TaskStatus::group` assigns to them.
-        for group in [StatusGroup::Active, StatusGroup::Waiting, StatusGroup::Done] {
-            let set = StatusSet::from(group);
+        // Active is every status outside Done.
+        let open: Vec<_> = TaskStatus::ALL
+            .iter()
+            .filter(|s| !TaskStatus::DONE.contains(s))
+            .copied()
+            .collect();
+        assert_eq!(StatusSet::Active.statuses(), open);
+        // The Waiting and Done sets are the statuses `TaskStatus::group` assigns to them.
+        for (set, group) in [
+            (StatusSet::Waiting, StatusGroup::Waiting),
+            (StatusSet::Done, StatusGroup::Done),
+        ] {
             let by_group: Vec<_> = TaskStatus::ALL
                 .iter()
                 .filter(|s| s.group() == group)
