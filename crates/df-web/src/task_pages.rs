@@ -375,8 +375,7 @@ async fn composer(State(state): State<WebState>, Query(query): Query<ComposeQuer
     let project = query
         .project
         .and_then(|key| keys.into_iter().find(|(k, _)| *k == key))
-        .map(|(_, id)| id)
-        .unwrap_or_default();
+        .map_or_default(|(_, id)| id);
     let values = TaskForm {
         project,
         ..TaskForm::default()

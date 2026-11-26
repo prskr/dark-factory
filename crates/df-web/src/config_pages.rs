@@ -281,7 +281,7 @@ impl FormTarget {
     }
 
     fn id_field(self) -> Markup {
-        html! { input type="hidden" name="entity_id" value=(self.id.map(|id| id.to_string()).unwrap_or_default()); }
+        html! { input type="hidden" name="entity_id" value=(self.id.map_or_default(|id| id.to_string())); }
     }
 }
 
@@ -758,10 +758,7 @@ fn project_values(p: &ProjectRecord, push_policy: &PushPolicy) -> ProjectForm {
         image: p.image.clone(),
         base_branch: p.base_branch.clone(),
         adapter_command: adapter_command_text(&p.adapter_command),
-        forge_credential_id: p
-            .forge_credential_id
-            .map(|id| id.to_string())
-            .unwrap_or_default(),
+        forge_credential_id: p.forge_credential_id.map_or_default(|id| id.to_string()),
         webhook_wake: p.webhook_wake.as_str().to_string(),
         branch_rewrite_policy: p.branch_rewrite_policy.as_str().to_string(),
         subtask_merge: p.subtask_merge.as_str().to_string(),
@@ -1057,8 +1054,7 @@ async fn project_forge(State(state): State<WebState>, RawQuery(query): RawQuery)
     let value = |name: &str| {
         url::form_urlencoded::parse(query.as_deref().unwrap_or_default().as_bytes())
             .find(|(key, _)| key == name)
-            .map(|(_, v)| v.into_owned())
-            .unwrap_or_default()
+            .map_or_default(|(_, v)| v.into_owned())
     };
     let feedback = forge_feedback(
         &state.forges,

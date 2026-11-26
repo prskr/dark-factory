@@ -325,7 +325,7 @@ async fn discard_outbox_of_other_run(outbox: &Mutex<outbox::Outbox>, run_id: &st
 fn log_assigned(assign: &df_proto::agent::v1::Assign) {
     tracing::info!(
         run_id = %assign.run_id,
-        task_key = %assign.task.as_ref().map(|t| t.task_key.as_str()).unwrap_or_default(),
+        task_key = %assign.task.as_ref().map_or_default(|t| t.task_key.as_str()),
         "run assigned"
     );
 }

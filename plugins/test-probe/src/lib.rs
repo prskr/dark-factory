@@ -395,8 +395,7 @@ impl WebhooksGuest for Probe {
             headers
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(name))
-                .map(|(_, v)| v.clone())
-                .unwrap_or_default()
+                .map_or_default(|(_, v)| v.clone())
         };
         let verify = || {
             let signature = hex::decode(header("x-probe-signature")).unwrap_or_default();

@@ -357,8 +357,7 @@ impl Push {
             }
         };
         let commands = parse_receive_pack_request(&failure.head, u64::MAX)
-            .map(|parsed| parsed.commands)
-            .unwrap_or_default();
+            .map_or_default(|parsed| parsed.commands);
         let entry = Entry::new(run_id, &commands, failure.read, started);
         self.reject(&entry, Reason::Check(reason)).await;
         text(status, &message)
@@ -658,8 +657,7 @@ impl Entry<'_> {
                 reason: ref_verdict
                     .reason
                     .as_ref()
-                    .map(|reason| reason.as_str().to_owned())
-                    .unwrap_or_default(),
+                    .map_or_default(|reason| reason.as_str().to_owned()),
             })
             .collect();
         PushRecord {

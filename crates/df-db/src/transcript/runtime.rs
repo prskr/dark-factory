@@ -134,8 +134,7 @@ fn content_blocks_mut(kind: &mut event::Kind) -> Vec<&mut ContentBlock> {
         event::Kind::ToolCallUpdate(u) => u
             .content
             .as_mut()
-            .map(|list| tool_content(&mut list.items))
-            .unwrap_or_default(),
+            .map_or_default(|list| tool_content(&mut list.items)),
         event::Kind::TurnStarted(_)
         | event::Kind::Plan(_)
         | event::Kind::TurnEnded(_)

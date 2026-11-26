@@ -410,7 +410,7 @@ pub(super) fn compose_form(
 /// The persona picker: a button with the chosen persona that opens the list of all personas,
 /// each with harness, model and description.
 fn persona_picker(personas: &[PersonaRecord], chosen: Option<&PersonaRecord>) -> Markup {
-    let name = chosen.map(|p| p.display_name.as_str()).unwrap_or_default();
+    let name = chosen.map_or_default(|p| p.display_name.as_str());
     html! {
         div class="relative" x-data={"{ open: false, name: " (serde_json::json!(name)) " }"} "x-on:keydown.escape.stop"="open = false" "x-on:click.outside"="open = false" {
             button type="button" aria-haspopup="listbox" ":aria-expanded"="open" "x-on:click"="open = !open"

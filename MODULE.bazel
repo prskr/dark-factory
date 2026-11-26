@@ -6,7 +6,7 @@ module(
 )
 
 # Keep in sync with `channel` in rust-toolchain.toml (a module file cannot read it).
-RUST_VERSION = "1.99.1"
+RUST_VERSION = "1.100.0"
 
 bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
 bazel_dep(name = "aspect_rules_js", version = "3.6.1")

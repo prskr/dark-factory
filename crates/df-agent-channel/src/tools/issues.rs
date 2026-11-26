@@ -122,14 +122,13 @@ pub(super) async fn create_issue(
 fn strings(args: &Value, key: &str) -> Vec<String> {
     args.get(key)
         .and_then(Value::as_array)
-        .map(|items| {
+        .map_or_default(|items| {
             items
                 .iter()
                 .filter_map(Value::as_str)
                 .map(str::to_owned)
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 fn excerpt(body: &str) -> String {

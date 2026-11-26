@@ -77,10 +77,8 @@ impl CardData {
             .as_deref()
             .and_then(|name| types.get(name));
         Self {
-            scopes: approval_type
-                .map(|t| t.scopes().to_vec())
-                .unwrap_or_default(),
-            summary: approval_type.map(|t| t.describe(&row)).unwrap_or_default(),
+            scopes: approval_type.map_or_default(|t| t.scopes().to_vec()),
+            summary: approval_type.map_or_default(|t| t.describe(&row)),
             row,
             task_key,
             task_title,

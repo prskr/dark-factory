@@ -186,18 +186,15 @@ fn git_route(run: &ActiveRun, git: &GitSettings) -> Option<GitRoute> {
         // A chat has no task branch (empty) and may not push.
         task_branch: Some(run.task_branch.as_str())
             .filter(|branch| !branch.is_empty())
-            .map(|branch| format!("refs/heads/{branch}"))
-            .unwrap_or_default(),
+            .map_or_default(|branch| format!("refs/heads/{branch}")),
         wip_branch: key
             .wip_branch()
-            .map(|branch| format!("refs/heads/{branch}"))
-            .unwrap_or_default(),
+            .map_or_default(|branch| format!("refs/heads/{branch}")),
         read_only: key.is_chat(),
         credential_ref: run
             .forge_credential
             .as_ref()
-            .map(|reference| reference.id.to_string())
-            .unwrap_or_default(),
+            .map_or_default(|reference| reference.id.to_string()),
         commit_name: run.commit_identity.name.clone(),
         commit_email: run.commit_identity.email.clone(),
         signing_public_key: run.signing_public_key.clone().unwrap_or_default(),

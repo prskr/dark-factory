@@ -366,8 +366,7 @@ mod tests {
         let scope = url
             .query_pairs()
             .find(|(k, _)| k == "scope")
-            .map(|(_, v)| v.into_owned())
-            .unwrap_or_default();
+            .map_or_default(|(_, v)| v.into_owned());
         assert_eq!(scope, "openid profile groups offline_access");
     }
 
