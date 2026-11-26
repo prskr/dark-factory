@@ -29,7 +29,7 @@ image:
   harness:
     claudeCode:
       repository: ghcr.io/prskr/dark-factory/claude-harness
-      tag: '0.107.0'
+      tag: '0.110.0'
       digest: ''
     # The tag is the OpenCode version of deploy/images/opencode-harness (keep it in step with the
     # df-core default of harness.opencode.image).
