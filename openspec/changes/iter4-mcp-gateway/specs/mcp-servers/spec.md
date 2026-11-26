@@ -46,7 +46,7 @@ The upstream URL SHALL be an absolute `https` URL without user information or fr
 - **THEN** the URL is stored with its query, and the gateway sends both parameters to the upstream
 
 ### Requirement: Credential schemes
-An MCP server SHALL have one credential scheme: `bearer` (`Authorization: Bearer <value>`), `header` (a header name and optional prefix, `<name>: <prefix><value>`) or `query` (a query parameter name, `?<name>=<value>` added to the URL). Header names of hop-by-hop headers, `Host`, `Content-Length`, `Content-Type`, `Accept`, `Mcp-Session-Id` and `Mcp-Protocol-Version` SHALL be rejected, and so SHALL a query parameter name the URL already contains.
+An MCP server SHALL have one credential scheme: `bearer` (`Authorization: Bearer <value>`), `header` (a header name and optional prefix, `<name>: <prefix><value>`) or `query` (a query parameter name, `?<name>=<value>` added to the URL). Header names of hop-by-hop headers, `Host`, `Content-Length`, `Content-Type`, `Accept`, `Mcp-Session-Id` and `Mcp-Protocol-Version` SHALL be rejected, and so SHALL a query parameter name the URL already contains, compared after percent-decoding.
 
 #### Scenario: Reserved header name
 - **WHEN** an admin chooses scheme `header` with name `Mcp-Session-Id`
@@ -57,8 +57,8 @@ An MCP server SHALL have one credential scheme: `bearer` (`Authorization: Bearer
 - **THEN** the gateway sends every upstream request to `https://design.example.com/mcp/stream?file=abc&token=<value>`, with the value URL-encoded
 
 #### Scenario: Parameter already in the URL
-- **WHEN** an admin chooses scheme `query` with name `file` for the URL `https://design.example.com/mcp/stream?file=abc`
-- **THEN** the form rejects it
+- **WHEN** an admin chooses scheme `query` with name `token` for the URL `https://design.example.com/mcp/stream?tok%65n=abc`
+- **THEN** the form rejects it, because `tok%65n` decodes to `token`
 
 ### Requirement: Credentials stay write-only
 An MCP server SHALL reference an existing credential reference (Secret name and key) and SHALL never hold or display a secret value. The credential SHALL never be sent to a sandbox. A credential reference used by a server SHALL NOT be deletable.
@@ -101,7 +101,7 @@ Admins SHALL enable and disable MCP servers per project on the project settings 
 
 #### Scenario: Board member without admin opens the project settings
 - **WHEN** a board member without the `admin` role opens the settings of project `DF`
-- **THEN** the page has no "MCP servers" tab, and posting its form is refused with 403
+- **THEN** the page has no "MCP servers" tab, and a direct request to load or save the tab's content is refused with 403
 
 #### Scenario: Enable for a project
 - **WHEN** an admin enables `context7` for project `DF`

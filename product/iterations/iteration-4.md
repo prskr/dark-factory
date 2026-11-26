@@ -47,7 +47,7 @@ flowchart LR
 | `iter4-audit-view` | Filterable `audit_log` list (actor, action, resource, time), push records and decided requests linked from their entries, desktop only (ADR-0035). |
 | `iter4-cost-view` | ADR-0021: pricing tables in the instance configuration, versioned by date, seeded with defaults (decision 14); cost per run, task, persona and project from harness and gateway usage; "what if" for subscription runs, actual cost for API-billed runs. |
 
-Suggested order: `iter4-permissions` first, because registering harnesses, MCP credentials and skills needs the `admin` role, and agent instance operations need the modes. `iter4-mcp-gateway` can start at once (it uses the `admin` role that already exists); `iter4-mcp-catalog` adds review, filters and grants on top of it after `iter4-permissions`. `iter4-harness-registry` and `iter4-cost-view` are independent and can run in parallel.
+Suggested order: `iter4-permissions` first, because registering harnesses and skills needs the permission check, and agent instance operations need the modes. `iter4-mcp-gateway` can start at once (it uses the `admin` role that already exists); `iter4-mcp-catalog` adds review, filters and grants on top of it after `iter4-permissions`. `iter4-harness-registry` and `iter4-cost-view` are independent and can run in parallel.
 
 ## 4. Decisions
 
@@ -66,7 +66,7 @@ Decided on 2026-10-30 for this iteration:
 
 | # | Decision | Alternatives |
 |---|---|---|
-| 7 | Upstream MCP servers use static credentials (header, bearer token). OAuth-based servers go to the backlog. | OAuth flows in the control plane: token storage and refresh per server before a single server needs it. |
+| 7 | Upstream MCP servers use static credentials (header, bearer token, query parameter). OAuth-based servers go to the backlog. | OAuth flows in the control plane: token storage and refresh per server before a single server needs it. |
 | 8 | The gateway serves HTTP MCP servers only. A stdio server either runs behind a stdio → HTTP bridge and is registered as an HTTP upstream, if it needs no project context; or it runs in the sandbox as a project-scoped server from `.mcp.json`, activated by a `repository-mcp-server` approval and started by the runtime, without credentials from the factory. | Stdio servers in the gateway: untrusted code next to all upstream credentials, and servers that need the workspace have none there. |
 | 9 | Harnesses are registered in the instance configuration through the Helm chart, like plugins (`iter2-plugin-distribution`). | UI registration: images are infrastructure and need image volumes in the pod spec. |
 | 10 | ACP registry presets are a vendored list, updated by an `xtask`; no registry fetch at runtime. | Fetching the registry at runtime: a network dependency of the control plane for static data. |

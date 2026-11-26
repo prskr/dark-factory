@@ -135,7 +135,7 @@ For `tools/call` the endpoint SHALL split the name at the first `__` and check t
 - **THEN** the call is rejected
 
 ### Requirement: Calls forwarded unchanged
-A permitted call SHALL be sent to its server's upstream as `tools/call` with the name after the prefix and the arguments unchanged. The upstream's result (content, structured content, `isError`) SHALL be returned unchanged; an upstream JSON-RPC error SHALL be returned as a tool result with `isError: true` and the error message, outcome `tool-error`.
+A permitted call SHALL be sent to its server's upstream as `tools/call` with the name after the prefix and the arguments unchanged. The upstream's result (content, structured content, `isError`) SHALL be returned unchanged apart from the credential redaction; an upstream JSON-RPC error SHALL be returned as a tool result with `isError: true` and the error message, outcome `tool-error`.
 
 #### Scenario: Successful call
 - **WHEN** the harness calls `context7__get-library-docs` with `{"libraryId": "/tokio-rs/tokio"}`
@@ -166,6 +166,21 @@ The gateway SHALL build every upstream request itself and SHALL forward no heade
 #### Scenario: Sandbox sends its own credential
 - **WHEN** a request to `/mcp` carries `Authorization: Bearer stolen` and `CONTEXT7_API_KEY: x`
 - **THEN** the upstream request carries only the server's configured credential header and neither value from the sandbox
+
+#### Scenario: Server without a credential scheme
+- **WHEN** a snapshot carries a server whose credential scheme is not set
+- **THEN** the gateway treats it like a server without a credential: its tools are left out, calls fail with outcome `upstream-error`, and no upstream is contacted
+
+### Requirement: Credential removed from returned content
+Before returning anything from an upstream to the sandbox (tool lists, results, error messages), the gateway SHALL replace every occurrence of the server's credential value, raw and URL-encoded, with `[redacted]`.
+
+#### Scenario: Upstream echoes the token
+- **WHEN** server `penpot` (scheme `query`) answers a call with a JSON-RPC error whose message contains the request URL with `token=<value>`
+- **THEN** the harness receives the message with `token=[redacted]`, and the transcript never holds the value
+
+#### Scenario: Token in a tool result
+- **WHEN** an upstream returns a tool result whose text contains the server's bearer token
+- **THEN** the harness receives the text with `[redacted]` in its place
 
 #### Scenario: Query credential not leaked
 - **WHEN** server `penpot` has scheme `query` and its upstream answers a call with 500

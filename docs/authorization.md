@@ -9,9 +9,10 @@ Contributor reference: who can act in Dark Factory, how each kind of caller is i
 | Human in the browser | Web UI (`df-web`) | OIDC login, server-side session; roles from the ID token | `crates/df-web/src/auth/` |
 | Sandbox runtime | Agent port of the control plane | mTLS client certificate (pod URI SAN) **and** source pod IP, resolved to one run | `df-tls` (`identity::pod_uri_san`), `sandbox-identity` |
 | Anything in a sandbox | Gateway: proxy, Git, `/inference` (later `/mcp`) | Source pod IP, looked up in the gateway's sandbox registry (policy snapshot) | `df-gateway` (`Policy::sandbox`) |
-| Gateway pod | Internal API of the control plane (`PolicyWatch`, records) | mTLS with a certificate from the instance CA | `df-gateway-control/src/internal.rs` (interceptor guard) |
-| Control plane | Gateway internal port (`Tail`) | mTLS, instance CA | `df-gateway` (`tail`) |
-| Forge | Webhook endpoints | Per-project webhook secret | `df-web/src/project_webhook.rs` and the forge plugins |
+| Gateway pod | Internal API of the control plane (`PolicyWatch`, records) | mTLS with a certificate from the instance CA **and** the gateway's DNS name in its SAN (`peer::require_dns_san`, name passed in `dark-factory/src/main.rs`) | `df-gateway-control/src/internal.rs` (interceptor guard) |
+| Control plane | Gateway internal port (`Tail`) | mTLS, instance CA, and the control plane's DNS name in the SAN | `df-gateway/src/gateway.rs` |
+| Forge | `POST /webhooks/{plugin}` | Signature over the body with the per-project webhook secret, checked by the forge plugin | `df-web/src/webhooks.rs`, `dark-factory/src/forge.rs`; the secret is shown in `df-web/src/project_webhook.rs` |
+| Anyone | `/healthz`, `/readyz`, static assets, `/lifecycle-events/public-key`, `/login`, `/auth/callback`, `/logout`; `/webhooks/{plugin}` (signature checked, row above) | Nothing: these routes are outside `require_board_member` (`base_routes` and the `ui` router in `df-web/src/lib.rs`; the webhook router is merged in `dark-factory/src/main.rs`) | `df-web/src/lib.rs` |
 
 An agent never has a role. What an agent may do is decided by its run (task, project, persona) and by the factory tools offered in `Assign`; instance operations with permission modes come with `iter4-permissions`.
 
@@ -29,7 +30,7 @@ Roles are read from the ID token claim `auth.rolesClaim` (default `roles`, a fla
 
 - `auth::require_board_member` wraps every page router (`df-web/src/lib.rs`). It loads the session, refreshes an expiring token, checks `board-member` and puts `CurrentUser` (id, display name, roles) into the request extensions.
 - `auth::require_admin` runs after it as a `route_layer` and checks `CurrentUser::has_role(ADMIN_ROLE)`. It answers 403 "Your account lacks the role `admin`.".
-- Pages that only show parts to admins check `CurrentUser::has_role` themselves; the handler that saves the part checks again.
+- Pages that only show parts to admins check `CurrentUser::has_role` to decide what to render. That is not a guard: the part must load and save through its own routes behind `require_admin`. For example, the project form handler `save_project` checks no role, so admin-only data must never be saved through it.
 - `auth::csrf_guard` rejects state-changing requests without the htmx header; with `SameSite=Lax` cookies this stops cross-site form posts.
 
 Where `admin` is required today:
@@ -38,15 +39,15 @@ Where `admin` is required today:
 |---|---|---|
 | Project webhook secret | `require_admin` route layer | `df-web/src/project_webhook.rs` |
 | Project lifecycle event subscriptions | `require_admin` route layer | `df-web/src/project_subscriptions.rs` |
-| "Integrations" tab of the project settings | shown and saved only for admins (`Editing::AsAdmin`) | `df-web/src/config_pages.rs` |
-| MCP servers page and the project tab "MCP servers" | planned: `require_admin` and `Editing::AsAdmin` | `openspec/changes/iter4-mcp-gateway` (D10) |
+| "Integrations" tab of the project settings | shown only for admins (`Editing::AsAdmin`, rendering only); its contents load and save through the two routes above | `df-web/src/config_pages.rs` |
+| MCP servers page and the project tab "MCP servers" | planned: `require_admin` route layers; the tab has its own route `/projects/{key}/mcp-servers`, `Editing::AsAdmin` only for showing it | `openspec/changes/iter4-mcp-gateway` (D10) |
 
 Everything else (projects, personas, model providers, credential references, egress rules, requests) needs `board-member` only.
 
 ## Adding a guarded page
 
 1. Put the routes behind `require_board_member` (every router merged into the pages router is).
-2. If the page decides what a shared secret or an external system reaches, add `.route_layer(middleware::from_fn(require_admin))`, and check `has_role(ADMIN_ROLE)` again in any handler of another router that shows or saves the same data.
+2. If the page decides what a shared secret or an external system reaches, give it its own routes with `.route_layer(middleware::from_fn(require_admin))`. Do not save such data through a handler that only board members reach; showing a tab only to admins does not protect it.
 3. Test both: a `board-member` session gets 403 naming `admin`, an admin session succeeds (`testkit` has both sessions).
 4. Update the table above, `specs/human-auth/spec.md` ("Board-member role required") and `docs/content/authentication/_index.md`.
 

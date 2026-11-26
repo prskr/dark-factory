@@ -19,7 +19,7 @@ The policy snapshot SHALL carry every MCP server enabled for at least one active
 Editing or deleting a server and changing a project's enabled servers SHALL publish a policy notification, so that every connected gateway pod has the change within about a second, regardless of the control plane replica.
 
 #### Scenario: Project disables a server on replica A, gateway on replica B
-- **WHEN** a board member disables `context7` for `DF` through replica A
+- **WHEN** an admin disables `context7` for `DF` through replica A
 - **THEN** a gateway pod connected to replica B rejects calls of `DF` runs to `context7__` tools within one second
 
 #### Scenario: MCP credential rotated

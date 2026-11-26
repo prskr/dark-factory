@@ -35,7 +35,7 @@ When `Assign` carries an MCP endpoint, the runtime SHALL register a second stdio
 - **THEN** the relay answers that request on stdout with a JSON-RPC error naming the cause, and keeps running
 
 ### Requirement: Relay framing and errors
-The relay SHALL write exactly one compact JSON line per message to stdout, never interleaving lines. A gateway answer with an HTTP error status to a request SHALL become a JSON-RPC error for that request id. For a notification the relay SHALL write nothing to stdout, whatever the answer; an HTTP error status for a notification SHALL be logged on stderr.
+The relay SHALL write exactly one compact JSON line per message to stdout, never interleaving lines. A gateway answer with an HTTP error status to a request SHALL become a JSON-RPC error for that request id. For a notification the relay SHALL write nothing to stdout, whatever the answer; an HTTP error status for a notification, or the gateway being unreachable, SHALL be logged on stderr.
 
 #### Scenario: Pretty-printed answer
 - **WHEN** the gateway's answer body contains newlines
