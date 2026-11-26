@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Board-member role required
-Roles SHALL be read from the configured claim (default `roles`, a flat list) at every login and token refresh, never stored as truth. Every UI page and action SHALL require the role `board-member`. Managing a project's event subscriptions, the MCP servers page and a project's MCP servers SHALL additionally require the role `admin`.
+Roles SHALL be read from the configured claim (default `roles`, a flat list) at every login and token refresh, never stored as truth. Every UI page and action SHALL require the role `board-member`. Managing a project's event subscriptions and its incoming webhook secret, the MCP servers page and a project's MCP servers SHALL additionally require the role `admin`.
 
 #### Scenario: User without the role
 - **WHEN** a user without `board-member` logs in
