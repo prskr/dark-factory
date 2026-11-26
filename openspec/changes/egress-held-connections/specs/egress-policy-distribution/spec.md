@@ -3,12 +3,12 @@
 ## MODIFIED Requirements
 
 ### Requirement: PolicyWatch stream
-The control plane SHALL serve `PolicyWatch` on its internal port to gateway clients authenticated by certificates from the instance CA. On connect it SHALL send a full snapshot, then a new snapshot or update with a higher version after every relevant change. The snapshot SHALL contain:
+The control plane SHALL serve `PolicyWatch` on its internal port to gateways with instance-CA client certificates. On connect it SHALL send a full snapshot, then a higher-versioned snapshot or update after each change. The snapshot SHALL contain:
 - the version;
-- the instance deny rules;
-- the sandbox registry: pod IP → run (id and number), task, project and persona;
+- the deny rules;
+- the sandbox registry: pod IP → run (id, number), task, project, persona;
 - each run's effective `http-host` allowlist;
-- each run's refused host:port pairs: those whose `network-access` request was denied for the run's task.
+- each run's refused host:port pairs (`network-access` request denied for the run's task).
 
 #### Scenario: Gateway connects
 - **WHEN** a gateway pod opens `PolicyWatch`

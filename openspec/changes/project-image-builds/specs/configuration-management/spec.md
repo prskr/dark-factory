@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Projects
-Board members SHALL list, create and edit projects with name, key, repository URL (HTTPS), optional issue tracker URL, project image source (see "Project image source"), optional adapter command, base branch, forge credential reference and the branch settings (see "Project branch settings"). The key SHALL be set when the project is created and SHALL be immutable afterwards; the edit form SHALL show it read-only. The adapter command, if set, replaces the instance's harness image and adapter for this project's runs.
+Board members SHALL list, create and edit projects with name, key, repository URL (HTTPS), optional issue tracker URL, project image source (see "Project image source"), optional adapter command, base branch, forge credential reference and the branch settings (see "Project branch settings"). The key SHALL be set at creation and be immutable; the edit form SHALL show it read-only. An adapter command replaces the instance's harness image and adapter for the project's runs.
 
 #### Scenario: Create a project
 - **WHEN** a board member submits name "Dark Factory", key `DF`, repo `https://git.example.org/peter/dark-factory.git`, image, base `main` and a forge credential

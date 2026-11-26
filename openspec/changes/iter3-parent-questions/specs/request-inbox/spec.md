@@ -27,7 +27,7 @@ The navigation SHALL show the number of pending requests addressed to humans on 
 - **THEN** the navigation shows 2
 
 ### Requirement: Requests on the task timeline
-The task detail SHALL show each request of the task as a card on the timeline at the time it was raised, with its state, decision, decider and the actions for pending requests. A question card SHALL name its addressee (the parent task with its persona, or humans) and, for a readdressed question, the parent task that ended; the actions SHALL also be offered for a pending question addressed to a parent task. A request card SHALL be visually distinct from messages and tool calls in both the light and the dark theme.
+The task detail SHALL show each request of the task as a card on the timeline at the time it was raised, with its state, decision, decider and the actions for pending requests. A question card SHALL name its addressee (the parent task with its persona, or humans) and, for a readdressed question, the parent task that ended; the actions SHALL also be offered for a pending question addressed to a parent task. A request card SHALL be visually distinct from messages and tool calls in both themes.
 
 #### Scenario: Decided request in history
 - **WHEN** a board member opens a task whose question was answered yesterday
