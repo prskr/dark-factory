@@ -194,11 +194,18 @@ The gateway reuses the usage reporter's pattern (bounded queue of 10,000, batche
 
 This change does not touch MCP servers a repository defines for its harness (Claude Code's `.mcp.json`, the `mcp` section of `opencode.json`). Nothing in the runtime or the generated harness configuration enables or disables them today, so each harness applies its own rule:
 
-- **Claude Code** asks the user to approve project-scoped `.mcp.json` servers before it starts them, unless its settings approve them (`enableAllProjectMcpServers`, `enabledMcpjsonServers`). Under the ACP adapter there is no interactive prompt, and the runtime auto-approves ACP permission requests; whether the adapter loads, skips or auto-approves `.mcp.json` servers is not verified (spike 1.2).
+- **Claude Code under the ACP adapter loads `.mcp.json` servers unasked (observed 2026-11-26).** Interactively, Claude Code asks before it starts project-scoped servers. In the run of DF-26 itself, the session started both servers of this repository's `.mcp.json`, `codegraph` (stdio, failed: binary missing) and `playwright` (HTTP, failed: needs auth), although `/data/home/.claude.json` had `enabledMcpjsonServers: []` and `hasTrustDialogAccepted: false`. So a repository decides which MCP servers the agent gets today, without a human.
 - **OpenCode** reads `mcp` entries of the repository's `opencode.json` as configuration, without a separate approval; the generated configuration does not override `mcp` (spike 1.2 confirms).
 - Either way, a repository server gets no credential from the factory: a stdio server runs in the sandbox under Landlock, and a remote one goes through the egress proxy and needs an allowlist entry.
 
-The planned `repository-mcp-server` approval (`iter4-mcp-catalog`, decision 8) needs the factory to decide this: block repository servers by default (Claude Code: settings without project MCP approval or with `enabledMcpjsonServers: []`; OpenCode: `enabled: false` per entry in the generated configuration) and enable approved entries. Spike 1.2 records the current behavior so that the catalog change starts from facts. If a harness loads repository servers unasked today, that is a gap to close in the catalog change or earlier, not by this change.
+The planned `repository-mcp-server` approval (`iter4-mcp-catalog`, decision 8) needs the factory to decide this: block repository servers by default (Claude Code: settings without project MCP approval or with `enabledMcpjsonServers: []`; OpenCode: `enabled: false` per entry in the generated configuration) and enable approved entries. For Claude Code this is a gap today, independent of this change. What it means:
+
+- A stdio server is a command from the repository that runs in the sandbox, and the agent can run such commands anyway.
+- A remote server's traffic goes through the egress proxy and its allowlist; `localhost` servers stay in the pod.
+- So the gap adds no credential and no new network path. But it lets the repository add tools and tool descriptions to the model's context, and it bypasses the planned `repository-mcp-server` approval.
+- A repository server named `ext` or `factory` may collide with the factory's servers (spike 1.2: which one wins).
+
+Closing the gap is not part of this slice: it belongs to `iter4-mcp-catalog` together with the approval. Spike 1.2 finds the switch that makes the adapter ignore `.mcp.json` (for example settings that deny project servers, or the SDK's setting sources), and does the same check for OpenCode.
 
 ## Security
 
