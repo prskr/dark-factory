@@ -1,8 +1,9 @@
 //! Repository tasks (`cargo xtask <task>`, alias in `.cargo/config.toml`).
 //!
-//! - `update-tools [--check]` generates `multitool.lock.json` from the latest upstream releases.
-//!   `--check` fails if the committed lock differs from what upstream would produce now.
-//!   Set `GITHUB_TOKEN` to avoid API rate limits.
+//! - `update-tools [--check]` generates `multitool.lock.json` from the latest upstream releases
+//!   (GitHub release assets, the npm registry for tools that are published only as npm tarballs,
+//!   see `npm_tool.rs`). `--check` fails if the committed lock differs from what upstream would
+//!   produce now. Set `GITHUB_TOKEN` to avoid API rate limits.
 //! - `update-opencode-checksums` sets the checksums of the `OpenCode` archives in `MODULE.bazel` for
 //!   `OPENCODE_VERSION` (see `update_opencode_checksums.rs`).
 //! - `next-version` prints the next release version `YYYY.M.N` (see `next_version.rs`).
@@ -23,6 +24,7 @@ mod check_file_length;
 mod check_test_names;
 mod common;
 mod next_version;
+mod npm_tool;
 mod outdated;
 mod update_github_spec;
 mod update_opencode_checksums;
@@ -31,10 +33,14 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
+use npm_tool::{NPM_TOOLS, npm_binaries};
 use serde::{Deserialize, Serialize};
 use update_github_spec::Mode;
 
 const LOCK_PATH: &str = "multitool.lock.json";
+/// The most an npm tarball of a pinned tool may be (a platform package of `esbuild` is about
+/// 5 MB); ureq's default read limit is 10 MB.
+const MAX_TARBALL_BYTES: u64 = 64 * 1024 * 1024;
 const SCHEMA: &str =
     "https://raw.githubusercontent.com/theoremlp/rules_multitool/main/lockfile.schema.json";
 
@@ -439,7 +445,31 @@ fn generate() -> Result<String> {
             Ok(get(url)?.body_mut().read_to_string()?)
         })?,
     );
+    for tool in &NPM_TOOLS {
+        tools.insert(
+            tool.name,
+            npm_binaries(
+                tool,
+                |url| Ok(get(url)?.body_mut().read_json()?),
+                |url| {
+                    Ok(get(url)?
+                        .body_mut()
+                        .with_config()
+                        .limit(MAX_TARBALL_BYTES)
+                        .read_to_vec()?)
+                },
+            )?,
+        );
+    }
     render(tools)
+}
+
+/// Fails when the committed lock `committed` differs from the freshly `generated` one.
+fn check_lock(committed: &str, generated: &str) -> Result<()> {
+    if committed != generated {
+        bail!("{LOCK_PATH} is stale; run `cargo xtask update-tools`");
+    }
+    Ok(())
 }
 
 fn owned(args: &[&str]) -> Vec<String> {
@@ -456,9 +486,7 @@ fn main() -> Result<()> {
     {
         ["update-tools"] => std::fs::write(LOCK_PATH, generate()?)?,
         ["update-tools", "--check"] => {
-            if std::fs::read_to_string(LOCK_PATH)? != generate()? {
-                bail!("{LOCK_PATH} is stale; run `cargo xtask update-tools`");
-            }
+            check_lock(&std::fs::read_to_string(LOCK_PATH)?, &generate()?)?;
         }
         ["outdated"] => outdated::run(None)?,
         ["outdated", "--since", rev] => outdated::run(Some(rev))?,
@@ -674,6 +702,27 @@ mod tests {
         assert_eq!(b.url, "https://get.helm.sh/helm-v4.3.1-linux-arm64.tar.gz");
         assert_eq!(b.file.as_deref(), Some("linux-arm64/helm"));
         assert_eq!(b.sha256, hash);
+    }
+
+    #[test]
+    fn check_fails_for_a_lock_that_differs_from_upstream() {
+        assert!(check_lock("{}\n", "{}\n").is_ok());
+        let stale = check_lock("{}\n", "{\"esbuild\":{}}\n").unwrap_err();
+        assert!(
+            stale.to_string().contains("cargo xtask update-tools"),
+            "{stale}"
+        );
+    }
+
+    #[test]
+    fn render_lists_an_npm_tool_next_to_the_github_ones() {
+        let mut t = BTreeMap::new();
+        t.insert("swc", vec![]);
+        t.insert(NPM_TOOLS[0].name, vec![]);
+        t.insert("hugo", vec![]);
+        let out = render(t).unwrap();
+        assert!(out.find("\"esbuild\"").unwrap() < out.find("\"hugo\"").unwrap());
+        assert!(out.find("\"hugo\"").unwrap() < out.find("\"swc\"").unwrap());
     }
 
     #[test]

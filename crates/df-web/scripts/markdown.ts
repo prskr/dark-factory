@@ -69,6 +69,7 @@
       diagram: null as HTMLElement | null,
       error: null as HTMLElement | null,
       observer: null as MutationObserver | null,
+      sourceObserver: null as MutationObserver | null,
       resizer: null as ResizeObserver | null,
       onSchemeChange: null as (() => void) | null,
 
@@ -82,6 +83,16 @@
         this.observer = new MutationObserver(() => this.apply());
         this.observer.observe(this.$el, { attributes: true, attributeFilter: ['hidden'] });
         if (this.$el.parentNode) this.observer.observe(this.$el.parentNode, { childList: true });
+        // A morph that changes the text of the `<pre>` (the preview of a Markdown field) draws the
+        // diagram again; one that leaves it alone keeps the drawn diagram and its iframe.
+        this.sourceObserver = new MutationObserver(() => {
+          const text = this.$el.textContent ?? '';
+          if (text !== this.source) {
+            this.source = text;
+            void this.draw();
+          }
+        });
+        this.sourceObserver.observe(this.$el, { childList: true, characterData: true, subtree: true });
         this.resizer = new ResizeObserver(() => this.fit());
         void this.draw();
       },
@@ -89,6 +100,7 @@
       destroy(): void {
         if (this.onSchemeChange) scheme.removeEventListener('change', this.onSchemeChange);
         this.observer?.disconnect();
+        this.sourceObserver?.disconnect();
         this.resizer?.disconnect();
         this.discard('diagram');
         this.discard('error');
@@ -168,6 +180,8 @@
         this.discard(name); // one an htmx morph removed
         const element = document.createElement(tag);
         element.className = className;
+        // An htmx morph of the preview of a Markdown field leaves the drawn diagram alone.
+        element.setAttribute('hx-morph-skip', '');
         this.$el.after(element);
         this[name] = element;
         return element;

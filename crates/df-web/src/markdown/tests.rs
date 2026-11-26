@@ -381,6 +381,26 @@ fn a_bare_javascript_url_stays_text() {
 }
 
 #[test]
+fn the_default_code_themes_color_the_function_name_classes_the_editor_gives_headings() {
+    // The editor's headings carry `hl-entity hl-name hl-function` (`editor/markdown-editor.ts`).
+    let theme = super::CodeTheme::default();
+    let css = &theme.css;
+    let (light, dark) = css
+        .split_once("@media (prefers-color-scheme: dark)")
+        .unwrap();
+    for (scheme, color) in [(light, "#795da3"), (dark, "#8fa1b3")] {
+        let rule = scheme
+            .lines()
+            .find(|line| line.contains(".hl-function") && line.contains(".hl-entity"))
+            .unwrap_or_else(|| panic!("no rule for the function name: {scheme}"));
+        assert!(rule.contains(".hl-entity.hl-name.hl-function"), "{rule}");
+        let at = scheme.find(rule).unwrap();
+        let body = &scheme[at..at + scheme[at..].find('}').unwrap()];
+        assert!(body.to_lowercase().contains(color), "{color}: {body}");
+    }
+}
+
+#[test]
 fn a_task_list_shows_disabled_checkboxes_and_still_escapes_html() {
     let out = html("- [x] done <script>alert(1)</script>\n- [ ] open\n");
     assert!(out.contains(r#"type="checkbox""#), "{out}");

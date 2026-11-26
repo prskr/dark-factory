@@ -3,8 +3,9 @@
 //! `build_assets.rs`, which has the tests.
 //!
 //! The third-party scripts come from the npm packages of `package.json` (`node_modules` or Bazel's
-//! `VENDOR_SCRIPTS`). The cfgs `df_web_scripts`, `df_web_styles` and `df_web_vendor` tell the tests
-//! which kinds were staged.
+//! `VENDOR_SCRIPTS`). The editor bundle `editor.js` is bundled from `editor/` and the `CodeMirror`
+//! packages (Bazel's `EDITOR_BUNDLE`, otherwise `esbuild`). The cfgs `df_web_scripts`,
+//! `df_web_styles`, `df_web_editor` and `df_web_vendor` tell the tests which kinds were staged.
 
 mod build_assets;
 
@@ -44,6 +45,7 @@ fn main() -> Result<()> {
     for path in [
         "styles/input.css",
         "scripts",
+        "editor",
         ".swcrc",
         "src",
         "assets",
@@ -55,8 +57,10 @@ fn main() -> Result<()> {
         "WEB_SCRIPTS",
         "TAILWIND_APP_CSS",
         "VENDOR_SCRIPTS",
+        "EDITOR_BUNDLE",
         "SWC_BIN",
         "TAILWIND_BIN",
+        "ESBUILD_BIN",
         "DF_WEB_REQUIRE_ASSETS",
         "PATH",
     ] {
@@ -64,6 +68,7 @@ fn main() -> Result<()> {
     }
     println!("cargo:rustc-check-cfg=cfg(df_web_scripts)");
     println!("cargo:rustc-check-cfg=cfg(df_web_styles)");
+    println!("cargo:rustc-check-cfg=cfg(df_web_editor)");
     println!("cargo:rustc-check-cfg=cfg(df_web_vendor)");
 
     // Only a lookup hint for `resolve_path`, so any value (even non-UTF-8) is fine.
@@ -77,8 +82,11 @@ fn main() -> Result<()> {
             .map(|file| resolve_path(&file, &manifest_dir, pwd)),
         vendor_scripts: optional_env("VENDOR_SCRIPTS")?
             .map(|files| parse_web_scripts(&files, &manifest_dir, pwd)),
+        editor_bundle: optional_env("EDITOR_BUNDLE")?
+            .map(|file| resolve_path(&file, &manifest_dir, pwd)),
         swc: tool("SWC_BIN", "swc", &manifest_dir, pwd)?,
         tailwind: tool("TAILWIND_BIN", "tailwindcss", &manifest_dir, pwd)?,
+        esbuild: tool("ESBUILD_BIN", "esbuild", &manifest_dir, pwd)?,
         manifest_dir,
     };
     for input in rerun_inputs(&config, env::var_os("PATH").as_deref()) {

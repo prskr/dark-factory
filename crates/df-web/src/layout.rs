@@ -13,7 +13,7 @@ use crate::components::{CreateAction, bottom_bar, floating_create, rail, setting
 
 /// Alpine components in `scripts/`, compiled to `<name>.js` (`Alpine.data` on `alpine:init`),
 /// loaded on every page before Alpine starts.
-pub(crate) const COMPONENT_SCRIPTS: [&str; 11] = [
+pub(crate) const COMPONENT_SCRIPTS: [&str; 12] = [
     "archiveModal.js",
     "artifactSplit.js",
     "chatLayout.js",
@@ -21,6 +21,7 @@ pub(crate) const COMPONENT_SCRIPTS: [&str; 11] = [
     "egress-log.js",
     "egress-rule.js",
     "markdown.js",
+    "markdownField.js",
     "persona-avatar.js",
     "secret-field.js",
     "tabs.js",
@@ -29,6 +30,10 @@ pub(crate) const COMPONENT_SCRIPTS: [&str; 11] = [
 
 /// The diagram renderer, loaded by the `mermaidDiagram` component when a page has a diagram.
 const MERMAID_ASSET: &str = "vendor/mermaid.min.js";
+
+/// The highlighting editor, loaded by the `markdownField` component when a page has a Markdown
+/// field; a build without it has no `data-editor-src` and the field stays a text field.
+const EDITOR_ASSET: &str = "editor.js";
 
 /// htmx extension in `scripts/sse-cleanup.ts`; loaded between htmx and `hx-sse`, so its cleanup
 /// hook runs before the one of `hx-sse`.
@@ -67,6 +72,9 @@ pub enum Nav {
     /// The settings page of one model provider: a page of the settings area (sidebar marks Model
     /// providers) without the phone navigation, like [`Nav::ProjectSettings`].
     ModelProviderSettings,
+    /// The settings page of one persona: a page of the settings area (sidebar marks Personas)
+    /// without the phone navigation, like [`Nav::ProjectSettings`].
+    PersonaSettings,
     /// Pending questions and approval requests.
     Requests,
     /// Egress rules (desktop only).
@@ -84,6 +92,7 @@ impl Nav {
         match self {
             Self::ProjectSettings => Self::Projects,
             Self::ModelProviderSettings => Self::ModelProviders,
+            Self::PersonaSettings => Self::Personas,
             other => other,
         }
     }
@@ -227,6 +236,7 @@ fn document(
                 // Without the renderer (a `cargo` build without the npm packages) the component
                 // leaves each diagram as source and says so.
                 data-mermaid-src=[get_asset(MERMAID_ASSET).map(|_| asset_url(MERMAID_ASSET))]
+                data-editor-src=[get_asset(EDITOR_ASSET).map(|_| asset_url(EDITOR_ASSET))]
                 x-data=[workspace.map(|_| "")]
                 "x-on:popstate.window"=[workspace.map(|_|"document.body.dataset.view = /^\\/(tasks|chats)\\/[A-Z]/.test(location.pathname) ? 'task' : 'list'")] {
                 div class="flex min-h-dvh" {
@@ -238,7 +248,7 @@ fn document(
                     }
                 }
                 @if nav != Nav::None {
-                    @if !matches!(nav, Nav::ProjectSettings | Nav::ModelProviderSettings) {
+                    @if !matches!(nav, Nav::ProjectSettings | Nav::ModelProviderSettings | Nav::PersonaSettings) {
                         (bottom_bar(nav))
                         (floating_create(&create_action(nav, compose_href)))
                     }
@@ -435,6 +445,16 @@ mod tests {
     }
 
     #[test]
+    fn a_persona_settings_page_marks_personas_and_has_no_bottom_bar() {
+        let page = layout("P", Nav::PersonaSettings, &Shell::default(), html! {}).into_string();
+        let sidebar = sidebar_html(Nav::PersonaSettings).expect("sidebar");
+        let marked = &sidebar[..sidebar.find("aria-current").unwrap()];
+        assert!(marked.ends_with("<a href=\"/personas\" "), "{sidebar}");
+        assert!(!page.contains("id=\"mobile-menu\""), "{page}");
+        assert!(!page.contains("fixed bottom-20"), "{page}");
+    }
+
+    #[test]
     fn the_sidebar_is_desktop_only_and_other_pages_have_none() {
         let page = layout("T", Nav::Personas, &Shell::default(), html! {}).into_string();
         let aside = &page[..page.find("id=\"settings-menu\"").unwrap()];
@@ -573,6 +593,26 @@ mod tests {
             !page.contains("<script src=\"/assets/vendor/mermaid"),
             "{page}"
         );
+    }
+
+    #[test]
+    #[cfg(df_web_editor)]
+    fn body_names_the_editor_bundle_for_the_markdown_field() {
+        let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
+        assert!(
+            page.contains("data-editor-src=\"/assets/editor.js?v="),
+            "{page}"
+        );
+        // The bundle is loaded by the field, not by every page.
+        assert!(!page.contains("<script src=\"/assets/editor.js"), "{page}");
+    }
+
+    #[test]
+    #[cfg(not(df_web_editor))]
+    fn body_has_no_editor_source_without_the_editor_bundle() {
+        let page = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
+        assert!(!page.contains("data-editor-src"), "{page}");
+        assert!(!page.contains("editor.js"), "{page}");
     }
 
     #[test]

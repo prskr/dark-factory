@@ -91,3 +91,12 @@ jobs:
       # Same command and version as the `web-typecheck` hook in lefthook.yml; Renovate updates both in one PR.
       - name: Type-check web scripts
         run: npx --yes -p typescript@7.0.2 tsc -p crates/df-web
+
+      # The entry of the editor bundle imports the CodeMirror packages, so their types must be installed
+      # first (no install script runs, pnpm-workspace.yaml). The `web-typecheck` hook skips this check
+      # without `crates/df-web/node_modules`.
+      - name: Type-check the editor bundle entry
+        working-directory: crates/df-web
+        run: |
+          npx --yes pnpm install --frozen-lockfile
+          npx --yes -p typescript@7.0.2 tsc -p editor

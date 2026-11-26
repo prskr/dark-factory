@@ -44,6 +44,7 @@ uuid.workspace = true
 df-core = { workspace = true, features = ["test-util"] }
 df-telemetry = { workspace = true, features = ["test-util"] }
 df-test-postgres.workspace = true
+flate2.workspace = true
 getrandom.workspace = true
 http-body-util.workspace = true
 insta.workspace = true

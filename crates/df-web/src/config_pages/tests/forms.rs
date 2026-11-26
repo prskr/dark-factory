@@ -3,7 +3,7 @@
 use axum::http::StatusCode;
 
 use super::credential_form_body;
-use crate::testkit::{TestApp, form, header_str, seed, seed_provider, tag_around, text};
+use crate::testkit::{TestApp, header_str, seed, tag_around, text};
 
 #[tokio::test]
 async fn unknown_resources_are_404() {
@@ -56,13 +56,9 @@ async fn forms_are_modal_fragments_and_plain_requests_go_to_the_list() {
 async fn the_full_page_form_routes_are_gone() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
-    for path in [
-        "/personas/00000000-0000-0000-0000-000000000000",
-        "/credentials/00000000-0000-0000-0000-000000000000",
-    ] {
-        let response = app.get(path, &cookie).await;
-        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED, "{path}");
-    }
+    let path = "/credentials/00000000-0000-0000-0000-000000000000";
+    let response = app.get(path, &cookie).await;
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED, "{path}");
 }
 
 #[tokio::test]
@@ -96,27 +92,13 @@ async fn a_validation_error_keeps_the_modal_open_with_values_and_the_error_at_th
 async fn forms_end_with_cancel_and_a_named_primary_action_at_the_bottom_right() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
-    let provider = seed_provider(&app.pool).await.to_string();
     seed(&app.pool).await;
-    let persona = form(&[
-        ("display_name", "Ada"),
-        ("handle", "ada"),
-        ("commit_email", "ada@example.org"),
-        ("system_prompt", "x"),
-        ("model", "claude-sonnet-5-5"),
-        ("model_provider_id", &provider),
-    ]);
-    app.post("/personas", &persona, &cookie).await;
     app.post(
         "/credentials",
         &credential_form_body("c", "s", "k"),
         &cookie,
     )
     .await;
-    let persona_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM personas WHERE handle = 'ada'")
-        .fetch_one(&app.pool)
-        .await
-        .unwrap();
     let credential_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM credential_refs")
         .fetch_one(&app.pool)
         .await
@@ -124,7 +106,6 @@ async fn forms_end_with_cancel_and_a_named_primary_action_at_the_bottom_right() 
     for (uri, label) in [
         ("/projects/new".to_string(), "Create project"),
         ("/personas/new".to_string(), "Create persona"),
-        (format!("/personas/{persona_id}/edit"), "Save persona"),
         (
             "/credentials/new".to_string(),
             "Create credential reference",

@@ -77,6 +77,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Config - Project egress | Egress tab (full screen) and its states (partial boards: main column only); phone |
 | Config - Personas | Personas: cards (full screen), identity (main column only), edit modal and its states (modal only); phone edit sheet; variant set `Settings nav` (property Active; the settings sidebar on every settings board is an instance) |
 | Config - Personas Signing | Grouped persona edit modal with the Commits group (modal only); Commits group states (group only); rotate key confirmations (dialog only); "Verify key on Forgejo" dialog and its states (dialog only); phone edit sheet |
+| Config - Persona page | Persona settings page: general, with a model error, commits (main column only); system prompt in the split, preview and editor views and the Markdown field states (partial boards); new persona modal (modal only); phone |
 | Config - Credentials | Credentials: two-line list rows, new with validation error; error page (not found) |
 | Config - Model providers | Model providers: two-line list rows (full screen); new provider modal per credential scheme (modal only); provider settings page general, models, model errors (main column only) |
 | Empty states | One board per empty state |
@@ -142,6 +143,8 @@ The implementation deviates from the design on purpose; the OpenSpec changes rec
 One row per view. The agent reads it to know the PenPot page and board, the route, the data it needs and the viewport.
 
 The boards of a change in progress are listed in its `openspec/changes/<name>/design-boards.md` (written by `/prepare-change`, same columns). `/complete-change` moves those rows here.
+
+The rows with the route `/personas/<id>/edit` are the boards of the persona edit modal, which the persona settings page ("Config - Persona page") replaced: the route answers 404 now, and the Commits group boards of "Config - Personas Signing" show what the Commits tab holds.
 
 | Board (page / name) | Route | Data | Viewport |
 |---|---|---|---|
@@ -268,6 +271,17 @@ The boards of a change in progress are listed in its `openspec/changes/<name>/de
 | Config - Personas Signing / Personas · verify key on Forgejo | `/personas/<id>/edit` | `linus`, "Verify key on Forgejo" clicked, token empty, "Forgejo domain" prefilled `forgejo.example.org`. Partial board: dialog only | 1440 |
 | Config - Personas Signing / Personas · verify key on Forgejo, signed | `/personas/<id>/edit` | as above after "Sign token" with a valid token. Partial board: dialog only | 1440 |
 | Config - Personas Signing / Personas · verify key on Forgejo, failed | `/personas/<id>/edit` | token over 256 characters submitted. Partial board: dialog only | 1440 |
+| Config - Persona page / Persona page · general | `/personas/<id>` | persona `linus` ("Linus", `linus@example.org`, description set), harness `claude-code`, provider "Claude subscription", model `claude-sonnet-5-5` | 1440 |
+| Config - Persona page / Persona page · general, model error | `/personas/<id>` | as Persona page · general; model cleared on General, "Save persona" clicked on System prompt. Partial board: main column only | 1440 |
+| Config - Persona page / Persona page · commits | `/personas/<id>?tab=commits` | as Persona page · general, with a signing key, on an instance with the `forgejo` plugin. Partial board: main column only | 1440 |
+| Config - Persona page / Personas · new persona | `/personas` | "New persona" clicked, fields filled. Partial board: modal only | 1440 |
+| Config - Persona page / Phone · persona page, general | `/personas/<id>` | as Persona page · general | 390 |
+| Config - Personas / Personas · card, no system prompt yet | `/personas` | persona `ada` without description and system prompt. Partial board: one card only | 1440 |
+| Config - Persona page / Persona page · system prompt | `/personas/<id>?tab=system-prompt` | as Persona page · general with a prompt holding a heading, a list (bold, inline code, link), a `rust` fence and a `mermaid` fence; editor bundle embedded; "Save persona" clicked | 1440 |
+| Config - Persona page / Persona page · system prompt, preview | `/personas/<id>?tab=system-prompt` | as Persona page · system prompt; "Preview" chosen. Partial board: main column only | 1440 |
+| Config - Persona page / Persona page · system prompt, 1024, editor | `/personas/<id>?tab=system-prompt` | as Persona page · system prompt; editor focused. Partial board: main column only | 1024 |
+| Config - Persona page / Markdown field · preview states | `/personas/<id>?tab=system-prompt` | switch row with "Highlighting" off; preview with empty text, after a failed live request, after a failed request in "Preview", for a text over 256 KiB, after the session ended. Partial board: field parts only | 1440 |
+| Config - Persona page / Phone · persona page, system prompt | `/personas/<id>?tab=system-prompt` | as Persona page · system prompt | 390 |
 | Tasks / Desktop · persona identity | `/tasks/<id>` | as Desktop · light, personas with handles: rows show the persona avatar before the time, transcript author "Linus @linus", details Persona "Linus @linus" with avatar | 1440 |
 | Tasks - Details Sidebar / Desktop · run usage, requests without usage | `/tasks/<id>` | manual seed (not built): run #8 with usage records and two records without usage. Partial board: details only | 1440 |
 | Tasks - Details Overview / Desktop · attached PR | `/tasks/<key>` | manual seed (not built): task on existing branch `renovate/serde-1.x` with attached open PR #40; "attached" pill after the PR link, tooltip "Opened outside the factory; the factory comments but never changes it". Partial board: details only | 1440 |

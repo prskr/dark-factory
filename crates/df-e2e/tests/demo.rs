@@ -4,7 +4,6 @@
 use df_e2e::browser::{Session, button};
 use df_e2e::data;
 use df_e2e::fixture;
-use playwright_rs::protocol::SelectOption;
 use playwright_rs::{Viewport, expect};
 
 #[tokio::test]
@@ -89,43 +88,25 @@ async fn a_persona_is_created_with_a_model_of_its_provider() -> anyhow::Result<(
         |world| async move {
             let page = &world.session.page;
             let name = world.unique("e2e-models");
-            page.goto(&format!("{}/personas", world.env.base_url), None)
-                .await?;
-
-            page.locator("button[hx-get='/personas/new']:visible")
-                // `.first()`: the list has the button once per layout (desktop and phone); the
-                // visible one is used.
-                .first()
-                .click(None)
-                .await?;
-            page.locator("#display_name").fill(&name, None).await?;
-            page.locator("#handle").fill(&name, None).await?;
-            page.locator("#commit_email")
-                .fill(&format!("{name}@example.org"), None)
-                .await?;
-            page.locator("#system_prompt")
-                .fill("Check the model select.", None)
-                .await?;
             // The provider and the model select are filled from the seeded provider and its
-            // model; the model is required.
-            page.locator("#model_provider_id")
-                .select_option(
-                    SelectOption::Label(data::MODEL_PROVIDER_NAME.to_string()),
-                    None,
-                )
+            // model; the model is required. The page of the new persona opens on the System
+            // prompt tab.
+            world
+                .session
+                .create_persona(&world.env, &name, &name, &format!("{name}@example.org"))
                 .await?;
-            page.locator("#model")
-                .select_option(
-                    SelectOption::Label(format!("{} (Anthropic Messages)", data::PERSONA_MODEL)),
-                    None,
-                )
-                .await?;
-            button(page, "Create persona").click(None).await?;
 
-            // `.first()`: the card shows the name, the handle and the email.
-            expect(page.get_by_text(&name, false).first())
-                .to_be_visible()
+            world
+                .session
+                .write_system_prompt("Check the model select.")
                 .await?;
+            world.session.save_persona().await?;
+            expect(page.get_by_role(
+                playwright_rs::protocol::AriaRole::Heading,
+                Some(playwright_rs::protocol::GetByRoleOptions::default().name(&name)),
+            ))
+            .to_be_visible()
+            .await?;
             Ok(())
         },
     )

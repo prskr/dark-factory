@@ -483,3 +483,76 @@
     @apply block overflow-x-auto;
   }
 }
+
+/* The Markdown field (`markdown_field`, `scripts/markdownField.ts`). `--md-rows` is its minimum
+   height in text rows. Outside the Split view the text field grows with its content up to 70 % of
+   the viewport (`field-sizing`; Firefox gets the same from the script); in the Split view both
+   columns share one height, capped by the visible page, and scroll on their own. */
+@layer components {
+  .md-input {
+    field-sizing: content;
+    min-height: calc(var(--md-rows, 8) * 1lh + 1rem);
+    max-height: 70vh;
+    line-height: 1.6;
+    font-size: 1rem;
+  }
+  /* 16 px below 1024 px and on touch-only devices, so the browser does not zoom on focus. */
+  @media (min-width: 1024px) and (any-pointer: fine) {
+    .md-input {
+      font-size: 13px;
+    }
+  }
+  /* Scroll anchoring stays on: a live-preview update (or a status line) above the visible part
+     keeps the text being read where it is on screen. */
+  .md-preview-panel {
+    min-height: calc(var(--md-rows, 8) * 1.3rem + 1rem);
+    max-height: 70vh;
+    overflow: auto;
+  }
+  .md-preview-panel :not(pre) > code {
+    @apply rounded bg-sunk px-1 py-0.5 text-ink;
+  }
+  .md-preview-panel .md-body a {
+    @apply text-accent-text;
+  }
+  .md-split {
+    max-height: calc(100dvh - 12rem);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .md-split > * {
+    min-height: 0;
+  }
+  /* The text field sizes by its content here too, so a long source grows the shared row height up
+     to the cap although its rendering is shorter; below the cap it fills the column. The column
+     scrolls when the text outgrows the cap. */
+  .md-split .md-write {
+    overflow: auto;
+  }
+  .md-split .md-input {
+    min-height: max(100%, calc(var(--md-rows, 8) * 1lh + 1rem));
+    max-height: none;
+  }
+  .md-split .md-preview-panel {
+    max-height: none;
+  }
+  /* The highlighting editor (`editor/markdown-editor.ts`) replaces the text field: it takes its
+     text size and height rules; its colors are set by its own theme from the tokens above. */
+  .md-editor {
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+  @media (min-width: 1024px) and (any-pointer: fine) {
+    .md-editor {
+      font-size: 13px;
+    }
+  }
+  .md-editor .cm-editor {
+    min-height: calc(var(--md-rows, 8) * 1lh + 1rem);
+    max-height: 70vh;
+  }
+  .md-split .md-editor,
+  .md-split .md-editor .cm-editor {
+    height: 100%;
+    max-height: none;
+  }
+}

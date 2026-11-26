@@ -1,6 +1,7 @@
 //! Persona pages (`specs/configuration-management/spec.md`): identity (display name, handle,
-//! commit email, avatar), system prompt, harness, model provider and the model of that provider,
-//! both compatible with the harness.
+//! commit email, avatar), harness, model provider and the model of that provider, both
+//! compatible with the harness, and the system prompt. The list and the "New persona" modal are
+//! here, the settings page of a persona is [`super::persona_page`].
 
 use axum::extract::{Form, Path, State};
 use axum::http::HeaderMap;
@@ -19,28 +20,30 @@ use maud::{Markup, html};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::signing_key::{Rotation, SigningKeySection, commits_group};
+use super::signing_key::{SigningKeySection, commits_group};
 use super::{
-    FormTarget, conflict, create_button, edit_button, form_footer, form_grid, full_row,
-    list_header, list_page, modal, required, saved,
+    conflict, create_button, form_footer, form_grid, full_row, list_header, list_page, modal,
+    persona_page::{self, PersonaTab},
 };
 use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::components::forms::{INPUT_CLASS, field, form_group, select_field_with_hint};
 use crate::components::{
-    AvatarSize, FormErrors, empty_panel, form_error, harness_label, persona_avatar,
-    persona_avatar_preview, text_field, textarea_field,
+    AvatarSize, FormErrors, ICON_BUTTON_CLASS, Icon, empty_panel, form_error, harness_label, icon,
+    persona_avatar, persona_avatar_preview, text_field,
 };
 use crate::layout::{Nav, Shell};
-use crate::responses::{internal_error, invalid, not_found};
+use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 
 pub(super) fn routes() -> Router<WebState> {
     Router::new()
         .route("/personas", get(personas_list).post(persona_create))
         .route("/personas/new", get(persona_new))
         .route("/personas/refresh", post(persona_refresh))
-        .route("/personas/{id}", post(persona_update))
-        .route("/personas/{id}/edit", get(persona_edit))
+        .route(
+            "/personas/{id}",
+            get(persona_page::page).post(persona_update),
+        )
         .route(
             "/personas/{id}/rotate-key",
             post(super::signing_key::rotate),
@@ -54,16 +57,16 @@ pub(super) fn routes() -> Router<WebState> {
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 pub(crate) struct PersonaForm {
-    display_name: String,
+    pub(super) display_name: String,
     handle: String,
-    commit_email: String,
+    pub(super) commit_email: String,
     description: String,
-    system_prompt: String,
+    pub(super) system_prompt: String,
     harness: String,
     model_provider_id: String,
     model: String,
-    /// The persona being edited; empty when creating.
-    entity_id: String,
+    /// The tab the settings page showed when it was saved; it stays open afterwards.
+    pub(super) tab: PersonaTab,
 }
 
 impl PersonaForm {
@@ -129,12 +132,6 @@ fn validate_persona(
             format!("Description is at most {PERSONA_DESCRIPTION_MAX_CHARS} characters."),
         );
     }
-    let system_prompt = required(
-        &mut errors,
-        "system_prompt",
-        &form.system_prompt,
-        "System prompt",
-    );
     let harness_name = form.harness();
     let provider = form.provider(providers);
     match provider {
@@ -169,7 +166,8 @@ fn validate_persona(
         display_name,
         commit_email,
         description,
-        system_prompt,
+        // Optional, stored as typed: a browser submits a textarea's line breaks as CRLF.
+        system_prompt: form.system_prompt.replace("\r\n", "\n"),
         harness: harness_name.to_string(),
         model: model.to_string(),
         model_provider_id: provider.map_or(Uuid::nil(), |provider| provider.id),
@@ -222,7 +220,7 @@ fn model_options(
         .collect()
 }
 
-fn persona_values(p: &PersonaRecord) -> PersonaForm {
+pub(super) fn persona_values(p: &PersonaRecord) -> PersonaForm {
     PersonaForm {
         display_name: p.display_name.clone(),
         handle: p.handle.clone(),
@@ -232,11 +230,11 @@ fn persona_values(p: &PersonaRecord) -> PersonaForm {
         harness: p.harness.clone(),
         model: p.model.clone(),
         model_provider_id: p.model_provider_id.to_string(),
-        entity_id: String::new(),
+        tab: PersonaTab::default(),
     }
 }
 
-/// A select whose change renders the form again, so the lists below follow.
+/// A select whose change renders [`agent_fields`] again, so the lists below follow.
 fn refreshing_select(
     label: &str,
     name: &str,
@@ -252,7 +250,7 @@ fn refreshing_select(
         hint,
         html! {
             select id=(name) name=(name) class=(INPUT_CLASS)
-                hx-post="/personas/refresh" hx-trigger="change" hx-target="#form" hx-swap="outerHTML"
+                hx-post="/personas/refresh" hx-trigger="change" hx-target="#agent-fields" hx-swap="outerHTML"
                 aria-invalid=[errors.get(name).map(|_| "true")] {
                 @for (value, text) in options { option value=(value) selected[value == selected] { (text) } }
             }
@@ -260,33 +258,31 @@ fn refreshing_select(
     )
 }
 
-/// The form in the groups "Identity", "Agent" and "Commits" (design boards of
-/// `persona-commit-signing`). `signing` is what the group "Commits" shows of the signing key.
-fn persona_form(
-    target: FormTarget,
+/// The "New persona" form in the groups "Identity", "Agent" and "Commits" (no system prompt: the
+/// settings page of the new persona opens on it). The group "Commits" holds the commit email and
+/// the note that the key comes with the first save.
+fn create_form(
     values: &PersonaForm,
     errors: &FormErrors,
     providers: &[ModelProviderRecord],
-    signing: &SigningKeySection,
-    submit: &str,
 ) -> Markup {
     html! {
-        form id="form" class="space-y-4" hx-post=(target.action()) hx-target="#form" hx-swap="outerHTML"
+        form id="form" class="space-y-4" hx-post="/personas" hx-target="#form" hx-swap="outerHTML"
             x-data={"personaAvatar(" (serde_json::json!(values.display_name)) ")"} "x-on:input"="track($event)" {
-            (target.id_field())
             (form_error(errors))
             div class="space-y-5" {
-                (form_group("Identity", identity_fields(target.id, values, errors)))
+                (form_group("Identity", identity_fields(None, values, errors)))
                 (form_group("Agent", agent_fields(values, errors, providers)))
-                (commits_group(&values.commit_email, errors, signing))
+                (commits_group(&values.commit_email, errors, &SigningKeySection::default()))
             }
-            (form_footer(submit))
+            (form_footer("Create persona"))
         }
     }
 }
 
-/// System prompt, harness, model provider and model.
-fn agent_fields(
+/// Harness, model provider and model: `#agent-fields`, which a change of the harness or provider
+/// renders again.
+pub(super) fn agent_fields(
     values: &PersonaForm,
     errors: &FormErrors,
     providers: &[ModelProviderRecord],
@@ -297,19 +293,26 @@ fn agent_fields(
         .map(|profile| (profile.name.to_string(), profile.name.to_string()))
         .collect();
     let models = model_options(values.provider(providers), harness_name);
-    form_grid(html! {
-        (full_row(textarea_field("System prompt", "system_prompt", &values.system_prompt, 8, errors)))
-        (refreshing_select("Harness", "harness", &harnesses, harness_name, None, errors))
-        (refreshing_select("Model provider", "model_provider_id", &with_empty(super::providers::compatible_options(providers, harness_name)),
-            &values.model_provider_id, Some("Only providers that offer a wire API of the harness."), errors))
-        (full_row(select_field_with_hint("Model", "model", &models, &values.model, Some("Choose…"),
-            Some("Required. Only models of the provider whose wire API the harness can use."), errors)))
-    })
+    html! {
+        div id="agent-fields" {
+            (form_grid(html! {
+                (refreshing_select("Harness", "harness", &harnesses, harness_name, None, errors))
+                (refreshing_select("Model provider", "model_provider_id", &with_empty(super::providers::compatible_options(providers, harness_name)),
+                    &values.model_provider_id, Some("Only providers that offer a wire API of the harness."), errors))
+                (full_row(select_field_with_hint("Model", "model", &models, &values.model, Some("Choose…"),
+                    Some("Required. Only models of the provider whose wire API the harness can use."), errors)))
+            }))
+        }
+    }
 }
 
 /// The avatar preview left of display name and handle, and the description below. The preview
 /// is neutral until the persona is saved.
-fn identity_fields(id: Option<Uuid>, values: &PersonaForm, errors: &FormErrors) -> Markup {
+pub(super) fn identity_fields(
+    id: Option<Uuid>,
+    values: &PersonaForm,
+    errors: &FormErrors,
+) -> Markup {
     html! {
         div class="space-y-4" {
             div class="flex items-start gap-4" {
@@ -392,15 +395,21 @@ fn personas_region(personas: &[PersonaRecord], providers: &[ModelProviderRecord]
                                 (persona_avatar(Some(p.id), &p.display_name, AvatarSize::Card))
                                 div class="min-w-0 flex-1" {
                                     h2 class="truncate font-semibold" {
-                                        (p.display_name) " " span class="font-normal text-muted" { "@" (p.handle) }
+                                        a href={"/personas/" (p.id)} class="hover:underline" { (p.display_name) }
+                                        " " span class="font-normal text-muted" { "@" (p.handle) }
                                     }
                                     p class="truncate text-xs text-muted" { (p.commit_email) }
                                     p class="text-xs text-muted" { (harness_label(&p.harness)) " · " (p.model) }
                                 }
-                                (edit_button(&format!("/personas/{}/edit", p.id), &format!("Edit persona {}", p.display_name)))
+                                a href={"/personas/" (p.id)} aria-label={"Edit persona " (p.display_name)}
+                                    title={"Edit persona " (p.display_name)} class=(ICON_BUTTON_CLASS) { (icon(Icon::Pencil)) }
                             }
-                            p class="line-clamp-3 whitespace-pre-wrap break-words text-sm text-muted" {
-                                @if p.description.is_empty() { (p.system_prompt) } @else { (p.description) }
+                            @if p.description.is_empty() && p.system_prompt.is_empty() {
+                                p class="text-sm text-faint" { "No system prompt yet" }
+                            } @else {
+                                p class="line-clamp-3 whitespace-pre-wrap break-words text-sm text-muted" {
+                                    @if p.description.is_empty() { (p.system_prompt) } @else { (p.description) }
+                                }
                             }
                             p class="mt-auto text-xs text-faint" {
                                 "Model provider: " span class="font-mono" { (provider.unwrap_or("none")) }
@@ -439,74 +448,19 @@ async fn persona_new(State(state): State<WebState>, headers: HeaderMap) -> Respo
     };
     modal(
         "New persona",
-        persona_form(
-            FormTarget::new("/personas", None),
-            &PersonaForm::default(),
-            &FormErrors::default(),
-            &providers,
-            &SigningKeySection::default(),
-            "Create persona",
-        ),
+        create_form(&PersonaForm::default(), &FormErrors::default(), &providers),
     )
 }
 
-async fn persona_edit(
-    State(state): State<WebState>,
-    headers: HeaderMap,
-    Path(id): Path<Uuid>,
-) -> Response {
-    if !crate::auth::is_htmx(&headers) {
-        return Redirect::to("/personas").into_response();
-    }
-    let (persona, providers) = match tokio::try_join!(
-        df_db::catalog::get_persona(&state.pool, id),
-        df_db::model_providers::list_model_providers(&state.pool)
-    ) {
-        Ok((Some(persona), providers)) => (persona, providers),
-        Ok((None, _)) => return not_found("The persona"),
-        Err(e) => return internal_error(&e),
-    };
-    let signing =
-        match SigningKeySection::load_or_error_page(&state, Some(id), Rotation::None).await {
-            Ok(signing) => signing,
-            Err(response) => return *response,
-        };
-    modal(
-        "Edit persona",
-        persona_form(
-            FormTarget::new("/personas", Some(id)),
-            &persona_values(&persona),
-            &FormErrors::default(),
-            &providers,
-            &signing,
-            "Save persona",
-        ),
-    )
-}
-
-/// A change of harness or model provider: the form as typed, rendered again with the provider
-/// and model lists of the new choice.
+/// A change of harness or model provider: the group "Agent" as typed, rendered again with the
+/// provider and model lists of the new choice. Nothing else of the form changes.
 async fn persona_refresh(State(state): State<WebState>, Form(form): Form<PersonaForm>) -> Response {
     let providers = match df_db::model_providers::list_model_providers(&state.pool).await {
         Ok(providers) => providers,
         Err(e) => return internal_error(&e),
     };
     let form = form.normalized(&providers);
-    let target = FormTarget::posted("/personas", &form.entity_id);
-    let signing =
-        match SigningKeySection::load_or_error_page(&state, target.id, Rotation::None).await {
-            Ok(signing) => signing,
-            Err(response) => return *response,
-        };
-    persona_form(
-        target,
-        &form,
-        &FormErrors::default(),
-        &providers,
-        &signing,
-        submit_label(target),
-    )
-    .into_response()
+    agent_fields(&form, &FormErrors::default(), &providers).into_response()
 }
 
 async fn persona_create(
@@ -546,10 +500,14 @@ async fn save_persona(
             match df_db::catalog::save_persona(&state.pool, actor, id, &input).await {
                 Ok(persona) => {
                     ensure_signing_key(&state, persona.id).await;
-                    return match personas_markup(&state).await {
-                        Ok(region) => saved(region),
-                        Err(response) => *response,
-                    };
+                    // A new persona gets its prompt written next, with the full editor.
+                    if id.is_none() {
+                        return htmx_redirect(&format!(
+                            "/personas/{}?tab=system-prompt",
+                            persona.id
+                        ));
+                    }
+                    return persona_page::saved(&state, persona.id, &providers, form.tab).await;
                 }
                 Err(DbError::NotFound(_)) => return not_found("The persona"),
                 Err(e) => match save_error(e) {
@@ -560,19 +518,13 @@ async fn save_persona(
         }
         Err(errors) => errors,
     };
-    let target = FormTarget::new("/personas", id);
-    let signing = match SigningKeySection::load_or_error_page(&state, id, Rotation::None).await {
-        Ok(signing) => signing,
-        Err(response) => return *response,
+    let Some(id) = id else {
+        return invalid(create_form(&form, &errors, &providers));
     };
-    invalid(persona_form(
-        target,
-        &form,
-        &errors,
-        &providers,
-        &signing,
-        submit_label(target),
-    ))
+    match persona_page::form_with_errors(&state, id, &form, &errors, &providers).await {
+        Ok(page_form) => invalid(page_form),
+        Err(response) => *response,
+    }
 }
 
 /// Creates the signing key of a saved persona, or makes the columns agree with its Secret
@@ -614,12 +566,4 @@ pub(super) fn save_error(error: DbError) -> Result<FormErrors, Box<Response>> {
         }
     }
     Ok(errors)
-}
-
-fn submit_label(target: FormTarget) -> &'static str {
-    if target.is_create() {
-        "Create persona"
-    } else {
-        "Save persona"
-    }
 }

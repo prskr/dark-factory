@@ -2,7 +2,7 @@
 
 use maud::{Markup, html};
 
-use super::actions::ICON_BUTTON_CLASS;
+use super::actions::{ButtonKind, ICON_BUTTON_CLASS, action_class};
 use super::icons::{Icon, icon};
 
 /// Validation errors by field name; the empty name is a message for the whole form.
@@ -54,6 +54,11 @@ pub const INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line-str
 
 /// Classes of a value that is shown but cannot be changed: muted on the `sunk` surface.
 pub(crate) const READONLY_INPUT_CLASS: &str = "min-h-11 w-full rounded-lg border border-line bg-sunk px-3 py-1.5 font-mono text-base text-muted lg:min-h-10";
+
+/// Classes of the text field of a [`MarkdownField`]: [`INPUT_CLASS`] without its minimum heights
+/// (`min-h-11`, `lg:min-h-10`), which would beat the one `.md-input` sets from the field's rows
+/// (`styles/input.css`), in monospace.
+const MARKDOWN_INPUT_CLASS: &str = "md-input w-full rounded-lg border border-line-strong bg-panel px-3 py-1.5 font-mono text-base text-ink placeholder:text-faint disabled:border-line disabled:bg-sunk disabled:text-faint";
 
 /// Classes of the compact read-only value of a dialog.
 const READONLY_COMPACT_CLASS: &str =
@@ -212,6 +217,111 @@ pub fn textarea_field(
     )
 }
 
+/// Which views a [`MarkdownField`] offers next to its text field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Preview {
+    /// "Editor" and "Preview" (modals and narrow places); opens on "Editor".
+    Switch,
+    /// "Editor", "Split" and "Preview" from 1280 px, "Editor" and "Preview" below; opens on
+    /// "Split" where it is offered. The page holds the rendered preview of `value` (design D2a).
+    Split,
+}
+
+/// A Markdown field (`markdown-editor` spec): a monospace text field with a view switch and the
+/// server-rendered preview. The Alpine component `markdownField` (`scripts/markdownField.ts`)
+/// runs it; without it the field is the plain labelled textarea.
+#[derive(Debug, Clone, Copy)]
+pub struct MarkdownField<'a> {
+    pub label: &'a str,
+    pub name: &'a str,
+    pub value: &'a str,
+    pub hint: Option<&'a str>,
+    /// The minimum height in text rows.
+    pub rows: u8,
+    pub preview: Preview,
+    /// The label is for screen readers only: the field fills a page tab of that name.
+    pub label_hidden: bool,
+}
+
+/// A [`MarkdownField`] with its hint and error.
+pub fn markdown_field(field: &MarkdownField<'_>, errors: &FormErrors) -> Markup {
+    let name = field.name;
+    let split = field.preview == Preview::Split;
+    let options = serde_json::json!({ "split": split });
+    html! {
+        div class="space-y-3" style={"--md-rows: " (field.rows)} x-data={"markdownField(" (options) ")"} {
+            label for=(name) id={(name) "-label"} class=(if field.label_hidden { "sr-only" } else { "block text-sm font-medium text-muted" }) { (field.label) }
+            // Without the component Alpine cannot evaluate `enhanced`, so the row stays hidden.
+            div class="relative flex min-h-8 items-center justify-center" x-cloak "x-show"="enhanced" {
+                div role="radiogroup" aria-label="View" "x-on:keydown"="move($event)"
+                    class="inline-flex gap-0.5 rounded-lg border border-line-strong bg-panel p-0.5" {
+                    (view_segment("editor", Icon::Pencil, "Editor", ""))
+                    @if split { (view_segment("split", Icon::Columns, "Split", "max-xl:hidden")) }
+                    (view_segment("preview", Icon::Eye, "Preview", ""))
+                }
+                // Only where the highlighting editor can attach (bundle embedded, from 768 px).
+                button type="button" role="switch" aria-checked="true" ":aria-checked"="highlighting"
+                    x-cloak "x-show"="canEdit" "x-on:click"="toggle()"
+                    class="absolute right-0 inline-flex min-h-8 items-center gap-2 text-[13px] font-medium text-muted" {
+                    "Highlighting"
+                    span aria-hidden="true" class="relative inline-block h-4 w-7 rounded-full" ":class"="highlighting ? 'bg-accent-text' : 'bg-muted'" {
+                        span class="absolute top-0.5 size-3 rounded-full bg-panel" ":class"="highlighting ? 'left-3.5' : 'left-0.5'" {}
+                    }
+                }
+            }
+            div class="grid gap-4" ":class"="view === 'split' && 'md-split xl:grid-cols-2'" {
+                // `:hidden`, not `x-show`: an expression Alpine cannot evaluate (the component did
+                // not load) must leave the text field shown.
+                div id={(name) "-write"} class="md-write min-w-0" ":hidden"="view === 'preview'" {
+                    textarea id=(name) name=(name) rows=(field.rows)
+                        class=(MARKDOWN_INPUT_CLASS)
+                        aria-invalid=[invalid(name, errors)]
+                        aria-describedby=[described_by(name, field.hint.is_some(), errors)] { (field.value) }
+                }
+                div id={(name) "-preview"} class="md-preview-panel min-w-0 rounded-lg border border-line bg-panel px-4 py-3.5 text-sm"
+                    aria-live="polite" x-cloak "x-show"="view !== 'editor'" {
+                    // The status lines: above the preview and sticky, because in Split the panel
+                    // scrolls and the last preview stays: a message at the top of the content
+                    // would be out of view for a board member who scrolled down.
+                    div data-preview-status class="sticky top-0 z-10 -mx-4 bg-panel px-4" {
+                        p class="pb-2 pt-1 text-xs text-faint" x-cloak "x-show"="status === 'failed' && view === 'split'" { "Preview not up to date" }
+                        p class="pb-2 pt-1 text-sm text-danger" x-cloak "x-show"="status === 'too-long'" { "Text too long for a preview (max 256 KiB)" }
+                        p class="pb-2 pt-1 text-sm text-danger" x-cloak "x-show"="status === 'session'" { "Preview not available: your session has ended. Copy your text, then reload." }
+                    }
+                    div x-cloak "x-show"="status === 'ok' || view === 'split'" data-preview {
+                        @if split { (crate::markdown_preview::fragment(field.value)) }
+                    }
+                    div x-cloak "x-show"="status === 'failed' && view !== 'split'" class="space-y-2" {
+                        p class="text-sm text-danger" { "Preview not available" }
+                        button type="button" "x-on:click"="retry()" class=(action_class(ButtonKind::Secondary)) { "Retry" }
+                    }
+                }
+            }
+            // While the highlighting editor is attached: Tab leaves it, so indenting has keys.
+            p id={(name) "-indent"} data-indent-hint x-cloak "x-show"="editing" "x-text"="indentHint" class="text-xs text-faint" {
+                "Tab moves to the next field. Indent with Ctrl+] and Ctrl+[."
+            }
+            @if let Some(hint) = field.hint { p id={(name) "-hint"} class="text-xs text-faint" { (hint) } }
+            @if let Some(error) = errors.get(name) {
+                p id={(name) "-error"} class="text-sm text-danger" role="alert" { (error) }
+            }
+        }
+    }
+}
+
+/// One segment of the view switch of a [`MarkdownField`].
+fn view_segment(view: &str, glyph: Icon, label: &str, class: &str) -> Markup {
+    html! {
+        button type="button" role="radio" data-view=(view) aria-checked="false" tabindex="-1"
+            ":aria-checked"={"view === '" (view) "'"} ":tabindex"={"view === '" (view) "' ? 0 : -1"}
+            ":class"={"view === '" (view) "' ? 'bg-sunk font-medium text-ink' : 'text-muted'"}
+            "x-on:click"={"select('" (view) "')"}
+            class={"inline-flex min-h-7 items-center gap-1.5 rounded-md px-2.5 text-[13px] [&_svg]:size-3.5 " (class)} {
+            (icon(glyph)) (label)
+        }
+    }
+}
+
 /// A select with an optional empty choice.
 pub fn select_field(
     label: &str,
@@ -362,6 +472,7 @@ pub(crate) fn described_by(name: &str, has_hint: bool, errors: &FormErrors) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::tag_around;
 
     #[test]
     fn input_classes_pad_so_the_desktop_height_stays_40px() {
@@ -497,6 +608,231 @@ mod tests {
             !area.contains("aria-invalid"),
             "error of another field: {area}"
         );
+    }
+
+    fn markdown(preview: Preview, label_hidden: bool, errors: &FormErrors) -> String {
+        markdown_field(
+            &MarkdownField {
+                label: "System prompt",
+                name: "system_prompt",
+                value: "## Rules\n\n- one <b>",
+                hint: Some("Markdown."),
+                rows: 20,
+                preview,
+                label_hidden,
+            },
+            errors,
+        )
+        .into_string()
+    }
+
+    #[test]
+    fn a_markdown_field_is_a_labelled_monospace_textarea_like_textarea_field() {
+        let mut errors = FormErrors::default();
+        errors.add("system_prompt", "Too long.");
+        let html = markdown(Preview::Switch, false, &errors);
+        assert!(
+            html.contains("<label for=\"system_prompt\" id=\"system_prompt-label\" class=\"block text-sm font-medium text-muted\">System prompt</label>"),
+            "{html}"
+        );
+        let area = &html[html.find("<textarea").unwrap()..];
+        let area = &area[..area.find("</textarea>").unwrap()];
+        for part in [
+            "id=\"system_prompt\"",
+            "name=\"system_prompt\"",
+            "rows=\"20\"",
+            "font-mono",
+            "md-input",
+            "aria-invalid=\"true\"",
+            "aria-describedby=\"system_prompt-hint system_prompt-error\"",
+            ">## Rules\n\n- one &lt;b&gt;",
+        ] {
+            assert!(area.contains(part), "{part}: {area}");
+        }
+        assert!(html.contains("id=\"system_prompt-hint\"") && html.contains("Too long."));
+        assert!(html.contains("--md-rows: 20"), "{html}");
+    }
+
+    #[test]
+    fn the_text_field_has_no_minimum_height_utility_so_its_rows_decide() {
+        // `min-h-11` of `INPUT_CLASS` (the utilities layer) would beat `.md-input`'s minimum
+        // height from `--md-rows` (the components layer): the field would be 44 px, not 20 rows.
+        let html = markdown(Preview::Switch, false, &FormErrors::default());
+        let area = tag_around(&html, "rows=\"20\"");
+        let class = area
+            .split("class=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let classes: Vec<_> = class.split(' ').collect();
+        assert!(classes.contains(&"md-input"), "{class}");
+        assert!(classes.iter().all(|c| !c.contains("min-h-")), "{class}");
+    }
+
+    #[test]
+    fn the_markdown_input_class_is_the_input_class_without_its_minimum_heights_in_monospace() {
+        let markdown: std::collections::BTreeSet<_> = MARKDOWN_INPUT_CLASS.split(' ').collect();
+        let input: std::collections::BTreeSet<_> = INPUT_CLASS
+            .split(' ')
+            .filter(|class| !class.contains("min-h-"))
+            .chain(["md-input", "font-mono"])
+            .collect();
+        assert_eq!(markdown, input);
+    }
+
+    #[test]
+    fn a_hidden_label_is_for_screen_readers_only() {
+        let html = markdown(Preview::Split, true, &FormErrors::default());
+        assert!(
+            html.contains("<label for=\"system_prompt\" id=\"system_prompt-label\" class=\"sr-only\">System prompt</label>"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn the_switch_view_has_editor_and_preview_in_a_radio_group_hidden_until_alpine_runs() {
+        let html = markdown(Preview::Switch, false, &FormErrors::default());
+        let switch = &html[html.find("role=\"radiogroup\"").unwrap()..];
+        let switch = &switch[..switch.find("</div>").unwrap()];
+        assert_eq!(switch.matches("role=\"radio\"").count(), 2, "{switch}");
+        assert!(switch.contains("Editor") && switch.contains("Preview"));
+        assert!(!switch.contains("Split"), "{switch}");
+        let row = &html[..html.find("role=\"radiogroup\"").unwrap()];
+        assert!(
+            row.rsplit("<div").nth(1).unwrap().contains("x-cloak"),
+            "{row}"
+        );
+        assert!(html.contains("aria-live=\"polite\""), "{html}");
+        assert!(!html.contains("role=\"tab\""), "{html}");
+        // Switch renders no preview before the first request.
+        assert!(!html.contains("<h2>Rules</h2>"), "{html}");
+    }
+
+    #[test]
+    fn the_split_view_adds_split_from_1280_px_and_renders_the_first_preview() {
+        let html = markdown(Preview::Split, false, &FormErrors::default());
+        assert!(
+            html.contains("x-data=\"markdownField({&quot;split&quot;:true})\""),
+            "{html}"
+        );
+        let split = &html[html.find("data-view=\"split\"").unwrap()..];
+        let split = &split[..split.find("</button>").unwrap()];
+        assert!(
+            split.contains("max-xl:hidden") && split.contains("Split"),
+            "{split}"
+        );
+        assert_eq!(html.matches("role=\"radio\"").count(), 3);
+        assert!(html.contains("xl:grid-cols-2"), "{html}");
+        let preview = &html[html.find("id=\"system_prompt-preview\"").unwrap()..];
+        assert!(preview.contains("<h2>Rules</h2>"), "{preview}");
+        assert!(preview.contains("&lt;b&gt;"), "{preview}");
+        assert!(!html.contains("role=\"tab\""), "{html}");
+    }
+
+    #[test]
+    fn the_highlighting_switch_and_the_indent_hint_wait_for_the_script() {
+        for preview in [Preview::Switch, Preview::Split] {
+            let html = markdown(preview, false, &FormErrors::default());
+            // The switch: at the right end of the row of the view switch, hidden until an editor
+            // can attach (`canEdit`), on by default.
+            let switch = tag_around(&html, "role=\"switch\"");
+            assert!(
+                switch.contains("x-show=\"canEdit\"")
+                    && switch.contains("x-cloak")
+                    && switch.contains(":aria-checked=\"highlighting\"")
+                    && switch.contains("absolute right-0")
+                    && switch.contains("x-on:click=\"toggle()\""),
+                "{switch}"
+            );
+            assert!(html.contains(">Highlighting<"), "{html}");
+            // The hint below the field names the keys and shows only while an editor is attached.
+            let hint = tag_around(&html, "data-indent-hint");
+            assert!(
+                hint.contains("id=\"system_prompt-indent\"")
+                    && hint.contains("x-show=\"editing\"")
+                    && hint.contains("x-cloak"),
+                "{hint}"
+            );
+            assert!(
+                html.contains("Tab moves to the next field. Indent with Ctrl+] and Ctrl+[."),
+                "{html}"
+            );
+            let (switch_at, hint_at) = (
+                html.find("role=\"switch\"").unwrap(),
+                html.find("data-indent-hint").unwrap(),
+            );
+            assert!(
+                html.find("role=\"radiogroup\"").unwrap() < switch_at
+                    && html.find("<textarea").unwrap() < hint_at,
+                "{html}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_text_field_stays_shown_and_the_switch_hidden_when_the_component_does_not_run() {
+        let html = markdown(Preview::Split, false, &FormErrors::default());
+        // An `x-show` that Alpine cannot evaluate hides its element: the panel of the text field
+        // therefore hides itself through `:hidden`, which an unevaluated binding leaves unset.
+        let write = tag_around(&html, "id=\"system_prompt-write\"");
+        assert!(
+            write.contains(":hidden=\"view === 'preview'\"") && !write.contains("x-show"),
+            "{write}"
+        );
+        // The switch row waits for the component's `enhanced`, so it stays hidden without it.
+        let row = tag_around(&html, "class=\"relative flex min-h-8");
+        assert!(
+            row.contains("x-cloak") && row.contains("x-show=\"enhanced\""),
+            "{row}"
+        );
+    }
+
+    #[test]
+    fn the_last_preview_of_the_split_view_stays_for_every_failure_with_its_message() {
+        let html = markdown(Preview::Split, false, &FormErrors::default());
+        let content = tag_around(&html, "data-preview>");
+        assert!(
+            content.contains("x-show=\"status === 'ok' || view === 'split'\""),
+            "{content}"
+        );
+        for (status, text) in [
+            ("failed", "Preview not up to date"),
+            ("too-long", "Text too long for a preview (max 256 KiB)"),
+            ("session", "your session has ended"),
+        ] {
+            let at = html.find(text).unwrap_or_else(|| panic!("{text}"));
+            let tag = &html[html[..at].rfind('<').unwrap()..at];
+            assert!(tag.contains(&format!("status === '{status}'")), "{tag}");
+            assert!(!tag.contains("view !== 'split'"), "{tag}");
+            // In the status block, which sits above the preview and is sticky: a board member
+            // who scrolled a long preview down still sees the message.
+            let status = tag_around(&html, "data-preview-status");
+            assert!(status.contains("sticky top-0"), "{status}");
+            let (block, preview) = (
+                html.find("data-preview-status").unwrap(),
+                html.find("data-preview>").unwrap(),
+            );
+            assert!(
+                block < at && at < preview,
+                "{text} is not in the status block"
+            );
+        }
+    }
+
+    #[test]
+    fn the_preview_states_are_messages_of_the_field() {
+        let html = markdown(Preview::Split, false, &FormErrors::default());
+        for text in [
+            "Preview not up to date",
+            "Preview not available",
+            "Retry",
+            "Text too long for a preview (max 256 KiB)",
+            "Preview not available: your session has ended. Copy your text, then reload.",
+        ] {
+            assert!(html.contains(text), "{text}: {html}");
+        }
     }
 
     #[test]

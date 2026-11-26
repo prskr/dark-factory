@@ -84,6 +84,34 @@
       }
     ]
   },
+  "esbuild": {
+    "binaries": [
+      {
+        "cpu": "x86_64",
+        "file": "package/bin/esbuild",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "9573bb2233aab0f9ea7647d5cca9726113cc1768de61d66b17267f4db84488f6",
+        "url": "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.28.2.tgz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "package/bin/esbuild",
+        "kind": "archive",
+        "os": "linux",
+        "sha256": "a96dbfa41d3ef5dbd1ef22b1c10d5187be9267e86093a870f06402a7ec931596",
+        "url": "https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-0.28.2.tgz"
+      },
+      {
+        "cpu": "arm64",
+        "file": "package/bin/esbuild",
+        "kind": "archive",
+        "os": "macos",
+        "sha256": "1980cde09749094452b20d36ff267585ccb3f72749c7bc97291cd9996ccf5a2a",
+        "url": "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-0.28.2.tgz"
+      }
+    ]
+  },
   "hadolint": {
     "binaries": [
       {

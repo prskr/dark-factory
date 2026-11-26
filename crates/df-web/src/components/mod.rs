@@ -26,9 +26,9 @@ pub use badges::{
     Tone, attached_badge, chip, filter_chip, harness_label, status_badge, tone_badge,
 };
 pub use forms::{
-    FormErrors, MenuItem, field, field_error, form_error, form_group, icon_menu,
-    mono_text_field_of_form, readonly_field, readonly_field_compact, search_menu, select_field,
-    text_field, textarea_field,
+    FormErrors, MarkdownField, MenuItem, Preview, field, field_error, form_error, form_group,
+    icon_menu, markdown_field, mono_text_field_of_form, readonly_field, readonly_field_compact,
+    search_menu, select_field, text_field, textarea_field,
 };
 pub use host_icon::{HostIconSize, host_icon};
 pub use icons::{Icon, forge_icon, icon, logo};
@@ -60,7 +60,7 @@ mod tests {
     const MIN_TEXT_CONTRAST: f64 = 4.5;
     /// Foreground and background tokens of the text pairs in `docs/design-system.md`,
     /// "Contrast ratios".
-    const TEXT_PAIRS: [(&str, &str); 38] = [
+    const TEXT_PAIRS: [(&str, &str); 40] = [
         ("avatar-1-fg", "avatar-1-bg"),
         ("avatar-2-fg", "avatar-2-bg"),
         ("avatar-3-fg", "avatar-3-bg"),
@@ -73,6 +73,7 @@ mod tests {
         ("ink", "panel"),
         ("ink", "raised"),
         ("ink", "bubble-me"),
+        ("ink", "sunk"),
         ("muted", "app"),
         ("muted", "panel"),
         ("muted", "sunk"),
@@ -83,6 +84,7 @@ mod tests {
         ("faint", "raised"),
         ("faint", "accent-soft"),
         ("danger", "raised"),
+        ("danger", "panel"),
         ("danger", "app"),
         ("danger", "danger-soft"),
         ("accent-text", "panel"),
@@ -223,6 +225,8 @@ mod tests {
             "field",
             "text_field",
             "textarea_field",
+            "markdown_field",
+            "Preview",
             "select_field",
             "form_error",
             "search_menu",

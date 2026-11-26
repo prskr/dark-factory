@@ -8,6 +8,7 @@ mod forge_hints;
 mod forms;
 mod integrations_tab;
 mod lists;
+mod persona_page;
 mod personas;
 mod project_page;
 mod projects;
@@ -47,6 +48,35 @@ pub(super) fn assert_saved(response: &axum::http::Response<axum::body::Body>) {
     assert_eq!(header_str(response, "hx-retarget"), "#config-list");
     assert_eq!(header_str(response, "hx-reswap"), "outerHTML");
     assert_eq!(header_str(response, "hx-trigger"), "modal-close");
+}
+
+/// Creating a persona opens its settings page on the System prompt tab.
+pub(super) fn assert_persona_created(response: &axum::http::Response<axum::body::Body>) {
+    assert_eq!(response.status(), StatusCode::OK);
+    let location = header_str(response, "hx-redirect");
+    assert!(
+        location.starts_with("/personas/") && location.ends_with("?tab=system-prompt"),
+        "{location}"
+    );
+}
+
+/// Saving a persona's settings page answers with the form again, not with a closing modal.
+pub(super) fn assert_persona_saved(response: &axum::http::Response<axum::body::Body>) {
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header_str(response, "hx-trigger"), "");
+    assert_eq!(header_str(response, "hx-retarget"), "");
+}
+
+/// The settings page of persona `id`, opened on `tab` (empty: General).
+pub(super) async fn persona_page(app: &TestApp, cookie: &str, id: uuid::Uuid, tab: &str) -> String {
+    let uri = if tab.is_empty() {
+        format!("/personas/{id}")
+    } else {
+        format!("/personas/{id}?tab={tab}")
+    };
+    let response = app.get(&uri, cookie).await;
+    assert_eq!(response.status(), StatusCode::OK, "{uri}");
+    text(response).await
 }
 
 pub(super) fn project_form(key: &str, repo: &str) -> String {

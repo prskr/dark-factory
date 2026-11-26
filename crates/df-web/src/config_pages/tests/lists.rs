@@ -5,7 +5,7 @@ use super::{
     assert_project_created, assert_saved, credential_form_body, project_form, project_with_tasks,
 };
 use crate::testkit::{
-    TestApp, form, head_of, phone_list_of, seed_provider, table_of, tag_around, text,
+    TestApp, form, head_of, header_str, phone_list_of, seed_provider, table_of, tag_around, text,
 };
 
 #[tokio::test]
@@ -309,8 +309,13 @@ async fn a_saved_entry_updates_the_count_in_the_header_of_the_answer() {
         ("model", "claude-sonnet-5-5"),
         ("model_provider_id", &provider),
     ]);
+    // Creating a persona opens its settings page; the list shows the count.
     let response = app.post("/personas", &persona, &cookie).await;
-    assert_eq!(count(&text(response).await, "Personas"), "1");
+    assert!(header_str(&response, "hx-redirect").starts_with("/personas/"));
+    assert_eq!(
+        count(&text(app.get("/personas", &cookie).await).await, "Personas"),
+        "1"
+    );
     let response = app
         .post(
             "/credentials",

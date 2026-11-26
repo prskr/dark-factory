@@ -6,7 +6,7 @@ use df_core::signing_key::{SigningKey, secret_ref};
 use df_core::{PersonaId, SecretError, SecretStore};
 use uuid::Uuid;
 
-use super::audit;
+use super::{audit, persona_page};
 use crate::testkit::{TestApp, form, seed, seed_provider, text};
 
 /// The persona form `ada` with the first seeded provider.
@@ -33,10 +33,9 @@ async fn create_linus(app: &TestApp, cookie: &str) -> Uuid {
         .unwrap()
 }
 
-async fn edit_form(app: &TestApp, cookie: &str, id: Uuid) -> String {
-    let response = app.get_htmx(&format!("/personas/{id}/edit"), cookie).await;
-    assert_eq!(response.status(), StatusCode::OK);
-    text(response).await
+/// The settings page of persona `id` on its Commits tab.
+async fn commits_tab(app: &TestApp, cookie: &str, id: Uuid) -> String {
+    persona_page(app, cookie, id, "commits").await
 }
 
 async fn stored_key(app: &TestApp, id: Uuid) -> (String, String) {
@@ -94,8 +93,8 @@ async fn the_persona_form_has_the_groups_identity_agent_and_commits_as_labelled_
             "{group}: {html}"
         );
     }
-    // Identity: avatar, display name, handle, description. Agent: prompt, harness, provider, model.
-    // Commits: the commit email.
+    // Identity: avatar, display name, handle, description. Agent: harness, provider, model (the
+    // prompt comes with the settings page). Commits: the commit email.
     let fields = positions(
         &html,
         &[
@@ -104,7 +103,6 @@ async fn the_persona_form_has_the_groups_identity_agent_and_commits_as_labelled_
             "name=\"handle\"",
             "name=\"description\"",
             "id=\"group-agent\"",
-            "name=\"system_prompt\"",
             "name=\"harness\"",
             "name=\"model_provider_id\"",
             "name=\"model\"",
@@ -149,7 +147,7 @@ async fn a_stored_persona_without_a_key_shows_the_note_and_no_rotate_button() {
             .unwrap();
     assert_eq!(public, None, "the seeded persona has no key yet");
 
-    let html = edit_form(&app, &cookie, seed.persona).await;
+    let html = commits_tab(&app, &cookie, seed.persona).await;
 
     assert!(
         html.contains("No signing key yet. Save the persona to create it."),
@@ -199,7 +197,7 @@ async fn the_group_commits_shows_email_register_hint_how_to_key_fingerprint_and_
     let id = create_linus(&app, &cookie).await;
     let (public, fingerprint) = stored_key(&app, id).await;
 
-    let html = edit_form(&app, &cookie, id).await;
+    let html = commits_tab(&app, &cookie, id).await;
 
     let order = positions(
         &html,
@@ -237,7 +235,7 @@ async fn copy_buttons_copy_the_full_values_and_hide_without_a_secure_clipboard()
     let cookie = app.login().await;
     let id = create_linus(&app, &cookie).await;
 
-    let html = edit_form(&app, &cookie, id).await;
+    let html = commits_tab(&app, &cookie, id).await;
 
     for label in ["Copy commit email", "Copy public key", "Copy fingerprint"] {
         let at = html
@@ -262,7 +260,7 @@ async fn the_rotate_confirmation_asks_without_runs_and_names_the_runs_with_them(
     let cookie = app.login().await;
     let id = create_linus(&app, &cookie).await;
 
-    let idle = edit_form(&app, &cookie, id).await;
+    let idle = commits_tab(&app, &cookie, id).await;
 
     assert!(idle.contains("Rotate the signing key of Linus?"), "{idle}");
     assert!(
@@ -304,7 +302,7 @@ async fn the_rotate_confirmation_names_the_number_of_active_runs() {
             .unwrap();
     }
 
-    let html = edit_form(&app, &cookie, seed.persona).await;
+    let html = commits_tab(&app, &cookie, seed.persona).await;
 
     assert!(
         html.contains("2 runs of Linus are active. Their commits that are not pushed yet must be re-signed: the next push rejects them, and the agent is told how."),
@@ -476,7 +474,7 @@ async fn only_an_instance_with_the_forgejo_plugin_offers_the_verify_dialog() {
     let cookie = forgejo.login().await;
     let id = create_linus(&forgejo, &cookie).await;
 
-    let html = edit_form(&forgejo, &cookie, id).await;
+    let html = commits_tab(&forgejo, &cookie, id).await;
 
     let order = positions(
         &html,
@@ -498,7 +496,7 @@ async fn only_an_instance_with_the_forgejo_plugin_offers_the_verify_dialog() {
     let github = TestApp::with_forges(crate::testkit::default_forge("github")).await;
     let cookie = github.login().await;
     let id = create_linus(&github, &cookie).await;
-    let html = edit_form(&github, &cookie, id).await;
+    let html = commits_tab(&github, &cookie, id).await;
     assert!(!html.contains("Verify key on Forgejo"), "{html}");
     let (status, _) = verify_key(&github, &cookie, id, "token-1").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
