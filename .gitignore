@@ -46,6 +46,9 @@ execution_log.binpb.zst
 
 .playwright-mcp/
 
+# Personal Claude Code settings (approved MCP servers, permissions); never shared
+/.claude/settings.local.json
+
 # Hugo (docs site)
 /docs/public/
 /docs/resources/
