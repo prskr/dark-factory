@@ -23,7 +23,7 @@ The sites are fixed by hand and not by a lint, see design, Decision 3.
   - or `start_paused = true`, where the test only shows that something does *not* happen.
 
   No production behavior changes. Where a test needs a signal that the code does not expose, the test fixture (`factory-agent/src/test_harness.rs`) provides it, not the production type.
-- **One lock-wait helper.** The private copies in `df-db` (`tasks/tests.rs`, `tasks/dependency_tests.rs`, `runs/tests.rs`, `git_pushes/tests.rs`, `transcript/tests.rs`), `df-web` (`task_pages/tests/reset_workspace.rs`) and `df-agent-channel` (`session/tests.rs`) call `df_test_postgres::wait_for_lock_wait`. The copy in `runs/tests.rs` has no timeout and counts lock waits of every database. With the shared helper it gets both.
+- **One lock-wait helper.** The private copies in `df-db` (`tasks/tests.rs`, `tasks/dependency_tests.rs`, `runs/tests.rs`, `git_pushes/tests.rs`, `transcript/tests.rs`), `df-web` (`task_pages/tests/reset_workspace.rs`) and `df-agent-channel` (`session/tests.rs`) call `df_test_postgres::wait_for_lock_wait`. Three copies (`runs/tests.rs`, `git_pushes/tests.rs`, `transcript/tests.rs`) have no timeout, and the one in `runs/tests.rs` also counts lock waits of every database. With the shared helper they get both.
 - **Bounded origin waits in the proxy tests (TD-50).** The origin-side `listener.accept()` calls and the head read loop in `df-gateway/src/proxy/tests.rs` get the same 5 s `tokio::time::timeout` as the client reads. A regression then fails these tests instead of making them hang.
 - **Tech-debt register.** TD-5, TD-50 and TD-101 are deleted from `docs/tech_debt.md`, both the entry and the summary row, as the register asks for a fixed entry.
 - **Rule made concrete.** The bullet in `CODING_STANDARDS.md` ("Tests") gets two additions:
@@ -51,6 +51,7 @@ None. The change touches only test code and a coding standard (`skip_specs: true
 
 - A lint against `tokio::time::sleep` / `std::thread::sleep`: rejected (design, Decision 3).
 - The bounded poll loops in tests (`df-orchestrator/src/scheduler/tests.rs`, `df-db/src/outbox/dispatcher/tests.rs`, `df-k8s` live helpers): they wait for a condition with a deadline, as the standard asks. A generic `eventually` helper outside `df-e2e` is rejected: each loop is a few lines, and a shared crate for it costs more than it saves.
+- The two advisory-lock waits (`df-db/src/network_access/tests.rs`, `advisory_lock_waiter`; `df-orchestrator/src/pr/sync/tests.rs`, `wait_for_queued_advisory_lock`): rejected. They read `pg_locks`, not `pg_stat_activity`, and both already have the timeout and the database filter. A shared helper for two callers saves little.
 - TD-16 (`eventually` in `df-agent-channel/tests/agent_port.rs` polls with `sleep`): its fix needs a subscription to the `Notifier`, not a test-timing change. It stays in `docs/tech_debt.md`.
 - TD-68 (keep-alive tests wait on real deadlines): its fix injects a clock into production code. It stays in `docs/tech_debt.md`.
 - The four copies of the fixed 100 ms accept-error backoff in production code (`df-tls`, `df-gateway` ×2, `factory-agent`): a production refactoring, not test timing. Backlog: "Shared accept loop with backoff" (row added by this change).

@@ -5,8 +5,8 @@ Write each test change so that it runs green, then remove the sleep. The red sta
 ## 1. `factory-agent`: connection tests (design, Decision 1)
 
 - [ ] 1.1 In `factory-agent/src/test_harness.rs`, add `refuse_streams()`, `accept_streams()` and `wait_for_connection_attempts(n, timeout)` to `MockControlPlane`. A refused stream answers `Status::unavailable` and still increments `connection_count`. Add a unit test in the same file: refuse, the runtime's reconnect attempt is counted and gets no stream, accept, the next attempt gets a stream. Verify: the test passes.
-- [ ] 1.2 `tests/connection.rs:786`: drop the stream, refuse new ones, wait for one refused attempt, send the two messages, accept again. Remove the sleep and its comment. Verify: the test passes 50 times in the loop.
-- [ ] 1.3 `tests/connection.rs:1248`: the same order: drop, refuse, wait for a refused attempt, send the report, `shutdown()`, accept. If the test now fails, the report path after shutdown while disconnected is broken: report it to the user with the output, do not bring the sleep back. Delete TD-5 (entry and summary row) from `docs/tech_debt.md`. Verify: the test passes 50 times in the loop, and `grep -n "TD-5 " docs/tech_debt.md` finds nothing.
+- [ ] 1.2 `tests/connection.rs:786`: refuse new streams, then drop the active one, then wait until `connection_count` has grown by one (design, Decision 1: this order), send the two messages, accept again. Remove the sleep and its comment. Verify: the test passes 50 times in the loop.
+- [ ] 1.3 `tests/connection.rs:1248`: the same order: refuse, drop, wait for the refused attempt, send the report, `shutdown()`, accept. If the test now fails, the report path after shutdown while disconnected is broken: report it to the user with the output, do not bring the sleep back. Delete TD-5 (entry and summary row) from `docs/tech_debt.md`. Verify: the test passes 50 times in the loop, and `grep -n "TD-5 " docs/tech_debt.md` finds nothing.
 
 ## 2. `factory-agent` and `fake-acp-agent`: outbox, runner, cancel
 
@@ -17,7 +17,7 @@ Write each test change so that it runs green, then remove the sleep. The red sta
 
 ## 3. `df-k8s` live test
 
-- [ ] 3.1 `df-k8s/src/reconcile/tests.rs:308`: replace the 3 s sleep with a wait for the first pass's patch. Read the `NetworkPolicy`'s `resourceVersion` before the loop starts, and wait until it changes and the rules equal `initial` (bounded, the existing `wait_for_egress_rules` deadline). Verify: `cargo test -p df-k8s --lib policy_loop_live -- --ignored` passes against a dev cluster (`DF_LIVE_*`, crate README). Without a cluster, state that it did not run.
+- [ ] 3.1 `df-k8s/src/reconcile/tests.rs:308`: replace the 3 s sleep with a wait for the first pass's patch. The policy already has the rules `initial`, so that patch changes nothing visible (design, Context). Before the loop starts, patch the egress rules to `[]`. After the first `get_targets` call, wait with `wait_for_egress_rules(&netpols, &initial, …)` until the first pass has restored them. Remove the sleep. Verify: `cargo test -p df-k8s --lib policy_loop_live -- --ignored` passes against a dev cluster (`DF_LIVE_*`, crate README). Without a cluster, state that it did not run.
 
 ## 4. One lock-wait helper (design, Decision 4)
 
@@ -26,7 +26,7 @@ Write each test change so that it runs green, then remove the sleep. The red sta
   - `df-web/src/task_pages/tests/reset_workspace.rs` (`wait_for_a_lock_wait`);
   - `df-agent-channel/src/session/tests.rs:141` (inline).
 
-  Remove the private functions, and delete TD-101 (entry and summary row) from `docs/tech_debt.md`. Verify: `grep -rn "wait_event_type = 'Lock'" crates --include=*.rs` lists only `df-test-postgres/src/lib.rs`, and `cargo nextest run -p df-db -p df-web -p df-agent-channel` passes (container socket needed; otherwise CI).
+  In `git_pushes` and `transcript`, the in-loop `assert!(!writer.is_finished())` goes away with the loop (design, Decision 4). Leave the advisory-lock waits of `network_access/tests.rs` and `pr/sync/tests.rs` alone. Remove the private functions, and delete TD-101 (entry and summary row) from `docs/tech_debt.md`. Verify: `grep -rn "wait_event_type = 'Lock'" crates --include=*.rs` lists only `df-test-postgres/src/lib.rs`, and `cargo nextest run -p df-db -p df-web -p df-agent-channel` passes (container socket needed; otherwise CI).
 
 - [ ] 4.2 TD-50: in `df-gateway/src/proxy/tests.rs`, wrap every origin-side `listener.accept()` and the request-head read loop that has no deadline in `tokio::time::timeout(Duration::from_secs(5), …)`, like the client reads. Delete TD-50 (entry and summary row) from `docs/tech_debt.md`. Verify: `cargo nextest run -p df-gateway proxy` passes. As a check, drop the forwarding in one test: it fails within 5 s instead of hanging.
 

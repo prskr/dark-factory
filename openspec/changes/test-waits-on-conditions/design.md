@@ -13,18 +13,25 @@ See proposal.md, "Why". The rule is in `CODING_STANDARDS.md` ("Tests"). The site
 | `factory-agent/src/tests/runner.rs:494` (`test_scenario_outcome_cancelled_by_control_plane`) | 100 ms | the turn runs when the cancel arrives | signal: send the cancel after the first outbound message of the turn (1) |
 | `factory-agent/src/tests/runner_runtime.rs:644` (`test_scenario_full_runtime_two_runs_on_single_data_dir`) | 50 ms, then `abort` | the collector task `cp_task2` has read every outbound message of run 2 | await the collector after `run_session` returns and drops its sender (1) |
 | `fake-acp-agent/src/tests.rs:1100` (`test_scenario_hang_until_cancelled`) | 100 ms | the prompt hangs when the cancel arrives | signal: the script says "Starting long task..." before `end: hang`; send the cancel after that session update (1) |
-| `df-k8s/src/reconcile/tests.rs:308` (`policy_loop_live`, `#[ignore]`, live cluster) | 3 s | the first pass's patch has landed | wait for the patch itself: the `NetworkPolicy`'s `resourceVersion` changes, or the egress rules equal `initial` and stay so in the following poll (1) |
+| `df-k8s/src/reconcile/tests.rs:308` (`policy_loop_live`, `#[ignore]`, live cluster) | 3 s | the first pass's patch has landed | make the first pass visible: clear the egress rules before the loop starts, then wait until they equal `initial` again (1) |
 
 Facts the fixes build on:
 
 - `MockControlPlane` (`factory-agent/src/test_harness.rs`) counts stream openings in `connection_count` (an `AtomicUsize`). `drop_active_stream` clears the active sender. Nothing stops the runtime from reconnecting at once.
 - `Outbox` uses `std::fs` (sync) and a `tokio::sync::Notify` (`space_available`). It has no `tokio::fs` and no `spawn_blocking`. On a paused clock, `tokio::time::sleep` therefore returns only when every task has run until it blocks.
 - Seven private lock-wait loops, all with the same `pg_stat_activity` query:
-  - `df-db/src/tasks/tests.rs:1409`, `tasks/dependency_tests.rs:483`, `runs/tests.rs:751`, `git_pushes/tests.rs:430`, `transcript/tests.rs:217`;
+  - `df-db/src/tasks/tests.rs:1414`, `tasks/dependency_tests.rs:483`, `runs/tests.rs:751`, `git_pushes/tests.rs:430`, `transcript/tests.rs:217`;
   - `df-web/src/task_pages/tests/reset_workspace.rs:40`;
   - `df-agent-channel/src/session/tests.rs:141`.
 
-  This is TD-101. Its proposed fix, the helper `df_test_postgres::wait_for_lock_wait(&PgPool)` (`df-test-postgres/src/lib.rs:131`), already exists, with a 10 s timeout and the filter `datname = current_database()`. `runs/tests.rs:751` has neither the timeout nor the filter, and it spins with `yield_now`. The three crates already have `df-test-postgres` as a dev-dependency.
+  This is TD-101. Its proposed fix, the helper `df_test_postgres::wait_for_lock_wait(&PgPool)` (`df-test-postgres/src/lib.rs:131`), already exists, with a 10 s timeout and the filter `datname = current_database()`. Differences of the copies:
+  - `runs/tests.rs:751` has neither the timeout nor the filter.
+  - `git_pushes/tests.rs:430` and `transcript/tests.rs:217` have no timeout. Inside the loop they assert `!writer.is_finished()`, so a writer that never waits fails at once.
+  - `runs`, `git_pushes`, `transcript` and `dependency_tests` spin with `yield_now`; the others sleep 10–20 ms per poll.
+
+  The three crates already have `df-test-postgres` as a dev-dependency.
+- Two other tests wait for an advisory lock through `pg_locks` (`df-db/src/network_access/tests.rs:559`, `df-orchestrator/src/pr/sync/tests.rs:598`). Both have a 10 s timeout and the database filter (proposal, "Out of Scope").
+- `policy_loop_live` provisions the `NetworkPolicy` with the rules `initial` already (`drive_policy_loop` checks this). So the first pass's patch changes nothing, and neither the rules nor the `resourceVersion` show that it landed.
 - TD-50: in `df-gateway/src/proxy/tests.rs`, some origin-side `listener.accept()` calls (for example near lines 973 and 1000) still have no timeout. The client side already uses `tokio::time::timeout(Duration::from_secs(5), …)` (line 912).
 - TD-5's own text says that the test fails when the manager is still in the active session at the moment it sends. Decision 1 rules this state out.
 
@@ -48,7 +55,7 @@ Where none exists, the fixture adds one. The production type does not. For the t
 - `accept_streams()`: new streams are accepted again.
 - `wait_for_connection_attempts(n)`: waits, with a timeout, until `connection_count` reaches `n`.
 
-The test drops the stream and refuses new ones. It waits for the first refused attempt, so the runtime has seen the drop. Then it sends the messages, which are now sent during the outage by construction. At the end it accepts again.
+The order is fixed: the test first refuses new streams, then drops the active one (`drop_active_stream`), then waits until `connection_count` has grown by one. The refused attempt shows that the runtime has seen the drop. Refusing first matters: if the test dropped the stream first, the runtime could reconnect, and be accepted, before refusing starts. Then it sends the messages, which are now sent during the outage by construction. At the end it accepts again.
 
 - Rejected: a connection-state `watch` on the production `ConnectionHandle`. It is test-only API in production code.
 - Rejected: a longer sleep. It is still a guess.
@@ -66,7 +73,9 @@ The rule stays a written standard, made concrete (proposal, "What Changes"). The
 
 ### Decision 4: one lock-wait helper
 
-The copies call `df_test_postgres::wait_for_lock_wait`. Its 10 s timeout replaces the copies' 5 s and 10 s timeouts. This only matters when a test fails. `runs/tests.rs` gets the database filter and the timeout with it. A copy whose query differs from the helper's in more than the filter or the timeout keeps its own loop, with a comment that says why. None is known.
+The copies call `df_test_postgres::wait_for_lock_wait`. Its 10 s timeout replaces the copies' 5 s and 10 s timeouts. This only matters when a test fails. `runs/tests.rs` gets the database filter and the timeout with it.
+
+The in-loop `!writer.is_finished()` assertion of `git_pushes` and `transcript` goes away on purpose. A writer that ends without waiting then fails the test after the helper's 10 s timeout, with "no lock wait", instead of at once. That is slower, but only when the test fails, and the two tests keep a short loop for one assertion less. The advisory-lock waits stay as they are: their query is a different one (Context).
 
 ## Risks / Trade-offs
 
