@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use df_core::TaskStatus;
 use df_e2e::browser::{Session, assert_no_sideways_scroll, button, button_in};
 use df_e2e::fixture::{self, World};
 use df_e2e::wait::{RECONNECT_TIMEOUT, RUN_TIMEOUT, eventually};
@@ -1003,6 +1004,70 @@ async fn a_live_update_of_the_task_head_leaves_the_focus_in_the_message_input() 
                 .to_be_focused()
                 .await
                 .context("focus stays in the message input")?;
+            renamer.close_page().await;
+            Ok(())
+        },
+    )
+    .await
+}
+
+/// task-ui, "Live update keeps the marked tab": the Artifacts tab of a chat is open when another
+/// viewer renames the chat, which replaces the tab bar of the details on this page. The open tab
+/// stays the selected one; Overview does not come back as selected.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_live_update_of_the_details_tab_bar_keeps_the_open_tab_selected() -> Result<()> {
+    fixture::run(
+        "a_live_update_of_the_details_tab_bar_keeps_the_open_tab_selected",
+        |world| async move {
+            let (env, session) = (&world.env, &world.session);
+            // No marker of the chat script: the turn ends at once.
+            let chat = session
+                .create_chat(env, data::CHAT_PROJECT_KEY, "Keep the details tab.")
+                .await?;
+            world.wait_for_status(&chat, TaskStatus::Waiting).await?;
+            let (overview, artifacts) = (
+                session.page.locator("#tab-overview"),
+                session.page.locator("#tab-artifacts"),
+            );
+            artifacts.click(None).await?;
+            expect(artifacts.clone())
+                .to_have_attribute("aria-selected", "true")
+                .await
+                .context("the Artifacts tab opens")?;
+
+            let renamer = Session::start_logged_in(env).await?;
+            renamer.open_chat(env, &chat).await?;
+            let title = world.unique("Renamed with Artifacts open");
+            renamer
+                .page
+                .get_by_role(
+                    AriaRole::Button,
+                    Some(GetByRoleOptions::default().name("Rename chat")),
+                )
+                .click(None)
+                .await?;
+            renamer.page.locator("#title").fill(&title, None).await?;
+            button_in(&renamer.page.locator("#chat-overview"), "Save")
+                .click(None)
+                .await?;
+
+            expect(session.page.locator("#chat-head"))
+                .to_contain_text(&title)
+                .await
+                .context("the live update reached the page")?;
+            expect(session.page.locator("#ws-details"))
+                .to_have_attribute("data-tab", "artifacts")
+                .await
+                .context("the Artifacts panel stays open")?;
+            expect(artifacts)
+                .to_have_attribute("aria-selected", "true")
+                .await
+                .context("the Artifacts tab stays selected")?;
+            expect(overview)
+                .to_have_attribute("aria-selected", "false")
+                .await
+                .context("the Overview tab is not selected")?;
             renamer.close_page().await;
             Ok(())
         },
