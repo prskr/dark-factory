@@ -1,0 +1,80 @@
+# Tasks
+
+Write each test first and watch it fail (TDD). Run the xtask tests with `cargo test --manifest-path tools/xtask/Cargo.toml` and lint with `cargo clippy --manifest-path tools/xtask/Cargo.toml --all-targets -- -D warnings`. Follow the existing checks (`check_file_length.rs`: `run(root, …)`, `common::report`, tests on a `tempfile` tree).
+
+## 1. Format, parser and `check`
+
+- [ ] 1.1 Write unit tests in a new `tools/xtask/src/tech_debt.rs`, on a `tempfile` repo tree. Valid cases: an entry with front matter and a body passes, and `paths` with a file and a directory (`crates/x/`) passes. Each failure of design, Decision 3 (`check`) fails with the file name in the message: an unknown field, an unknown severity, empty `paths` and `locations`, a missing path, a directory path without `/`, a body without `**Fix:**`, a stray file, `NEXT_ID` at or below the highest ID. Then implement the `Entry` struct (`serde`, `deny_unknown_fields`), front matter splitting at `+++` and `check`, and the dispatch `["tech-debt", "check"]` in `main.rs`. Verify: the tests pass.
+- [ ] 1.2 Write `docs/tech-debt/README.md`. It covers:
+  - the format (design, Decision 1, with the example);
+  - the rules: add with `next-id`, delete the file in the change that fixes it, IDs are never reused;
+  - the commands.
+
+  Verify: the example in the README passes `check`, because a test reads it from the README.
+
+## 2. `list`, `for`, `next-id`
+
+- [ ] 2.1 Write tests:
+  - `list` prints the rows sorted by ID.
+  - `for crates/df-db/src/runs/tests.rs` finds an entry with `paths = ["crates/df-db/src/"]` and one with the exact file, and does not find an entry with `crates/df-db/src/run` (no prefix match inside a name).
+  - `for` without a hit prints nothing and succeeds.
+  - `next-id` prints 132 and leaves `NEXT_ID` at 133.
+
+  Then implement them and the dispatch: `for --since <rev>` through `git diff --name-only <rev>...HEAD`, and `for <path>…`. Verify: the tests pass. `for --since HEAD~1` on a scratch commit in a `tempfile` git repo lists the entry of the changed file.
+- [ ] 2.2 Write tests for `for --change <dir>` on a `tempfile` tree with a change directory:
+  - A backticked existing file that matches an entry, without the ID in any of the change's files: the entry is printed, and the run fails.
+  - The same, with `TD-<n>` in the proposal: the run succeeds.
+  - `TD-<n>0` does not count as a mention of `TD-<n>`.
+  - A backticked path that does not exist (a new file) and a backticked symbol are ignored.
+  - A backticked directory (`crates/x/`) matches an entry for a file below it.
+
+  Then implement it (design, Decision 3). Verify: the tests pass. On the real tree, after group 3, `cargo xtask tech-debt for --change openspec/changes/test-waits-on-conditions` succeeds, because that change names TD-5, TD-50 and TD-101.
+
+## 3. Migration
+
+- [ ] 3.1 Write a temporary converter (a `#[test] #[ignore]` function or a throwaway subcommand in `tech_debt.rs`). It reads `docs/tech_debt.md` and writes `docs/tech-debt/TD-<n>.md`:
+  - `title`: the heading without the review IDs;
+  - `severity` and `area`: from the summary row;
+  - `paths`: the backticked paths of the files line, braces expanded, directories with `/`;
+  - `locations`: for entries without a repo path;
+  - `issue`: the "Tracked in" line;
+  - `origin`: the review IDs from the heading, plus the line of the "Origin of TD-x" list;
+  - the body: the rest of the section, unchanged, including the symbol notes of the files line.
+
+  Write `NEXT_ID` (132), and move `## Accepted decisions` to `docs/tech-debt/accepted.md`. Verify: `cargo xtask tech-debt check` passes, and there are 70 entry files.
+- [ ] 3.2 Compare old and new. Every old section's prose appears in its new body (a test or a script that diffs them, normalizing only the removed heading and files lines). `cargo xtask tech-debt list` has the same 70 IDs, severities and areas as the old summary table. Fix by hand any path that `check` rejects: a path that no longer exists means the entry is stale, so ask the user whether to delete it or update it. Verify: the comparison passes, and the user has decided each stale entry.
+- [ ] 3.3 Delete `docs/tech_debt.md` and the converter. Verify: `grep -rn "tech_debt.md" --include=*.md --include=*.yaml --include=*.rs . | grep -v -E "openspec/changes/archive|review_findings.md"` shows only the places that group 4 changes.
+
+## 4. Checks in hooks and CI, rules, links
+
+- [ ] 4.1 Add `tech-debt-check: run: build/with_tools.sh cargo xtask tech-debt check` to the pre-commit section of `lefthook.yml`, without a glob. Add `cargo xtask tech-debt check` to "Repository checks" in `.github/workflows/ci.yaml`. Verify: `lefthook run pre-commit` passes. Renaming a file that an entry names makes it fail with the entry's name.
+- [ ] 4.2 Update the agent rules:
+  - `openspec/config.yaml`: one sentence in `context` (design, Decision 4, Planning).
+  - `.claude/skills/implement-change/SKILL.md` preflight: a new step after "Confirm the scope" that runs `cargo xtask tech-debt for --change openspec/changes/<name>`. On failure it stops, lists the entries and suggests `/openspec-update-change` (design, Decision 4, Gate).
+  - `.claude/skills/implement-change/SKILL.md` step 7.4: a file per P2 entry with `next-id`, then `check`. Remove the "next free ID", "Origin of" and summary row steps.
+  - `.claude/skills/code-review/SKILL.md` step 3: run `cargo xtask tech-debt for --since <fixed point>`. Step 4: pass the output to the Standards sub-agent.
+  - `.claude/agents/standards-reviewer.md`: the input, and the three report rules of Decision 4.
+
+  Do not edit the generated OpenSpec skills (`.agents/skills/openspec-*`). Verify by reading each against design, Decision 4 (skill `writing-for-agents`). Run `cargo xtask tech-debt for --change` on every open change in `openspec/changes/`, and list the changes that fail in the PR description, so that their owners know before the gate stops them.
+- [ ] 4.3 Update the links to the old file:
+  - `docs/remote-execution.md` (TD-27 links `tech-debt/TD-27.md`);
+  - `product/iterations/roadmap.md` (two rows link `docs/tech-debt/`);
+  - `product/iterations/iteration-3.md` (TD-91, TD-28, TD-31, TD-32 as `docs/tech-debt/TD-<n>.md`, or "fixed" if the entry is gone).
+
+  If `test-waits-on-conditions` is not merged yet, change its "delete TD-n from `docs/tech_debt.md`" steps (tasks 1.3, 4.1, 4.2) to "delete `docs/tech-debt/TD-<n>.md`". Verify: `just docs-build` passes, and the grep of task 3.3 is empty.
+
+## 5. Record the DF-46 sweep
+
+- [ ] 5.1 Add entries with `next-id` for items 6–10 of the DF-46 artifact `cleanup-patterns.md`:
+  - cast opt-outs for display values (`df-web/src/egress/log/rows.rs`, `df-web/src/artifacts/view.rs`);
+  - the wit-bindgen opt-out on the whole plugin crate (`plugins/{forgejo,github,test-probe}/src/lib.rs`);
+  - the icons follow-up in the lint reason (`df-web/src/components/icons.rs`);
+  - the hand-kept `excluded_tests` (`deploy/e2e/e2e-local.sh`);
+  - tests that run only in a manual environment (`df-k8s`, the live tests of `df-plugins`).
+
+  Re-check each against the code first and leave out any that is gone. Show the entries to the user before writing them. Verify: `check` passes, and `cargo xtask tech-debt for crates/df-web/src/components/icons.rs` lists the icons entry.
+
+## 6. Final checks
+
+- [ ] 6.1 Run `cargo test` and `cargo clippy` for `tools/xtask` (see the header), `cargo xtask tech-debt check`, `just docs-build` and `openspec validate --all --strict`. Verify: all pass.
+- [ ] 6.2 Published docs: none. The register is contributor documentation. `docs-site` keeps it unpublished, which `just docs-build` confirms in task 6.1.
