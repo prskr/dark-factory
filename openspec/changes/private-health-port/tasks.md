@@ -3,7 +3,6 @@
 ## 1. Verify first
 
 - [ ] 1.1 Verify the Cilium behavior for traffic from the local host to pods (option name `allow-localhost`, its default, and the `fromEntities` needed when host traffic is subject to policy) in the Cilium docs or source for the version the docs name; correct design D4 and the docs text of task 5 to what you find.
-- [ ] 1.2 Verify in the Kubernetes release notes which version adds the `GRPCContainerProbeTLS` feature gate and its default; write the result into ADR-0065 or drop the "(unverified)" mark if the docs are enough.
 
 ## 2. Control plane health listener (TDD)
 

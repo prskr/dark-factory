@@ -6,7 +6,7 @@
 
 ## Context
 
-The control plane served `/healthz` and `/readyz` on its UI port, which the ingress publishes, so anyone could make it ping the database. The gateway already served its probes on a separate health port that no Service exposes. Both binaries are gRPC services, and Kubernetes has native gRPC probes (`grpc.health.v1`, stable since v1.27). But the kubelet's gRPC probe connects in plaintext by default; its optional TLS mode (feature gate `GRPCContainerProbeTLS`) skips certificate verification and sends no client certificate. Every gRPC port of Dark Factory requires a client certificate from the instance CA.
+The control plane served `/healthz` and `/readyz` on its UI port, which the ingress publishes, so anyone could make it ping the database. The gateway already served its probes on a separate health port that no Service exposes. Both binaries are gRPC services, and Kubernetes has native gRPC probes (`grpc.health.v1`, stable since v1.27). But the kubelet's gRPC probe connects in plaintext by default; its optional TLS mode (feature gate `GRPCContainerProbeTLS`, alpha since v1.37, off by default) skips certificate verification and sends no client certificate. Every gRPC port of Dark Factory requires a client certificate from the instance CA.
 
 ## Decision
 
