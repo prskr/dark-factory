@@ -257,6 +257,9 @@ message AcpHarness {
   // Files the runtime writes below HOME before every start, overwriting what is on the PVC
   // (Claude Code settings and CLAUDE.md, OpenCode AGENTS.md). The system prompt is one of them.
   repeated HarnessFile files = 5;
+  // URL of the gateway's MCP endpoint (`https://<gateway>:<git port>/mcp`); the runtime registers
+  // the stdio server `ext` (`factory-agent mcp-relay`) for it. Empty: no third-party tools.
+  string mcp_endpoint = 6;
 }
 
 message HarnessFile {

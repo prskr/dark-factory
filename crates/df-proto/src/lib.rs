@@ -50,6 +50,31 @@ pub mod gateway {
                     .finish()
             }
         }
+        impl std::fmt::Debug for mcp_server::CredentialScheme {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    Self::Bearer(scheme) => f.debug_tuple("Bearer").field(scheme).finish(),
+                    Self::Header(scheme) => f.debug_tuple("Header").field(scheme).finish(),
+                    Self::Query(scheme) => f.debug_tuple("Query").field(scheme).finish(),
+                }
+            }
+        }
+
+        impl std::fmt::Debug for McpServer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                // The query may hold a token or a file id: print scheme, host and path only.
+                let url = self.url.split(['?', '#']).next().unwrap_or_default();
+                f.debug_struct("McpServer")
+                    .field("id", &self.id)
+                    .field("name", &self.name)
+                    .field("url", &url)
+                    .field("credential_ref", &self.credential_ref)
+                    .field("credential_scheme", &self.credential_scheme)
+                    .field("private_network", &self.private_network)
+                    .field("config_version", &self.config_version)
+                    .finish()
+            }
+        }
     }
 }
 
@@ -182,6 +207,30 @@ mod tests {
             format!("{snapshot:#?}"),
         ] {
             assert!(!debug.contains("sk-ant-secret"), "{debug}");
+        }
+    }
+
+    #[test]
+    fn mcp_server_debug_omits_the_url_query() {
+        use super::gateway::v1::{McpServer, Snapshot};
+        let server = McpServer {
+            id: "s1".into(),
+            name: "penpot".into(),
+            url: "https://design.example.com/mcp/stream?file=abc&token=sekret".into(),
+            ..Default::default()
+        };
+        let snapshot = Snapshot {
+            mcp_servers: [("s1".to_owned(), server.clone())].into(),
+            ..Default::default()
+        };
+        for debug in [format!("{server:?}"), format!("{snapshot:#?}")] {
+            assert!(!debug.contains("sekret"), "{debug}");
+            assert!(!debug.contains("file=abc"), "{debug}");
+            assert!(
+                debug.contains("https://design.example.com/mcp/stream"),
+                "{debug}"
+            );
+            assert!(debug.contains("penpot"), "{debug}");
         }
     }
 

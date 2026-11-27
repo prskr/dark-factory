@@ -11,6 +11,7 @@ pub mod host;
 pub mod ids;
 pub mod keys;
 pub mod lifecycle;
+pub mod mcp;
 pub mod model_provider;
 pub mod persona;
 pub mod public_address;

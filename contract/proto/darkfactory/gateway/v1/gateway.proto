@@ -15,8 +15,8 @@
 //     denials with ReportDenial (iter2-egress-approvals design D2).
 //   * GatewayUsage (served by the control plane): the inference endpoint reports the token usage
 //     of every model request with Report (iter3-inference-gateway design D4).
-//
-// Versions of PolicyUpdate increase monotonically (a database sequence). A gateway that sees a
+//   * GatewayMcp (served by the control plane): the MCP endpoint reports one record per tool call
+//     with Report (iter4-mcp-gateway design D9). of PolicyUpdate increase monotonically (a database sequence). A gateway that sees a
 // gap or reconnects replaces its policy with the next snapshot it receives and enforces its last
 // snapshot while it has none.
 
@@ -55,6 +55,12 @@ service GatewayUsage {
   rpc Report(UsageBatch) returns (ReportUsageResponse);
 }
 
+service GatewayMcp {
+  // Stores the call records of a batch. Idempotent by `McpCallRecord.call_id`: a record that is
+  // already stored is ignored; records of unknown runs are dropped.
+  rpc Report(McpCallBatch) returns (ReportMcpCallsResponse);
+}
+
 // ---------------------------------------------------------------------------
 // Policy
 // ---------------------------------------------------------------------------
@@ -77,9 +83,11 @@ message Snapshot {
   // project has an entry; the control plane fills in the defaults for a project without a stored
   // policy.
   map<string, PushPolicy> push_policies = 3;
-  // Credentials of the model providers the inference routes use, keyed by
-  // `InferenceRoute.credential_ref`.
+  // Credentials the inference routes and the MCP servers use, keyed by
+  // `InferenceRoute.credential_ref` and `McpServer.credential_ref`.
   map<string, ProviderCredential> provider_credentials = 4;
+  // MCP servers enabled for at least one active run, keyed by server id.
+  map<string, McpServer> mcp_servers = 5;
 }
 
 // An active sandbox: where its traffic comes from and what it may reach.
@@ -99,6 +107,8 @@ message SandboxEntry {
   repeated string exceptions = 9;
   // The model provider the run's harness talks to through the inference endpoint; unset if none.
   InferenceRoute inference = 10;
+  // Ids of the MCP servers enabled for the run's project (keys of `Snapshot.mcp_servers`).
+  repeated string mcp_server_ids = 11;
 }
 
 // The API protocol of a model endpoint.
@@ -470,3 +480,75 @@ message UsageRecord {
 }
 
 message ReportUsageResponse {}
+
+// ---------------------------------------------------------------------------
+// MCP
+// ---------------------------------------------------------------------------
+
+// An upstream MCP server (iter4-mcp-gateway design D7). The URL may carry a query, so the Rust
+// `Debug` prints it without.
+message McpServer {
+  string id = 1;
+  string name = 2;
+  // May contain path and query parameters.
+  string url = 3;
+  // Key into `Snapshot.provider_credentials`.
+  string credential_ref = 4;
+  // How the credential is sent; unset is treated like a missing credential.
+  oneof credential_scheme {
+    // `Authorization: Bearer <value>`
+    McpBearerScheme bearer = 5;
+    // `<name>: <prefix><value>`
+    McpHeaderScheme header = 6;
+    // `?<parameter>=<value>`, URL-encoded
+    McpQueryScheme query = 7;
+  }
+  // Skip the private-address check.
+  bool private_network = 8;
+  // Increases on every edit; upstream sessions end when it changes.
+  uint64 config_version = 9;
+}
+
+message McpBearerScheme {}
+
+message McpHeaderScheme {
+  string name = 1;
+  string prefix = 2;
+}
+
+message McpQueryScheme {
+  string parameter = 1;
+}
+
+message McpCallBatch {
+  // Name of the reporting gateway pod, for logs.
+  string gateway_pod = 1;
+  repeated McpCallRecord records = 2;
+}
+
+// One `tools/call`, or one server left out of a `tools/list` (tool `tools/list`).
+message McpCallRecord {
+  // UUIDv7 chosen by the gateway; idempotency key of the record.
+  string call_id = 1;
+  string run_id = 2;
+  google.protobuf.Timestamp started_at = 3;
+  string server_name = 4;
+  string tool = 5;
+  McpCallOutcome outcome = 6;
+  uint64 duration_ms = 7;
+  uint64 request_bytes = 8;
+  uint64 response_bytes = 9;
+}
+
+enum McpCallOutcome {
+  MCP_CALL_OUTCOME_UNSPECIFIED = 0;
+  MCP_CALL_OUTCOME_OK = 1;
+  MCP_CALL_OUTCOME_TOOL_ERROR = 2;
+  MCP_CALL_OUTCOME_REJECTED = 3;
+  MCP_CALL_OUTCOME_UPSTREAM_ERROR = 4;
+  MCP_CALL_OUTCOME_TIMEOUT = 5;
+  MCP_CALL_OUTCOME_TOO_LARGE = 6;
+  MCP_CALL_OUTCOME_CANCELLED = 7;
+}
+
+message ReportMcpCallsResponse {}

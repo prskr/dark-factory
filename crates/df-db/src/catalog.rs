@@ -433,6 +433,61 @@ pub async fn save_credential_ref(
     Ok(row.into())
 }
 
+/// Deletes a credential reference nothing uses and audits it. One a project (as forge
+/// credential), a model provider or an MCP server uses is a [`DbError::Conflict`] naming the user.
+pub async fn delete_credential_ref(
+    pool: &PgPool,
+    actor: Actor<'_>,
+    id: Uuid,
+) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    let (name,): (String,) =
+        sqlx::query_as("SELECT name FROM credential_refs WHERE id = $1 FOR UPDATE")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| DbError::NotFound(format!("credential reference `{id}`")))?;
+    let servers = crate::mcp_servers::servers_using_credential(&mut *tx, id).await?;
+    let projects: Vec<String> =
+        sqlx::query_scalar("SELECT key FROM projects WHERE forge_credential_id = $1 ORDER BY key")
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+    let providers: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM model_providers WHERE credential_ref_id = $1 ORDER BY name",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (what, users) in [
+        ("MCP server", servers),
+        ("project", projects),
+        ("model provider", providers),
+    ] {
+        if !users.is_empty() {
+            return Err(DbError::Conflict(format!(
+                "credential `{name}` is used by {what} {}",
+                users.join(", ")
+            )));
+        }
+    }
+    sqlx::query("DELETE FROM credential_refs WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    let entry = NewAuditEntry::new(
+        actor.principal.clone(),
+        actor.roles.to_vec(),
+        "credential_ref.delete",
+        "credential_ref",
+        &name,
+    )
+    .with_details(&serde_json::json!({ "id": id }))?;
+    write_audit_entry(&mut *tx, &entry).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Creates or updates a project and audits the change. Changing the key of an existing project
 /// is a [`DbError::Conflict`].
 pub async fn save_project(
@@ -486,6 +541,9 @@ async fn save_project_in(
     for glob in &input.agent_branch_globs {
         protected_glob(glob)
             .map_err(|error| DbError::InvalidData(format!("agent branch `{glob}`: {error}")))?;
+    }
+    if let Some(credential) = input.forge_credential_id {
+        crate::mcp_servers::check_credential_not_used_by_a_server(&mut **tx, credential).await?;
     }
     // The key is set at creation and never changes: task keys (DF-1) and branches derive from it.
     if let Some(b) = &before
