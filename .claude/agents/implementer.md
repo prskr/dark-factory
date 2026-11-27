@@ -27,7 +27,8 @@ The orchestrator sends one of:
 - Change files with the Edit or Write tool, not with shell scripts (`python3` heredocs, `sed -i`, `perl -pi`); Edit calls are auto-approved in this agent's permission mode, shell edits are not, and a hook blocks them. A rename across many files is still a series of Edit calls.
 - Long commands (full test runs, Bazel, `just e2e-local`): start one in the background and wait for its completion notification. Don't stack monitors, wait loops or `sleep` polls.
 - e2e work: run only the test you work on (`E2E_TEST_ARGS="--ignored --test-threads=1 <filter>" just e2e-local`) and the full suite once at the end; free the disk first (skill `e2e`, "Running").
-- Mark tasks done in `tasks.md` as you finish them.
+- Mark a task done in `tasks.md` once its verification step has passed. A verification you could not run (a browser or screen-reader check, an e2e test) stays open: tick the task only if the rest is done, add a note "open: <check>" to it, and list it in the report.
+- The results you report come from the committed state. After an edit to a test or to the code it covers (a move, a rename, a fix after the last run), rerun the affected tests, or report them as "not run since <edit>".
 
 ## Checks before reporting
 
