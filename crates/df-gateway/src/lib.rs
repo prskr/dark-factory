@@ -12,6 +12,7 @@ pub mod git;
 pub mod health;
 pub mod inference;
 pub mod link;
+pub mod mcp;
 pub mod metrics;
 pub mod peer;
 pub mod policy;

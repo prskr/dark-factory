@@ -68,6 +68,13 @@ fn resolver_options(mut system: ResolverOpts) -> ResolverOpts {
 pub struct BlockedRanges(Vec<IpNet>);
 
 impl BlockedRanges {
+    /// No range is blocked: for tests that reach a fake upstream on the loopback address through
+    /// the destination check.
+    #[cfg(test)]
+    pub(crate) fn none() -> Self {
+        Self(Vec::new())
+    }
+
     /// The built-in ranges plus `extra` (the cluster's pod and Service CIDRs), as CIDR strings.
     pub fn new<'a>(
         extra: impl IntoIterator<Item = &'a str>,

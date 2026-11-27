@@ -3,6 +3,7 @@
 //! Public because `df-gateway-control` is the other end of the gateway link and uses the
 //! `*_to_proto` conversions and `wire_api_from_proto`.
 
+use df_core::mcp::McpCallOutcome;
 use df_core::model_provider::{CredentialScheme, WireApi};
 use df_proto::gateway::v1 as pb;
 
@@ -52,9 +53,50 @@ pub const fn scheme_to_proto(scheme: CredentialScheme) -> pb::CredentialScheme {
     }
 }
 
+/// The call outcome in the wire contract.
+pub const fn mcp_outcome_to_proto(outcome: McpCallOutcome) -> pb::McpCallOutcome {
+    match outcome {
+        McpCallOutcome::Ok => pb::McpCallOutcome::Ok,
+        McpCallOutcome::ToolError => pb::McpCallOutcome::ToolError,
+        McpCallOutcome::Rejected => pb::McpCallOutcome::Rejected,
+        McpCallOutcome::UpstreamError => pb::McpCallOutcome::UpstreamError,
+        McpCallOutcome::Timeout => pb::McpCallOutcome::Timeout,
+        McpCallOutcome::TooLarge => pb::McpCallOutcome::TooLarge,
+        McpCallOutcome::Cancelled => pb::McpCallOutcome::Cancelled,
+    }
+}
+
+/// The call outcome of the wire contract, `None` if unspecified or unknown.
+///
+/// Public for `df-gateway-control`, the other end of the gateway link.
+pub fn mcp_outcome_from_proto(outcome: i32) -> Option<McpCallOutcome> {
+    match pb::McpCallOutcome::try_from(outcome).ok()? {
+        pb::McpCallOutcome::Ok => Some(McpCallOutcome::Ok),
+        pb::McpCallOutcome::ToolError => Some(McpCallOutcome::ToolError),
+        pb::McpCallOutcome::Rejected => Some(McpCallOutcome::Rejected),
+        pb::McpCallOutcome::UpstreamError => Some(McpCallOutcome::UpstreamError),
+        pb::McpCallOutcome::Timeout => Some(McpCallOutcome::Timeout),
+        pb::McpCallOutcome::TooLarge => Some(McpCallOutcome::TooLarge),
+        pb::McpCallOutcome::Cancelled => Some(McpCallOutcome::Cancelled),
+        pb::McpCallOutcome::Unspecified => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn call_outcomes_survive_the_trip_through_the_wire_contract() {
+        for outcome in McpCallOutcome::ALL {
+            assert_eq!(
+                mcp_outcome_from_proto(mcp_outcome_to_proto(outcome).into()),
+                Some(outcome)
+            );
+        }
+        assert_eq!(mcp_outcome_from_proto(0), None);
+        assert_eq!(mcp_outcome_from_proto(99), None);
+    }
 
     #[test]
     fn wire_apis_and_schemes_survive_the_trip_through_the_wire_contract() {

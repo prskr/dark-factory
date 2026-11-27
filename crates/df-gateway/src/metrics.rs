@@ -17,6 +17,7 @@ pub struct Metrics {
     inference_requests: Counter<u64>,
     inference_duration: Histogram<f64>,
     usage_dropped: Counter<u64>,
+    mcp_calls_dropped: Counter<u64>,
 }
 
 impl Default for Metrics {
@@ -57,6 +58,10 @@ impl Metrics {
             usage_dropped: meter
                 .u64_counter("df.gateway.inference.usage_dropped")
                 .with_description("Usage records dropped because the buffer was full or refused")
+                .build(),
+            mcp_calls_dropped: meter
+                .u64_counter("df.gateway.mcp.calls_dropped")
+                .with_description("MCP call records dropped because the buffer was full or refused")
                 .build(),
         }
     }
@@ -116,6 +121,11 @@ impl Metrics {
     /// `count` usage records were dropped.
     pub(crate) fn usage_dropped(&self, count: u64) {
         self.usage_dropped.add(count, &[]);
+    }
+
+    /// `count` MCP call records were dropped.
+    pub(crate) fn mcp_calls_dropped(&self, count: u64) {
+        self.mcp_calls_dropped.add(count, &[]);
     }
 
     /// A snapshot with `version` was applied.

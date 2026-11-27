@@ -116,7 +116,32 @@ impl UpstreamConnector {
         B::Data: Send,
         B::Error: Into<BoxError>,
     {
-        let stream = tokio::time::timeout(CONNECT_TIMEOUT, self.connect(url))
+        let destination = Destination {
+            host: url.host(),
+            port: url.port(),
+            https: url.is_https(),
+            address: None,
+        };
+        self.open_to(&destination).await
+    }
+
+    /// Whether `http://` URLs are used (`network.allowPlainHttp`).
+    pub(crate) fn allows_plain_http(&self) -> bool {
+        self.allow_plain_http
+    }
+
+    /// Like [`Self::open`] for a [`Destination`]: with an `address`, the connection goes there
+    /// and the host only names the TLS server.
+    pub(crate) async fn open_to<B>(
+        &self,
+        destination: &Destination<'_>,
+    ) -> Result<(SendRequest<B>, ConnectionTask), ConnectError>
+    where
+        B: hyper::body::Body + Send + 'static,
+        B::Data: Send,
+        B::Error: Into<BoxError>,
+    {
+        let stream = tokio::time::timeout(CONNECT_TIMEOUT, self.connect(destination))
             .await
             .map_err(|_elapsed| ConnectError::TimedOut)?
             .map_err(ConnectError::Failed)?;
@@ -131,16 +156,32 @@ impl UpstreamConnector {
         Ok((sender, task))
     }
 
-    /// Opens a connection to the host of `url`, TLS if it is `https`, without a timeout.
-    async fn connect(&self, url: &UpstreamUrl) -> Result<Box<dyn UpstreamIo>, BoxError> {
-        let host = url.host();
-        let stream = TcpStream::connect((host, url.port())).await?;
-        if !url.is_https() {
+    /// Opens a connection to the destination, TLS if it is `https`, without a timeout.
+    async fn connect(
+        &self,
+        destination: &Destination<'_>,
+    ) -> Result<Box<dyn UpstreamIo>, BoxError> {
+        let host = destination.host;
+        let stream = match destination.address {
+            Some(address) => TcpStream::connect((address, destination.port)).await?,
+            None => TcpStream::connect((host, destination.port)).await?,
+        };
+        if !destination.https {
             return Ok(Box::new(stream));
         }
         let name = ServerName::try_from(host.to_owned())?;
         Ok(Box::new(self.connector.connect(name, stream).await?))
     }
+}
+
+/// Where [`UpstreamConnector::open_to`] connects.
+pub(crate) struct Destination<'a> {
+    /// Host name or IP literal (without brackets); names the TLS server.
+    pub(crate) host: &'a str,
+    pub(crate) port: u16,
+    pub(crate) https: bool,
+    /// Connect to this address instead of resolving `host`.
+    pub(crate) address: Option<std::net::IpAddr>,
 }
 
 /// An upstream URL the gateway may use: https (or http with `network.allowPlainHttp`), without

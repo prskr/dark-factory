@@ -577,10 +577,18 @@ async fn run_gateway_command(
     let push = df_gateway::git::push::Push::new(Arc::new(mirrors), &mirror_dir, max_push_size)
         .with_checks(checks)
         .with_recorder(recorder.clone());
-    let (inference, usage) = inference_endpoint(&outside, &settings, upstream_connector);
+    let (inference, usage) = inference_endpoint(&outside, &settings, upstream_connector.clone());
+    let (mcp, calls) = mcp_endpoint(
+        &outside,
+        &settings,
+        upstream_connector,
+        &cfg.gateway.blocked_cidrs,
+    )?;
+    let janitor = tokio::spawn(mcp.clone().run_janitor(policy_rx.clone(), shutdown.clone()));
     let git = Arc::new(
         df_gateway::git::server::GitEndpoint::new(policy_rx, Arc::new(upstream), Arc::new(push))
-            .with_inference(inference),
+            .with_inference(inference)
+            .with_mcp(mcp),
     );
     let git_task = tokio::spawn(git.serve(
         git_listener,
@@ -604,6 +612,8 @@ async fn run_gateway_command(
     }
     recorder.shutdown(RECORD_DRAIN_GRACE).await;
     usage.shutdown(RECORD_DRAIN_GRACE).await;
+    calls.shutdown(RECORD_DRAIN_GRACE).await;
+    janitor.abort();
     signals.abort();
     Ok(result?)
 }
@@ -630,6 +640,35 @@ fn inference_endpoint(
         settings.metrics.clone(),
     ));
     (inference, usage)
+}
+
+/// The MCP endpoint of a gateway pod and the reporter that sends its call records. Public
+/// servers are checked against the built-in blocked ranges and `blocked_cidrs`.
+fn mcp_endpoint(
+    outside: &df_gateway::gateway::Outside,
+    settings: &df_gateway::gateway::Settings,
+    connector: df_gateway::upstream::UpstreamConnector,
+    blocked_cidrs: &[String],
+) -> anyhow::Result<(
+    Arc<df_gateway::mcp::Mcp>,
+    Arc<df_gateway::mcp::report::CallReporter>,
+)> {
+    let calls = Arc::new(df_gateway::mcp::report::CallReporter::new(
+        outside.connector.clone(),
+        settings.control_plane.clone(),
+        settings.pod.clone(),
+        settings.metrics.clone(),
+        df_gateway::inference::report::Timing::default(),
+    ));
+    let blocked = df_gateway::resolve::BlockedRanges::new(blocked_cidrs.iter().map(String::as_str))
+        .context("invalid `gateway.blockedCidrs`")?;
+    let mcp = Arc::new(df_gateway::mcp::Mcp::new(
+        connector,
+        outside.resolver.clone(),
+        blocked,
+        calls.clone(),
+    ));
+    Ok((mcp, calls))
 }
 
 /// The gateway's connection settings for upstreams (forges for Git, model providers for inference),
