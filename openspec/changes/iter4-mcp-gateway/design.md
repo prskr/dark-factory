@@ -239,21 +239,28 @@ Closing the gap is not part of this slice: it belongs to `iter4-mcp-catalog` tog
 
 Additive: new tables, new proto fields, new endpoint, new runtime subcommand. A run without enabled servers behaves as before. Rollback: disable all servers (no `Assign.mcp_endpoint`); the migration has a down path that drops the new tables. Release notes name the new page and the docs.
 
-## Decisions to confirm (open questions with recommendation)
+## Decisions (Peter Kurfer)
 
-Taken on 2026-11-25 (Peter Kurfer): gateway first with all tools forwarded (D1); the "Private network" switch instead of a fixed private-address check (D3); the stdio relay through the runtime instead of an HTTP server in the harness (D8).
+Taken on 2026-11-25: gateway first with all tools forwarded (D1); the "Private network" switch instead of a fixed private-address check (D3); the stdio relay through the runtime instead of an HTTP server in the harness (D8).
+
+Taken on 2026-11-27:
+
+| # | Question | Decision |
+|---|---|---|
+| Q1 | Enable servers per project or per persona, opt-in or opt-out? | Per project, opt-in (D1, amends ADR-0032). Persona grants later intersect with it. |
+| Q2 | Write tools until the catalog? | No block of write tools; the form warning, the documented rule (read-only tokens, no forge write tokens), and the guard that the factory's own forge and model credentials cannot be used for MCP servers. The MCP annotations `readOnlyHint` / `destructiveHint` are hints from the upstream, not a boundary; the catalog may use them to preselect, never to grant. |
+| Q3 | Store call arguments or results? | No. Size and outcome only; the transcript has the payloads. |
+| Q4 | Who registers servers and enables them per project? | The existing `admin` role, for both (D10); `credential:manage` after `iter4-permissions`. |
+| Q5 | One credential per server per instance? | Yes, with the consequences documented. Per-project credentials and rate limits are in the backlog. |
+| Q6 | Apply the private-address check to inference and Git upstreams too? | No, not in this change. |
+| Q8 | Server name `ext` and separator `__`? | Yes. |
+| Q9 | PenPot designs for the three screens? | Yes, drawn when the change is prepared for implementation (task group 6, first task). |
+
+Still open:
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q1 | Enable servers per project or per persona, opt-in or opt-out? | Per project, opt-in (D1, amends ADR-0032). A server is an external system with its own data; which projects may reach it is the blast-radius decision, and it matches the egress rules. Persona grants later intersect with it. |
-| Q2 | Write tools until the catalog? | No block of write tools; the form warning, the documented rule (read-only tokens, no forge write tokens), and the guard that the factory's own forge and model credentials cannot be used for MCP servers. |
-| Q3 | Store call arguments or results? | No. Size and outcome only; the transcript has the payloads. |
-| Q4 | Who registers servers and enables them per project? | Users with the existing `admin` role, for both (D10); `credential:manage` after `iter4-permissions`. |
-| Q5 | One credential per server per instance? | Yes, with the consequences documented. Per-project credentials and rate limits to the backlog. |
-| Q6 | Apply the private-address check to inference and Git upstreams too? | No, not in this change; in-cluster model routers are a real case there. |
-| Q7 | Limits fixed or configurable? | Fixed constants (as for inference). |
-| Q8 | Server name `ext` and separator `__`? | Yes; short because of the 64-character tool name limit. |
-| Q9 | PenPot designs for the three screens? | Not required; they follow the model provider form and the egress tab. |
+| Q7 | The limits (request 1 MiB, result 4 MiB, tool list 1,000 tools / 4 MiB per server, connect 10 s, list 15 s per server and 20 s overall, list cache 60 s, call 120 s, 8 concurrent calls per run and gateway pod, upstream session idle 10 min): fixed constants or settings? | Fixed constants in the code for this slice, as for inference. A setting (instance-wide or per server) when a real server needs more, most likely the call timeout and the result size. |
 
 ## Open Questions
 
