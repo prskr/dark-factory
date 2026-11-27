@@ -209,9 +209,18 @@ async fn without_the_field_script_the_system_prompt_is_a_plain_text_field() -> R
 
             // A labelled text field, no view switch, no editor: Alpine cannot evaluate what the
             // missing component defines, and the field and its switch must not follow that.
-            expect(world.session.system_prompt_editor())
-                .to_be_visible()
-                .await?;
+            expect(
+                page.get_by_role(
+                    AriaRole::Textbox,
+                    Some(
+                        GetByRoleOptions::default()
+                            .name("System prompt")
+                            .exact(true),
+                    ),
+                ),
+            )
+            .to_be_visible()
+            .await?;
             expect(page.locator(TEXT_FIELD)).to_be_visible().await?;
             expect(view(page, "Preview")).to_be_hidden().await?;
             expect(view(page, "Split")).to_be_hidden().await?;
@@ -1046,6 +1055,12 @@ async fn a_failed_editor_load_leaves_the_text_field_with_its_preview() -> Result
             refuse_script(page, "**/assets/editor.js*").await?;
             open_prompt_tab(&world, "md-nobundle", 1440).await?;
 
+            // The field's component runs (it opens on Split): text filled in before it listens is
+            // never previewed.
+            expect(view(page, "Split"))
+                .to_have_attribute("aria-checked", "true")
+                .await
+                .context("the field's script runs")?;
             expect(page.locator(TEXT_FIELD)).to_be_visible().await?;
             expect(page.locator(".cm-editor")).to_have_count(0).await?;
             expect(highlighting(page)).to_be_hidden().await?;
