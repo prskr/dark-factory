@@ -185,8 +185,8 @@ impl Filters {
 
 /// The rows of the task list; replaced as a whole when a task changes. `current` is the open
 /// task. Clicking a row swaps the transcript and details of that task in without touching the
-/// list; the click shows the task pane on phones, `aria-current` is moved once that load
-/// succeeded and ignored by the live morph (see `layout`).
+/// list; once that load succeeded the phone shows the task pane and `aria-current` moves, which
+/// the live morph ignores (see `layout`).
 pub(crate) fn task_rows(
     items: &[TaskListItem],
     current: Option<&str>,
@@ -203,7 +203,7 @@ pub(crate) fn task_rows(
                     a href=(href) hx-get=(href) hx-target=(Region::WsDetail.selector()) hx-select=(Region::WsDetail.selector()) hx-swap="outerHTML" hx-push-url="true"
                         data-focus-after-swap=(Region::TaskHead.selector())
                         aria-current=[(current == Some(t.key.as_str())).then_some("page")]
-                        "x-on:click"="showPane()" "x-on:htmx:after:swap.document"="selected($el, $event)"
+                        "x-on:htmx:after:swap.document"="selected($el, $event)"
                         class="block min-h-11 border-b border-line border-l-[3px] border-l-transparent py-3.5 pr-5 pl-[17px] hover:bg-sunk aria-[current=page]:border-l-accent aria-[current=page]:bg-accent-soft" {
                         div class="flex items-center gap-2" {
                             span class="font-mono text-xs text-faint" { (t.key) }

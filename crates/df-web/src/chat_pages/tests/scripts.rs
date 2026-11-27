@@ -82,9 +82,9 @@ async fn chat_rows_select_themselves_and_hand_focus_to_the_head_after_loading() 
 
     assert!(html.contains("<div id=\"chat-rows\" data-rows>"), "{html}");
     let row = super::row(&html, "DF-1-CHAT");
-    // The click shows the chat pane (phone) before the focus moves to its head; the row is
-    // marked once its chat loaded, so a failed load leaves the open chat's row marked.
-    assert!(row.contains("x-on:click=\"showPane()\""), "{row}");
+    // Marked and shown (phone) once its chat loaded: a failed load leaves the list, the open
+    // chat's row and the focus on the row as they are.
+    assert!(!row.contains("x-on:click"), "{row}");
     assert!(
         row.contains("x-on:htmx:after:swap.document=\"selected($el, $event)\""),
         "{row}"
@@ -106,12 +106,21 @@ fn both_workspaces_mark_a_row_only_after_its_own_request_succeeded() {
         );
         assert!(js.contains("ctx?.sourceElement !== row"), "{source}");
         assert!(js.contains("status < 400"), "{source}");
-        // The pane switches on the click, before `focusAfterSwap.ts` focuses the head in it.
         let selected = &js[js.find("selected(row: HTMLElement").unwrap()..];
         let selected = &selected[..selected.find("\n    },").unwrap()];
-        assert!(!selected.contains("dataset.view"), "{source}: {selected}");
-        assert!(js.contains("showPane(): void"), "{source}");
+        assert!(
+            selected.contains("dataset.view = 'task'"),
+            "{source}: {selected}"
+        );
     }
+}
+
+#[test]
+fn focus_after_a_row_load_waits_until_every_listener_showed_the_pane() {
+    // `focusAfterSwap.ts` listens before Alpine: focusing right away would hit the head of a pane
+    // the phone does not show yet, because `selected()` switches the pane after it.
+    let js = script_source("focusAfterSwap.ts");
+    assert!(js.contains("queueMicrotask("), "{js}");
 }
 
 #[test]

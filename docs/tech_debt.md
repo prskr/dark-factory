@@ -860,7 +860,7 @@ Origin of TD-132: code review of `web-htmx-robustness` (`df-web`, 2026-11-27). T
 
 `crates/df-web/scripts/workspace.ts`, `crates/df-web/scripts/chatLayout.ts`
 
-Both components carry the same `showPane()` (on the click: set `body.dataset.view = 'task'`, close the details) and `selected(row, event)`: once the row's own load succeeded, clear the marked row of `row.closest('[data-rows]')` and mark the new one. The tests `both_workspaces_clear_the_marked_row_of_their_own_list_only` and `both_workspaces_mark_a_row_only_after_its_own_request_succeeded` have to check both copies.
+Both components carry the same `selected(row, event)`: once the row's own load succeeded, set `body.dataset.view = 'task'`, close the details, clear the marked row of `row.closest('[data-rows]')` and mark the new one. The tests `both_workspaces_clear_the_marked_row_of_their_own_list_only` and `both_workspaces_mark_a_row_only_after_its_own_request_succeeded` have to check both copies.
 
 **Matters when:** a third list view needs row selection, or the selection behaviour changes; both copies must change in step.
 

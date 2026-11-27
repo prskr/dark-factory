@@ -546,9 +546,9 @@ fn a_task_row_selects_itself_and_hands_focus_to_the_head_after_loading() {
 
     let html = task_rows(&[list_item("DF-21")], None, &filters).into_string();
 
-    // The click shows the task pane (phone) before the focus moves to its head; the row is
-    // marked once its task loaded, so a failed load leaves the open task's row marked.
-    assert!(html.contains("x-on:click=\"showPane()\""), "{html}");
+    // Marked and shown (phone) once its task loaded: a failed load leaves the list, the open
+    // task's row and the focus on the row as they are.
+    assert!(!html.contains("x-on:click"), "{html}");
     assert!(
         html.contains("x-on:htmx:after:swap.document=\"selected($el, $event)\""),
         "{html}"
