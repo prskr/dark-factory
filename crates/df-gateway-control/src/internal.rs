@@ -3,6 +3,7 @@
 
 use df_proto::gateway::v1::gateway_events_server::GatewayEventsServer;
 use df_proto::gateway::v1::gateway_git_server::GatewayGitServer;
+use df_proto::gateway::v1::gateway_mcp_server::GatewayMcpServer;
 use df_proto::gateway::v1::gateway_policy_server::GatewayPolicyServer;
 use df_proto::gateway::v1::gateway_usage_server::GatewayUsageServer;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use tonic::transport::Server;
 
 use super::denial_events::DenialEvents;
 use super::git_records::{GitRecords, scan_stale_pushes};
+use super::mcp_calls::McpCalls;
 use super::policy_service::PolicyService;
 use super::usage_records::{TokenCounter, UsageRecords};
 use df_gateway::peer::require_dns_san;
@@ -46,6 +48,7 @@ where
     let records = GitRecords::new(service.pool.clone());
     let denials = DenialEvents::new(service.pool.clone());
     let usage = UsageRecords::new(service.pool.clone(), tokens);
+    let calls = McpCalls::new(service.pool.clone());
     let scan = tokio::spawn(scan_stale_pushes(service.pool.clone(), shutdown.clone()));
     let served = Server::builder()
         .add_service(GatewayPolicyServer::with_interceptor(
@@ -57,7 +60,8 @@ where
             denials,
             guard.clone(),
         ))
-        .add_service(GatewayUsageServer::with_interceptor(usage, guard))
+        .add_service(GatewayUsageServer::with_interceptor(usage, guard.clone()))
+        .add_service(GatewayMcpServer::with_interceptor(calls, guard))
         .serve_with_incoming_shutdown(incoming, shutdown.clone().cancelled_owned())
         .await;
     scan.abort();

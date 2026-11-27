@@ -13,6 +13,8 @@ pub mod denial_events;
 pub mod git_records;
 mod inference_routes;
 pub mod internal;
+pub mod mcp_calls;
+mod mcp_servers;
 pub mod policy_service;
 pub mod relay;
 pub mod snapshot;

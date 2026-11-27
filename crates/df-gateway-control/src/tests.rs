@@ -25,6 +25,8 @@ use super::snapshot::{self, GitSettings};
 use super::{PolicyService, serve_internal};
 use df_gateway::link::{GrpcConnector, MtlsConnector};
 
+mod mcp;
+
 /// Tokens are not checked here.
 struct NoTokens;
 

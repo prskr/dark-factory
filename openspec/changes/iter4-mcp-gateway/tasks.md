@@ -24,9 +24,9 @@
 
 ## 4. Control plane
 
-- [ ] 4.1 Snapshot: `df-gateway-control` adds the MCP servers of active runs (with `private_network` and `config_version`) and per-run server ids, and resolves their credentials into `provider_credentials` once each, tests first for the `egress-policy-distribution` scenarios. Publish the policy notification on every MCP change (server save/delete, project enablement). Verify: `cargo nextest run -p df-gateway-control snapshot` (container-backed).
-- [ ] 4.2 `GatewayMcp.Report` service storing call records, tests first (stored, duplicate ignored, unknown run dropped and counted). Register it in `serve_internal`. Verify: `cargo nextest run -p df-gateway-control mcp` (container-backed).
-- [ ] 4.3 `Assign`: `df-agent-channel` sets `AcpHarness.mcp_endpoint` for runs whose project has an enabled server, chats included, tests first for the `run-orchestration` scenarios and for the mcp-servers scenario "First server enabled during a run" (the first `Assign` of a run started without enabled servers has no endpoint, the runtime does not add `ext` to an existing session, and the next run's `Assign` has the endpoint). Verify: `cargo nextest run -p df-agent-channel assign` (container-backed).
+- [x] 4.1 Snapshot: `df-gateway-control` adds the MCP servers of active runs (with `private_network` and `config_version`) and per-run server ids, and resolves their credentials into `provider_credentials` once each, tests first for the `egress-policy-distribution` scenarios. Publish the policy notification on every MCP change (server save/delete, project enablement). Verify: `cargo nextest run -p df-gateway-control snapshot` (container-backed).
+- [x] 4.2 `GatewayMcp.Report` service storing call records, tests first (stored, duplicate ignored, unknown run dropped and counted). Register it in `serve_internal`. Verify: `cargo nextest run -p df-gateway-control mcp` (container-backed).
+- [x] 4.3 `Assign`: `df-agent-channel` sets `AcpHarness.mcp_endpoint` for runs whose project has an enabled server, chats included, tests first for the `run-orchestration` scenarios and for the mcp-servers scenario "First server enabled during a run" (the first `Assign` of a run started without enabled servers has no endpoint, the runtime does not add `ext` to an existing session, and the next run's `Assign` has the endpoint). Verify: `cargo nextest run -p df-agent-channel assign` (container-backed).
 
 ## 5. Runtime
 
