@@ -62,3 +62,11 @@ User decision: none needed (no open finding)
 - Docs: `just docs-build` (via build/with_tools.sh docs/publish.sh) ok. Pages added: docs/content/security/mcp-endpoint.md, docs/content/using/mcp-servers.md; changed: architecture/agent-runs.md, authentication/_index.md, observability/telemetry.md, security/_index.md, security/egress-gateway.md, using/_index.md; contributor docs: docs/authorization.md, docs/demo.md, design/egress.md, docs/adr/0032, product/iterations/iteration-4.md.
 - Tech debt: none (no P2 finding). Roadmap: the four backlog rows of the change already exist.
 - Open tasks: 1.2 (harness facts: source/doc findings in design.md "Spike results"), 8.2 (manual runs against Claude Code and OpenCode with Context7 and a private-network server).
+
+## PR review round 4 (2026-11-27, maintainer, full range 1947ce52...71edcc7)
+
+- Security: no findings. Standards S8–S20, S22 and Spec P6–P10, P12 inline on PR #410; not raised: S21, P11, P13, P14.
+- User decision: fix all inline comments; P6 option 1 (no credential reference deletion; spec changed in 2f2b078c).
+- Fix round 3 sent to the implementer (run 2e7ba58f).
+- Implementer: 079a4508 (fix round 3: S8–S20, S22, P6–P10, P12; S15 partly: `credentials_for` shared, `McpCalls`/`UsageRecords` kept apart for readability), then 1e1bd756 (S23, P15). Checks fmt/clippy/machete/check-crates/check-test-names/Bazel/openspec/docs ok; tests of touched crates pass except the known macOS failures; factory-agent only `mcp_relay` tests (full crate hangs on macOS); e2e compiled, not run (user's manual cluster).
+- Review of 71edcc71...079a4508: Security 0. Standards: all fixed; S9 polling loop with a 10 s bound kept (waits on the condition, no timing assertion); new S23 (yield-based abort test) fixed in 1e1bd756. Spec: all fixed; new P15 (`tools/list` label for a rejected unprefixed name) fixed in 1e1bd756.
