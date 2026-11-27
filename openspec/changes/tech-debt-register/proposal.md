@@ -53,6 +53,7 @@ None.
 - `docs/tech_debt.md` removed. New `docs/tech-debt/` (one file per entry, 72 on `main` today, `README.md`, `accepted.md`, `NEXT_ID`).
 - `tools/xtask`: new module `src/tech_debt.rs` and dispatch in `src/main.rs`. It uses the existing `toml`, `serde` and `anyhow`, so no new dependency.
 - `lefthook.yml` (pre-commit `tech-debt-check`), `.github/workflows/ci.yaml` ("Repository checks").
+- `docs/links_test.sh`: the "not published" check names `tech-debt` instead of `tech_debt`.
 - Rules for agents: `openspec/config.yaml` (`context`), `.claude/skills/implement-change/SKILL.md` (preflight gate, step 7.4), `.claude/skills/code-review/SKILL.md` (steps 3 and 4), `.claude/agents/standards-reviewer.md` (input and rules).
 - Links to the old file: `docs/remote-execution.md` (TD-27), `product/iterations/roadmap.md` (iteration 1.1 row and the "Remaining low-severity tech debt" row), `product/iterations/iteration-3.md` (TD-91, TD-28, TD-31, TD-32). The historical `review_findings.md` and the archived changes stay as they are.
 - No production code, no published docs page (the register is contributor documentation and stays unpublished).

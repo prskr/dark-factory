@@ -76,7 +76,7 @@ The subcommands live in `tools/xtask/src/tech_debt.rs`. All of them parse the sa
 
   It runs in pre-commit on every commit, so that a rename in code is caught as well. Parsing about 70 small files takes milliseconds.
 - `cargo xtask tech-debt list` prints the summary table (ID, severity, area, title, issue), sorted by ID. It replaces the hand-kept table.
-- `cargo xtask tech-debt for <path>…` and `cargo xtask tech-debt for --since <rev>` print one line per hit, `TD-<n> | <title> | <matching path>`. `--since` takes the changed files from `git diff --name-only <rev>...HEAD`. A path matches when it equals an entry path or lies below an entry directory. The order of the output is fixed (by ID).
+- `cargo xtask tech-debt for <path>…` and `cargo xtask tech-debt for --since <rev>` print one line per hit, `TD-<n> | <title> | <matching path>`. `--since` takes the changed files from `git diff --name-only <rev>...HEAD`. A given path and an entry path match when they are equal, or when one of them is a directory (ends with `/`) and the other lies below it. So a changed file below an entry directory matches, and so does a directory named by a change with an entry file below it. The order of the output is fixed (by ID).
 - `cargo xtask tech-debt for --change <dir>`:
   - It reads every `.md` file below `<dir>` (an OpenSpec change).
   - It collects each backticked token that is an existing file, or an existing directory written with `/`. A token resolves as a repo-relative path first, then below `crates/` and below `plugins/`. So `factory-agent/src/tests/connection.rs`, the way the changes usually write it, finds `crates/factory-agent/src/tests/connection.rs`. Tokens that resolve nowhere are ignored: they are new files, symbols or commands.

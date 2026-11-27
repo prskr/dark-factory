@@ -44,7 +44,7 @@ Write each test first and watch it fail (TDD). Run the xtask tests with `cargo t
 
   Every `### TD-<n>` heading becomes an entry, also the ones below `## Accepted decisions`. `docs/tech-debt/accepted.md` gets only the section's intro and its `- **…**` bullets. Write `NEXT_ID` from the "next free ID" line of the old file (TD-134 on `main` today). Recount first: entries are added and deleted while this change waits. Verify: `cargo xtask tech-debt check` passes, the number of entry files equals `grep -c '^### TD-' docs/tech_debt.md`, and `accepted.md` has as many bullets as the old section and no `### TD-` heading.
 - [ ] 3.2 Compare old and new. Every old section's prose appears in its new body (a test or a script that diffs them, normalizing only the removed heading and files lines). `cargo xtask tech-debt list` has the same IDs, severities and areas as the old summary table. If the table and the headings disagree (an entry without a row, or a row without an entry), list the differences for the user. Fix by hand any path that `check` rejects: a path that no longer exists means the entry is stale, so ask the user whether to delete it or update it. Verify: the comparison passes, and the user has decided each stale entry.
-- [ ] 3.3 Delete `docs/tech_debt.md` and the converter. Verify: `grep -rn "tech_debt.md" --include=*.md --include=*.yaml --include=*.rs . | grep -v -E "openspec/changes/archive|review_findings.md"` shows only the places that group 4 changes.
+- [ ] 3.3 Delete `docs/tech_debt.md` and the converter. Verify: `grep -rn "tech_debt.md" --include=*.md --include=*.yaml --include=*.rs . | grep -v -E "openspec/changes/archive|openspec/changes/tech-debt-register/|review_findings.md"` shows only the places that group 4 changes. This change's own artifacts name the old file on purpose and are excluded.
 
 ## 4. Checks in hooks and CI, rules, links
 
@@ -77,5 +77,6 @@ Write each test first and watch it fail (TDD). Run the xtask tests with `cargo t
 
 ## 6. Final checks
 
-- [ ] 6.1 Run `cargo test` and `cargo clippy` for `tools/xtask` (see the header), `cargo xtask tech-debt check`, `just docs-build` and `openspec validate --all --strict`. Verify: all pass.
-- [ ] 6.2 Published docs: none. The register is contributor documentation. `docs-site` keeps it unpublished, which `just docs-build` confirms in task 6.1.
+- [ ] 6.1 In `docs/links_test.sh`, the check "Contributor docs … are not published" lists the names `development tech_debt adr design-system releasing`. Replace `tech_debt` with `tech-debt`. Verify: `build/with_tools.sh docs/links_test.sh` passes. With a temporary `docs/content/tech-debt/x.md`, it fails. Remove the file.
+- [ ] 6.2 Run `cargo test` and `cargo clippy` for `tools/xtask` (see the header), `cargo xtask tech-debt check`, `just docs-build`, `build/with_tools.sh docs/links_test.sh` and `openspec validate --all --strict`. Verify: all pass.
+- [ ] 6.3 Published docs: none. The register is contributor documentation. `docs-site` keeps it unpublished, which `docs/links_test.sh` confirms (tasks 6.1, 6.2). `just docs-build` alone does not check this.
