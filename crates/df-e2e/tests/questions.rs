@@ -512,6 +512,42 @@ async fn a_question_answered_in_another_browser_shows_the_answer_on_the_timeline
     .await
 }
 
+/// Spec "Answered in the inbox": the card answered in the inbox keeps the answer after the live
+/// update that takes the request out of the pending list. A request raised after the answer is the
+/// marker: the stream applies updates in order, so once its card is there the update that saw the
+/// answered request has been applied too.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_card_answered_in_the_inbox_keeps_its_answer_after_the_live_update() -> Result<()> {
+    fixture::run(
+        "a_card_answered_in_the_inbox_keeps_its_answer_after_the_live_update",
+        |world: Arc<World>| async move {
+            let key = task_asking(&world, "[kind-drafts]").await?;
+            let multi = db::question(&world.pool, &key, ENVIRONMENTS_QUESTION)
+                .await?
+                .id;
+            let inbox = world.session.open_inbox_card(&world.env, multi).await?;
+            option_in(&inbox, AriaRole::Checkbox, "Dev")
+                .click(None)
+                .await?;
+            press_answer(&inbox).await?;
+            expect_text_in(&inbox, "Answered by", UI_TIMEOUT).await?;
+
+            let later =
+                db::raise_text_question(&world.pool, &key, &world.unique("After the answer?"))
+                    .await?;
+            expect(world.session.request_card(later))
+                .with_timeout(UI_TIMEOUT)
+                .to_be_visible()
+                .await
+                .context("the request raised after the answer arrives live")?;
+            expect_text_in(&inbox, "Answered by", UI_TIMEOUT).await?;
+            Ok(())
+        },
+    )
+    .await
+}
+
 /// Spec "Stream reconnects while typing": the live connection is dropped and restored; the text
 /// and the open tab are kept, and a request raised meanwhile arrives with the reconnect.
 #[tokio::test]

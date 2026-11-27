@@ -9,7 +9,8 @@
 // - a card with that id: it is replaced; when both the old and the new card are pending and their
 //   forms carry the same `data-question`, the old `<form>` moves into the new card first, so
 //   checked options, typed text, the open tab and focus stay;
-// - a delete template removes the card;
+// - a delete template removes the card while it is pending: a card decided on this page shows its
+//   decision (the answer of its own POST) until the page is reloaded;
 // - a keep template (`data-request-keep="<card ids>"`, the first send of a connection) removes
 //   every card of the list it does not name: those were decided while the page was offline.
 // Without this script the sink stays hidden and live card updates do nothing until a reload.
@@ -48,7 +49,9 @@ document.addEventListener('alpine:init', () => {
   function apply(template: HTMLTemplateElement): void {
     const removed = template.dataset.requestDelete;
     if (removed !== undefined) {
-      document.getElementById(removed)?.remove();
+      const card = document.getElementById(removed);
+      // A card this page decided already shows the answer from its own POST: it stays.
+      if (card?.dataset.state === 'pending') card.remove();
       return;
     }
     const kept = template.dataset.requestKeep;
