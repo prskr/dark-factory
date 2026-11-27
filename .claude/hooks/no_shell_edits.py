@@ -5,7 +5,7 @@ AGENTS.md: change files with the edit tool, not with `sed -i`, `perl -pi`, `pyth
 `cat >`. Edits through the tool stay reviewable and fail loudly when the target text doesn't
 match. Generated output (`cargo fmt`, lock files, code generators) is not matched here.
 
-Writes whose targets are all under /tmp or /dev are allowed (scratch files, scripts that
+Writes whose targets are all under /tmp, /dev or the Claude Code scratchpad (~/.cache/claude/) are allowed (scratch files, scripts that
 analyse logs), as are `echo`/`printf` appends to the CI files ($GITHUB_OUTPUT, ...). Exit code 2
 blocks the call and shows the reason to the agent. Copying a file prepared under /tmp into the
 repo (`cp`/`mv`/`install`) counts as an edit. A heuristic, not a sandbox: it catches the usual
@@ -20,7 +20,8 @@ import sys
 REASON = (
     "Blocked by .claude/hooks/no_shell_edits.py: change files with the Edit or Write tool, "
     "not with sed -i, perl -pi, python heredocs, tee or > redirects (AGENTS.md). Shell is fine "
-    "for generated output (cargo fmt, lock files, code generators) and for files under /tmp."
+    "for generated output (cargo fmt, lock files, code generators) and for files under /tmp "
+    "or the scratchpad (~/.cache/claude/)."
 )
 
 IN_PLACE = re.compile(r"\b(sed|perl)\b([^|;&\n]*\s(-[a-zA-Z]*i[a-zA-Z]*\b|--in-place)[^|;&\n]*)")
@@ -53,8 +54,10 @@ TEE = re.compile(r"\btee\b((?:\s+-\w+)*)((?:\s+[^\s|;&]+)*)")
 # `cp`/`mv`/`install` in command position; renames and copies inside the repo are fine, a file
 # prepared under /tmp and copied into the repo is an edit.
 COPY = re.compile(r"(?:^|[;&|(]|\bthen|\bdo)\s*(?:sudo\s+)?(cp|mv|install)\s([^|;&\n]*)", re.M)
+# The session scratchpad of Claude Code lives under ~/.cache/claude/ and counts as /tmp.
 SAFE_TARGET = re.compile(
-    r"^['\"]?(/tmp/|/dev/|&\d|\$\{?\w*(?i:tmp|temp|scratch)\w*)"
+    r"^['\"]?(/tmp/|/dev/|&\d|\$\{?\w*(?i:tmp|temp|scratch)\w*"
+    r"|(?:/home/[^/\s]+|/root|~|\$\{?HOME\}?)/\.cache/claude/)"
 )
 CI_FILE = re.compile(r"^['\"]?\$\{?GITHUB_(OUTPUT|ENV|PATH|STEP_SUMMARY)")
 # Message arguments (git commit -m, gh pr create --body) may mention the blocked commands.

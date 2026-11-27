@@ -49,7 +49,9 @@ When it reports:
 3. Spawn all three reviewers **in parallel** in one message. Each gets the ledger rows of all axes, not only its own: a reviewer that sees only its axis flags the fixes the user approved on another axis as scope creep.
    - `subagent_type: standards-reviewer`: diff command, commit list, standards files, the smell baseline pasted in full, the ledger rows.
    - `subagent_type: spec-reviewer`: diff command, commit list, the change's context files (`openspec instructions apply --change <name> --json`, with `--store`, → `contextFiles`) plus `DESIGN` if there is one, the ledger rows, and the instruction to check that the published docs (`docs/content/`, mounted crate references) describe what the diff builds, no more and no less.
-   - `subagent_type: security-reviewer`: `mode: find`, diff command, commit list, the ledger rows.
+   - `subagent_type: security-reviewer`: `mode: find`, diff command, commit list, the ledger rows. From round 2 on, leave it out when every file in the round's diff is test code or docs (`crates/df-e2e/`, a `tests/` directory, a `tests.rs` file, `docs/`, `openspec/`): its exclusions cover all of them. Record "Security: not run (test and docs only)" in the ledger.
+
+   From round 2 on, a fix round whose diff is under 20 changed lines, all in test code, and does exactly what one fix-list item asked needs no reviewer: read the diff yourself, check it against the finding, and record "checked by the orchestrator" with the range in the ledger.
 4. Filter the Security findings as in step 4b of the code-review skill (one parallel `mode: verify` agent per finding, drop below confidence 8). Record dropped findings in the ledger as `rejected (verifier: <reason>)`.
 
 ## 4. Classify

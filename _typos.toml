@@ -10,6 +10,8 @@ extend-exclude = [
     "plugins/github/tests/fixtures/webhooks/**",
     # Vendored Hextra theme (Hugo module).
     "docs/_vendor/**",
+    # Review ledgers of `implement-change` (also archived): records full of short commit SHAs.
+    "openspec/changes/**/review-log.md",
 ]
 
 [default]
