@@ -24,10 +24,14 @@ Text buttons SHALL be 40 px high from 1024 px (at least 44 px below) with a 10 p
 ## ADDED Requirements
 
 ### Requirement: Pages use only design tokens
-Every page of the web UI SHALL take its colours, font sizes and corner radii from the design tokens of the stylesheet, which carry the names of the PenPot tokens. No page SHALL use a fixed palette colour or an arbitrary font size, line height, letter spacing or radius. A build that contains one SHALL fail its tests.
+Every page of the web UI SHALL take its colours, font sizes and corner radii from the design tokens of the stylesheet, which carry the names of the PenPot tokens. No page SHALL use a fixed palette colour or an arbitrary font size, line height, letter spacing or radius, in markup or in the stylesheet's own rules. A build that contains one SHALL fail its tests. The black scrim behind modal dialogs and sheets is the one exception and stays the same in both themes.
 
 #### Scenario: Arbitrary font size in a page
 - **WHEN** a page module renders an element with the class `text-[13px]`
+- **THEN** the web UI's tests fail and name the class
+
+#### Scenario: Arbitrary radius in a stylesheet rule
+- **WHEN** a rule of the stylesheet applies `rounded-[12px]`
 - **THEN** the web UI's tests fail and name the class
 
 #### Scenario: Palette colour in a page
@@ -36,4 +40,4 @@ Every page of the web UI SHALL take its colours, font sizes and corner radii fro
 
 #### Scenario: Both themes from one token
 - **WHEN** a page is shown with the system set to dark
-- **THEN** every text, border and fill takes the dark value of the same token as in the light theme, with no page-specific colour
+- **THEN** every text, border and fill except the dialog scrim takes the dark value of the same token as in the light theme, with no page-specific colour

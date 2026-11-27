@@ -11,7 +11,7 @@ See proposal.md, "Why". Current state in `crates/df-web`:
 - **Copies found:**
   - Confirmations: `reset_dialog` and `cancel_dialog` (`task_pages/view.rs`) and `rotate_dialog` (`config_pages/signing_key.rs`) are each `dialog x-ref=… class=(DIALOG_CLASS)` > `rounded-2xl border border-line bg-panel p-5 shadow-lg` card > `h2` > paragraphs > a `mt-5 flex flex-col-reverse gap-2 md:flex-row md:justify-end` button row. `verify_dialog` uses the same frame for a form.
   - Tab rows: `tabbed_form` (`config_pages.rs`, styles `Page` and `Dialog`), `details_heading` and `chat_details_heading` with `tab_button` (`artifacts/view.rs`), `tab` in `requests/create_issue.rs`, and the link tabs of `chat_pages/archive.rs`. All but the archive use the Alpine component `tabs` (`scripts/tabs.ts`, `move()` for arrow keys). The archive tabs are `hx-get` links with `role="tab"` and no arrow keys, and mark the open tab with the bright `border-accent`.
-  - Status dots: `Tone::dot_class()` exists (`components/badges.rs`). The markup around it is repeated in `config_pages.rs` (2), `task_pages/view.rs` (2: `size-3` with `role="img"` in the strip, `size-2` decorative), `task_pages/dependencies.rs`, `chat_pages/view.rs` (2: `size-2.5` "Needs you" and `size-3`), and the `size-1.5` live dot of `egress/log/page.rs`.
+  - Status dots: `Tone::dot_class()` exists (`components/badges.rs`). The markup around it is repeated in `config_pages.rs` (2), `task_pages/view.rs` (2: `size-3` with `role="img"` in the strip, `size-2` decorative), `task_pages/dependencies.rs`, `chat_pages/view.rs` (3: `size-2.5` "Needs you" in `needs_you_dot`, `size-3` and `size-2`), and the `size-1.5` live dot of `egress/log/page.rs`. `task-list-tree` (task 2.1) moves `needs_you_dot` into `components/badges.rs`.
   - Count pills: `rounded-full bg-sunk px-1.5 text-xs` after tab labels (`artifacts/view.rs`, 4 times), `… font-mono` for the archived count (`chat_pages/view.rs`), `… px-2 py-0.5 font-mono text-xs text-muted` for the subtask `done/total` chip (`task_pages/subtasks.rs`).
   - Labels: 11 `block text-sm font-medium text-muted` labels and legends outside `field()` (`project_webhook.rs` 2, `project_subscriptions.rs` 1, `egress/log/allow.rs` 1, `config_pages/signing_key.rs` 4, `config_pages/providers.rs` 2, `config_pages/push_policy.rs` 1). Uppercase `text-xs font-medium uppercase tracking-wide text-faint` headings: `section()` and 11 more in `egress/log/`, `task_pages/` and `components/`.
 - **PenPot names.** The PenPot MCP was not connected while this was planned. Known PenPot names come from `.agents/skills/penpot/helpers.js` (the colour-to-token rules), `docs/design-workflow.md` (page table: variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button`, `Button`, `Task row`, `Request card`, `Icon button`; main component `Profile menu`) and `openspec/changes/archive/2026-10-30-ui-design-alignment/design.md` (`Button` variants `Primary`, `Secondary`, `Ink`, `Danger`; `Icon button` properties Icon, Size, State). The full token list, the variant names of every set and any typography or radius tokens are (unverified). Task 1.1 reads them first.
@@ -37,7 +37,7 @@ See proposal.md, "Why". Current state in `crates/df-web`:
 
 ### D1: One change, delivered in ordered steps
 
-The three parts depend on each other. The mapping table (part 2) names the CSS tokens after the rename. The guard (part 3) can only go green once the components (part 1) have replaced the copies that hold most of the arbitrary values. The work stays one change on one branch, as commits in this order, each with green tests:
+The three parts depend on each other. The mapping table (part 2) names the CSS tokens after the rename. The rename and the contrast check have to come after the components (part 1), so they run over the fewest copies. The work stays one change on one branch, as commits in this order, each with green tests:
 
 1. Verify the PenPot inventory (tokens, variant sets, typography and radius tokens). No code.
 2. Type and radius tokens, then the guard (TDD: the guard fails first, the replacement makes it pass).
@@ -48,7 +48,15 @@ The three parts depend on each other. The mapping table (part 2) names the CSS t
 7. The token rename: one mechanical commit, late, so it touches the fewest lines and can be redone after a rebase. The contrast check from step 6 must stay green across it.
 8. The mapping table and the doc test that keeps it honest.
 
-If `task-list-tree` hasn't landed when step 4 starts, steps 5 to 8 go first and the `task_row` move waits for it (D9).
+If `task-list-tree` hasn't landed when step 4 starts, steps 5 to 8 go first and the `task_row` move waits for it (D9). If it still hasn't landed once every other task is done, the `task_row` move (tasks 4.3 and the `task_row` part of 4.4) leaves this change for a follow-up change `web-ui-task-row-component` (backlog row added on archive), and this change is archived without it. `task-list-tree` hasn't started (0 of 15 tasks) and waits for `task-list-active-filter`, so this change mustn't wait for it.
+
+While task 1.1 waits for the PenPot MCP, only work that doesn't depend on PenPot names or sizes goes ahead:
+- Tasks 2.1 and 2.3.
+- Tasks 3.1, 3.2 and 3.5.
+- Tasks 4.1 and 4.2.
+- Tasks 6.1 to 6.3.
+
+Task 2.2 (token names), 3.3 and 3.4 (dot sizes, count pill), group 5 (board) and groups 7 and 8 wait for 1.1.
 
 Alternative: three changes (components, tokens, rename). Rejected. Each one would leave `docs/design-system.md` half-updated, and the rename would run twice over the same files.
 
@@ -88,6 +96,11 @@ pub fn tab_class(style: TabsStyle, selected: bool) -> &'static str;
 ```
 
 - `Underline`: the project and persona settings pages (`TabsStyle::Page` today). `Side`: `tabbed_form` in a dialog. `Inline`: the details heading of tasks and chats, with counts. `Folder`: the Preview / Markdown tabs of a create-issue card.
+- Selection marker per style:
+  - `Underline`: a 2 px `accent-strong` bar under the label (today's `Page` marker).
+  - `Side`: a 3 px `accent-strong` bar at the left edge on `sunk` (today's `Dialog` marker).
+  - `Inline`: today it marks the selected tab by text colour only (`text-ink` vs `text-muted`). It gets the same 2 px `accent-strong` bar under the label as `Underline`, with `text` for the label, so the selection doesn't depend on a colour difference between two text colours. This is the "details tab marker" of the `question-kinds` review. `accent-strong` reaches 6.9:1 (light) and 13.4:1 (dark) on `panel`, above the 3:1 for non-text. Task 1.1 checks the marker against the details boards of PenPot.
+  - `Folder`: the panel-coloured tab joined to the panel (today's `TAB_CLASS`).
 - Every row gets `role="tablist"`, `aria-label`, `aria-selected`, roving `tabindex`, `aria-controls` and `x-on:keydown="move($event)"`, and works with the existing Alpine component `tabs`. Tab ids become `tab-<id>` everywhere. Today `create_issue` uses `<panel>-tab`, and its test changes with it.
 - `tabbed_form` keeps its job (form, panels, footer) and calls `tabs`. `config_pages::TabsStyle` is removed and its callers pass `components::TabsStyle`.
 - The archive's link tabs keep their links (the server loads the tab's content) and take their classes from `tab_class(TabsStyle::Underline, …)`. That replaces the bright `border-accent` marker with the `accent-strong` underline of the settings pages. The bright accent is only 1.4:1 on the light panel, so it fails the 3:1 a selection marker needs. Arrow keys for these link tabs: backlog.
@@ -96,7 +109,7 @@ Alternative: one component that also renders the panels. Rejected. The panels di
 
 ### D4: `status_dot`, `count_pill`, labels and the small heading
 
-- `status_dot(tone: Tone) -> Markup`: 8 px, `aria-hidden`. `StatusDot { tone, size: DotSize, label: Option<&str> }.render()` covers the rest: `DotSize::{Small (6 px, inside a badge), Regular (8 px), Large (12 px, details strip and chat header)}`. A label gives `role="img"`, `aria-label` and `title`. The 10 px "Needs you" dot becomes `Regular` unless task 1.1 finds a 10 px dot on the PenPot boards. In that case `DotSize` gets that size. The hollow "waiting" dot of a dependency and the subtask `status_ring` aren't status dots and stay as they are.
+- `status_dot(tone: Tone) -> Markup`: 8 px, `aria-hidden`. `StatusDot { tone, size: DotSize, label: Option<&str> }.render()` covers the rest: `DotSize::{Small (6 px, inside a badge), Regular (8 px), Large (12 px, details strip and chat header)}`. A label gives `role="img"`, `aria-label` and `title`. `needs_you_dot` isn't touched by task 3.3. `task-list-tree` moves it into `components/badges.rs`, and task 4.3 converts it once, after that change has landed: `Regular`, unless task 1.1 finds a 10 px dot on the PenPot boards, in which case `DotSize` gets that size. The hollow "waiting" dot of a dependency and the subtask `status_ring` aren't status dots and stay as they are.
 - `count_pill(label: &str) -> Markup` (`components/badges.rs`): `rounded-full bg-sunk px-1.5 font-mono text-xs text-muted`. It's used for the tab counts, the archived count and the subtask `done/total` chip. Unifying them changes the padding of the `done/total` chip (`px-2` → `px-1.5`) and makes tab counts mono. Task 1.1 checks this against the `Task row` board. If PenPot draws one of them differently, that one wins.
 - `field_label(for_id: &str, text: &str)` and `legend_label(text: &str)` (`components/forms.rs`) replace the 11 labels and legends. `field()` and `markdown_field()` use `field_label` too.
 - `SMALL_HEADING_CLASS` (`components/lists.rs`): `text-xs font-medium uppercase tracking-wide text-faint`. It's a class, not a function, because the element varies (`h2`, `h3`, a `tr` of a `thead`, a `summary`). `section()` uses it.
@@ -153,13 +166,17 @@ A unit test in `components/mod.rs` (`no_page_uses_a_palette_colour_or_an_arbitra
 - an arbitrary radius: `rounded-[…]` and `rounded-<side>-[…]`;
 - an arbitrary colour in any colour utility: `-[#…]`, `-[rgb(…)]`, `-[var(…)]`.
 
-Arbitrary variants (`[&_svg]:size-4`) and arbitrary spacing (`pl-[17px]`) pass. Because Tailwind turns every class-like string in `src/` into a rule, the compiled stylesheet covers every page and every state, including pages without a seeded route, Alpine `:class` strings and `@apply` in `input.css`. It needs no database. Like every test that reads `app_css()`, it carries `#[cfg_attr(not(df_web_styles), ignore = "…")]`. CI and Bazel build the stylesheet, so it never passes silently there.
+Arbitrary variants (`[&_svg]:size-4`) and arbitrary spacing (`pl-[17px]`) pass. Because Tailwind turns every class-like string in `src/` into a rule, the compiled stylesheet covers every page and every state, including pages without a seeded route and Alpine `:class` strings. It needs no database.
+
+`@apply` is the exception: it copies the declarations into the custom selector and leaves no utility selector behind. `text-[0.9em]` (`.md-body code`) and `rounded-t-[18px]` (`.ws-details`) appear only inside `@apply` in `styles/input.css`, so `app.css` has no `.text-\[0\.9em\]` selector. A second test, `no_apply_uses_a_palette_colour_or_an_arbitrary_type_or_radius_value`, therefore runs the same matcher over the class names of every `@apply` line of `styles/input.css`. The test module already embeds that file as `CSS`, so this test runs in every build, with or without `tailwindcss`. Today the selector scan finds 7 of the 9 arbitrary values and the `@apply` scan the other 2. The selector test reads `app_css()` and, like every such test, carries `#[cfg_attr(not(df_web_styles), ignore = "…")]`. CI and Bazel build the stylesheet, so it never passes silently there.
 
 `palette_classes` moves to a shared test helper (`testkit::forbidden_classes`) with the same rules. The rendered-page test in `task_pages/tests/layout.rs` keeps its routes and also covers `/requests`, `/egress/log`, `/egress/allowlist`, `/chats` and `/model-providers`. That catches a class assembled at run time, which the stylesheet scan can't see. Today none is assembled (`format!` builds no colour class).
 
 Side effect: a test that asserts the absence of a forbidden class, or a comment that names one, also trips the guard. Such strings are rewritten (the guard's own tests build them with `concat!`).
 
-Alternative: walk the source files at test time. Rejected. It needs the sources as Bazel `data`, misses `@apply`, and re-implements Tailwind's class detection.
+Alternative: walk the `.rs` source files at test time. Rejected. It needs the sources as Bazel `data` and re-implements Tailwind's class detection (Alpine strings, `format!` pieces). `input.css` is the one source file the test reads directly, because only it holds `@apply`.
+
+Exempt: the black scrim behind modal dialogs and sheets (`backdrop:bg-black/50`, `bg-black/40`). Tailwind's `black` is no palette with a number, and the scrim is the same in both themes on purpose. `web-ui-shell` "Pages use only design tokens" names this exception.
 
 ### D8: The two hand-built tables stay
 
@@ -211,12 +228,15 @@ Tests: a unit test reads `app_css()` and checks that the cell rule resets `overf
 
 Each page is visited once in a light and once in a dark session. A dark session is a browser context with the dark colour scheme: playwright-rs support for the context option or `emulate_media` is (unverified), see task 6.1. The helper `browser::contrast_violations(page)` sends the source of `axe.min.js` with `page.evaluate`. That isn't subject to a page CSP, and there is no CSP anyway. It then runs `axe.run(document, { runOnly: ['color-contrast'] })` and returns the violations. The test fails with page, theme, selector, ratio and colours per violation. axe's `incomplete` results (text on images or gradients) are written to the test's diagnostics and don't fail the test. Before axe runs, the test waits for the page's state (`expect` on the content it seeded), so live regions don't change underneath it.
 
-axe-core source: pinned in `crates/df-e2e/package.json` with `pnpm-lock.yaml`, installed by `e2e-local.sh` and the e2e workflow (`pnpm install --frozen-lockfile`). The helper reads `crates/df-e2e/node_modules/axe-core/axe.min.js` and fails with an error naming the install command when it is missing. The browser runs in the cluster, but the test host reads the file and sends its text, so the browser server image doesn't change.
+axe-core source: pinned in `crates/df-e2e/package.json` with `pnpm-lock.yaml`, following the conventions of `crates/df-web`:
+- a `pnpm-workspace.yaml` with `allowBuilds: {}`, so no install script runs;
+- `/crates/df-e2e/node_modules/` in `.gitignore`;
+- installed by `e2e-local.sh` and the e2e workflow with `npx --yes pnpm install --frozen-lockfile`, as `ci.yaml` does for `crates/df-web`. The workflow has no Node step yet, and the runner's Node is (unverified), see task 6.2. The helper reads `crates/df-e2e/node_modules/axe-core/axe.min.js` and fails with an error naming the install command when it is missing. The browser runs in the cluster, but the test host reads the file and sends its text, so the browser server image doesn't change.
 
 Fixes: every violation the first run reports is fixed in this change, through a token's role or, as a last resort, a token value (Goals). Known ones:
 - Inline code in non-bubble Markdown (D11).
 - The avatar link underline (location (unverified)).
-- The details tab marker. That one is non-text, which axe doesn't check, so D3 fixes it: the `tabs` underline uses `accent-strong`.
+- The details tab marker. That one is non-text, which axe doesn't check, so D3 fixes it: `TabsStyle::Inline` gets the `accent-strong` bar.
 
 Alternatives:
 - A unit test over `TEXT_PAIRS` only: it already exists, and it only knows the pairs someone listed, while the three defects were pairs nobody listed.
