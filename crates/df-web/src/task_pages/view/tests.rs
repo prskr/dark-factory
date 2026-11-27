@@ -928,3 +928,22 @@ fn a_rejected_name_without_a_server_shows_as_the_agent_sent_it() {
     assert!(section.contains("plain"), "{section}");
     assert!(!section.contains("__plain"), "{section}");
 }
+
+#[test]
+fn a_rejected_tools_list_name_without_a_server_shows_without_a_server_prefix() {
+    let mut with_calls = run(8);
+    with_calls.mcp_calls = vec![call(
+        "",
+        "tools/list",
+        McpCallOutcome::Rejected,
+        1,
+        0,
+        (10, 0),
+    )];
+
+    let html = runs_region("DF-1", &[with_calls], None).into_string();
+
+    let section = &html[html.find("Tool calls (MCP)").unwrap()..];
+    assert!(section.contains("tools/list"), "{section}");
+    assert!(!section.contains(" · tools/list"), "{section}");
+}

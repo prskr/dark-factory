@@ -294,14 +294,31 @@ pub async fn run(url: &str, ca_path: &Path) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    /// Signals when it is dropped.
+    struct SignalOnDrop(Option<tokio::sync::oneshot::Sender<()>>);
+
+    impl Drop for SignalOnDrop {
+        fn drop(&mut self) {
+            if let Some(sender) = self.0.take() {
+                sender.send(()).ok();
+            }
+        }
+    }
+
     #[tokio::test]
     async fn dropping_the_guard_aborts_the_task() {
-        let task = tokio::spawn(std::future::pending::<()>());
-        let watcher = task.abort_handle();
+        let (sender, dropped) = tokio::sync::oneshot::channel();
+        let held = SignalOnDrop(Some(sender));
+        let task = tokio::spawn(async move {
+            let _held = held;
+            std::future::pending::<()>().await;
+        });
 
         drop(AbortOnDrop(task));
-        tokio::task::yield_now().await;
 
-        assert!(watcher.is_finished());
+        tokio::time::timeout(Duration::from_secs(10), dropped)
+            .await
+            .expect("the task was not aborted")
+            .expect("the signal was lost");
     }
 }
