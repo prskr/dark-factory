@@ -40,9 +40,16 @@ async fn test_scenario_harness_resume_success() {
                     summary: "Context from previous run".to_string(),
                 };
 
-                let res = setup_session(&cx, &repo_dir, Some(&continuation), &mcp_cmd, &mcp_sock)
-                    .await
-                    .expect("setup session should succeed");
+                let res = setup_session(
+                    &cx,
+                    &repo_dir,
+                    Some(&continuation),
+                    &mcp_cmd,
+                    &mcp_sock,
+                    None,
+                )
+                .await
+                .expect("setup session should succeed");
 
                 assert!(res.is_resumed, "Session should be resumed");
                 assert_eq!(res.session_id, "sess-existing-123");
@@ -130,9 +137,16 @@ async fn test_scenario_harness_resume_fails_falls_back_to_new() {
                     summary: "Summary of earlier progress".to_string(),
                 };
 
-                let res = setup_session(&cx, &repo_dir, Some(&continuation), &mcp_cmd, &mcp_sock)
-                    .await
-                    .expect("fallback to new session should succeed");
+                let res = setup_session(
+                    &cx,
+                    &repo_dir,
+                    Some(&continuation),
+                    &mcp_cmd,
+                    &mcp_sock,
+                    None,
+                )
+                .await
+                .expect("fallback to new session should succeed");
 
                 assert!(!res.is_resumed, "Session should NOT be resumed");
                 assert_ne!(res.session_id, "nonexistent-sess");
@@ -216,6 +230,7 @@ async fn notice_codes_of_a_new_session(
                 continuation.as_ref(),
                 std::path::Path::new("/opt/factory/factory-agent"),
                 std::path::Path::new("/run/factory/runtime.sock"),
+                None,
             )
             .await?;
             Ok(res.notices.into_iter().map(|n| n.code).collect::<Vec<_>>())
@@ -347,7 +362,7 @@ sessions:
     let client = Client.v1();
     let setup_result = client
         .connect_with(transport, async move |cx| {
-            let res = setup_session(&cx, &repo_dir_1, None, &mcp_cmd_1, &mcp_sock_1)
+            let res = setup_session(&cx, &repo_dir_1, None, &mcp_cmd_1, &mcp_sock_1, None)
                 .await
                 .expect("setup session new");
             Ok(res)
@@ -394,6 +409,7 @@ sessions:
                 Some(&continuation),
                 &mcp_cmd_2,
                 &mcp_sock_2,
+                None,
             )
             .await
             .expect("setup session load");
@@ -713,6 +729,7 @@ mod harness_files {
                             content: (*content).into(),
                         })
                         .collect(),
+                    mcp_endpoint: String::new(),
                 })),
             }),
             tools: vec![],
@@ -794,5 +811,124 @@ mod harness_files {
         prepare_harness_environment(&assign(&[]), &home).unwrap();
 
         assert_eq!(std::fs::read_dir(&home).unwrap().count(), 0);
+    }
+}
+
+mod ext_relay {
+    use std::path::Path;
+
+    use agent_client_protocol::v1::schema::McpServer;
+    use agent_client_protocol::{Channel, Client};
+    use df_proto::agent::v1::Continuation;
+
+    use crate::harness::{ExtRelay, setup_session};
+    use crate::test_harness::MockAcpAgent;
+
+    const ENDPOINT: &str = "https://df-gateway.df.svc:8443/mcp";
+    const CA: &str = "/run/factory/ca/ca.crt";
+
+    /// Runs `setup_session` against `agent`.
+    async fn registered(agent: MockAcpAgent, continuation: Option<Continuation>, ext: bool) {
+        let builder = agent.build();
+        let (transport, peer) = Channel::duplex();
+        let agent_task = tokio::spawn(async move {
+            builder.connect_to(peer).await.unwrap();
+        });
+        let client = Client.v1();
+        client
+            .connect_with(transport, async move |cx| {
+                let ext = ext.then_some(ExtRelay {
+                    endpoint: ENDPOINT,
+                    ca_file: Path::new(CA),
+                });
+                setup_session(
+                    &cx,
+                    Path::new("/work/repo"),
+                    continuation.as_ref(),
+                    Path::new("/opt/factory/factory-agent"),
+                    Path::new("/run/factory/runtime.sock"),
+                    ext,
+                )
+                .await?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        agent_task.abort();
+    }
+
+    /// The MCP servers (name, arguments) the agent received in `session/new` or `session/load`.
+    fn servers_of(agent: &MockAcpAgent) -> Vec<(String, Vec<String>)> {
+        agent
+            .received_mcp_servers
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|server| match server {
+                McpServer::Stdio(stdio) => (stdio.name.clone(), stdio.args.clone()),
+                other => panic!("expected stdio servers, got {other:?}"),
+            })
+            .collect()
+    }
+
+    fn relay_args() -> Vec<String> {
+        ["mcp-relay", "--url", ENDPOINT, "--ca", CA]
+            .map(String::from)
+            .to_vec()
+    }
+
+    #[tokio::test]
+    async fn a_new_session_lists_factory_and_ext_when_the_run_has_an_endpoint() {
+        let agent = MockAcpAgent::new();
+
+        registered(agent.clone(), None, true).await;
+
+        let servers = servers_of(&agent);
+        assert_eq!(
+            servers
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["factory", "ext"]
+        );
+        assert_eq!(servers[1].1, relay_args());
+    }
+
+    #[tokio::test]
+    async fn a_resumed_session_lists_factory_and_ext_too() {
+        let agent = MockAcpAgent::new()
+            .with_load_session(true)
+            .with_existing_session("sess-1");
+        let continuation = Continuation {
+            harness_session_id: "sess-1".into(),
+            summary: String::new(),
+        };
+
+        registered(agent.clone(), Some(continuation), true).await;
+
+        let servers = servers_of(&agent);
+        assert_eq!(
+            servers
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["factory", "ext"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_without_an_endpoint_lists_only_factory() {
+        let agent = MockAcpAgent::new();
+
+        registered(agent.clone(), None, false).await;
+
+        let servers = servers_of(&agent);
+        assert_eq!(
+            servers
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["factory"]
+        );
     }
 }

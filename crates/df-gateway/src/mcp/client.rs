@@ -359,7 +359,7 @@ impl Client {
     /// Ends the sessions `keep` refuses (`DELETE`), and those idle for longer than `max_idle`.
     pub(crate) async fn sweep(
         &self,
-        keep: &dyn Fn(&SessionKey, &Target) -> bool,
+        keep: &(dyn Fn(&SessionKey, &Target) -> bool + Sync),
         max_idle: Duration,
     ) {
         let slots: Vec<(SessionKey, Slot)> = match self.sessions.lock() {

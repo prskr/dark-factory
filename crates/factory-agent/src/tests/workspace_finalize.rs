@@ -808,6 +808,7 @@ async fn test_scenario_assign_environment_stays_off_the_volume() {
                         content: "You are Dark Factory Bot".to_string(),
                     },
                 ],
+                mcp_endpoint: String::new(),
             })),
         }),
         tools: vec![],

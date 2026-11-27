@@ -960,12 +960,24 @@ async fn setup_harness_session(
     session_ready: &AtomicBool,
     harness_started: Instant,
 ) -> Result<SessionSetupResult, agent_client_protocol::Error> {
+    let ca_file = std::path::Path::new(df_sandbox_contract::paths::INSTANCE_CA_PATH);
+    let endpoint = match ctx
+        .assign
+        .harness
+        .as_ref()
+        .and_then(|harness| harness.kind.as_ref())
+    {
+        Some(df_proto::agent::v1::harness::Kind::Acp(acp)) => acp.mcp_endpoint.as_str(),
+        None => "",
+    };
+    let ext = (!endpoint.is_empty()).then_some(crate::harness::ExtRelay { endpoint, ca_file });
     let result = setup_session(
         cx,
         &ctx.repo_dir,
         ctx.assign.continuation.as_ref(),
         &ctx.runtime_exe,
         &ctx.runtime_sock_path,
+        ext,
     )
     .await;
     send_timing(

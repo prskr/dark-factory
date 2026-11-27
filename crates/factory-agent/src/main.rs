@@ -19,6 +19,7 @@ pub mod git_sign;
 pub mod harness;
 pub mod hidden_paths;
 pub mod mcp;
+pub mod mcp_relay;
 pub mod outbox;
 pub mod run_control;
 pub mod runner;
@@ -81,6 +82,13 @@ async fn run_command(cli: Cli) -> ExitCode {
         Command::Mcp { socket } => {
             if let Err(e) = mcp::run_mcp_stdio_server(&socket).await {
                 eprintln!("mcp server error: {e}");
+                return ExitCode::FAILURE;
+            }
+            ExitCode::SUCCESS
+        }
+        Command::McpRelay { url, ca } => {
+            if let Err(e) = mcp_relay::run(&url, &ca).await {
+                eprintln!("mcp-relay: {e:#}");
                 return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS
