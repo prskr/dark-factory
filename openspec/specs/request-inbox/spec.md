@@ -146,7 +146,7 @@ A decided question card SHALL show the question, its kind, every option in order
 - **THEN** the card lists all options with `api` marked chosen, shows "Other: also the CLI" and "Answered by Peter Kurfer · <time>"
 
 ### Requirement: Answer drafts survive live updates
-A live update of the inbox, the task timeline or the chat timeline SHALL keep the choices and text typed into a pending card while its question stays pending and unchanged, also when the card is sent again (a reconnect) or other parts of it change. A card whose question was decided or closed elsewhere SHALL show that on the timeline and leave the inbox.
+A live update of the inbox, the task timeline or the chat timeline SHALL keep the choices and text typed into a pending card while its question stays pending and unchanged, also when the card is sent again (a reconnect) or other parts of it change. A card whose question was decided or closed elsewhere SHALL show that on the timeline and leave the inbox. A card decided in the inbox SHALL show the decision there until the page is reloaded.
 
 #### Scenario: New request while typing in the inbox
 - **WHEN** a board member has written half an answer to a text question in the inbox and another agent raises a request
@@ -159,6 +159,10 @@ A live update of the inbox, the task timeline or the chat timeline SHALL keep th
 #### Scenario: Decided elsewhere while typing
 - **WHEN** a board member is writing an answer on `DF-7` and another board member answers the same question
 - **THEN** the card on `DF-7` shows the other board member's answer instead of the input
+
+#### Scenario: Answered in the inbox
+- **WHEN** a board member answers a question in the inbox and the live update takes it out of the pending list
+- **THEN** the card stays in the inbox with "Answered by" and the answer
 
 #### Scenario: Stream reconnects while typing
 - **WHEN** a board member has written half an answer on `DF-7` and the live connection of the page drops and reconnects
