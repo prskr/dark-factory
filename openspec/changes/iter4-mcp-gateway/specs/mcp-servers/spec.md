@@ -24,11 +24,11 @@ A server name SHALL be 1 to 20 characters of lowercase letters, digits and hyphe
 
 #### Scenario: Invalid name
 - **WHEN** an admin creates a server named `my--tools` or `tools-`
-- **THEN** the form rejects it and names the allowed characters
+- **THEN** the form rejects it with "Use lowercase letters, digits and single hyphens: start with a letter, end with a letter or digit, at most 20 characters." under the name
 
 #### Scenario: Rename
 - **WHEN** an admin edits server `context7`
-- **THEN** the form shows the name read-only
+- **THEN** the form "Edit MCP server" shows the name read-only with "The name can't be changed: it is part of every tool name agents see (context7__<tool>)."
 
 ### Requirement: Upstream URL
 The upstream URL SHALL be an absolute `https` URL without user information or fragment; it MAY have path and query parameters, which are stored and shown as entered. An `http` URL SHALL be accepted only while the instance setting `network.allowPlainHttp` is on. The form SHALL state that the URL is not secret and that a token belongs into the credential reference.
@@ -94,7 +94,23 @@ The server form SHALL state that agents, in tasks and chats, get every tool the 
 
 #### Scenario: Form text
 - **WHEN** an admin opens the form to create a server
-- **THEN** the form shows the warning, including the forge token rule, next to the credential reference
+- **THEN** the form shows, under the credential reference and scheme, the warning "Agents get every tool of this server, including tools that write" with "In tasks and chats, agents see every tool the server offers, with its unreviewed description. Writes bypass the Git proxy's push checks and the factory's approvals. The credential's scope is the effective permission: use a read-only token where possible, and never a forge token with write access."
+
+#### Scenario: URL note
+- **WHEN** an admin opens the form to create a server
+- **THEN** the URL field says "MCP Streamable HTTP endpoint; path and query parameters are kept. The URL is not secret: it is stored and shown here. A token belongs into the credential reference, not into the URL."
+
+#### Scenario: Scheme preview
+- **WHEN** an admin chooses scheme "Query parameter" with name `token` for the URL `https://design.example.com/mcp/stream?file=abc`
+- **THEN** the form shows under "Sent to" the URL ending `?file=abc&token=<value>` and "The upstream and proxies in front of it may log full URLs, query included. Prefer Bearer or Header when the server supports them."; with "Bearer" it shows "Sent as Authorization: Bearer <value>."
+
+#### Scenario: Server list
+- **WHEN** an admin opens the MCP servers page with `context7` enabled for DF and DOC and `wiki` with "Private network" on
+- **THEN** the "MCP servers" page lists each server with its URL as entered, its scheme, its credential reference and the projects that enable it ("DF, DOC", or "no project"), and `wiki` carries the badge "Private network"
+
+#### Scenario: No servers
+- **WHEN** no MCP server is registered
+- **THEN** the page shows "No MCP servers yet" and a "New MCP server" button
 
 ### Requirement: Enablement per project
 Admins SHALL enable and disable MCP servers per project on the project settings page ("MCP servers" tab, shown to admins only, like "Integrations"). No server SHALL be enabled for a project by default. Changes SHALL be audited (`project.mcp_servers_update`).
@@ -102,6 +118,14 @@ Admins SHALL enable and disable MCP servers per project on the project settings 
 #### Scenario: Board member without admin opens the project settings
 - **WHEN** a board member without the `admin` role opens the settings of project `DF`
 - **THEN** the page has no "MCP servers" tab, and a direct request to load or save the tab's content is refused with 403
+
+#### Scenario: Project tab
+- **WHEN** an admin opens the "MCP servers" tab of project `DF` (after "Integrations")
+- **THEN** the tab lists every registered server with a checkbox, its URL and, where on, the badge "Private network", has its own "Save MCP servers" button, and the page shows no "Save project" button on this tab
+
+#### Scenario: Project tab without servers
+- **WHEN** an admin opens the "MCP servers" tab while no server is registered
+- **THEN** the tab shows "No MCP servers registered" and a link "Open MCP servers" to the MCP servers page
 
 #### Scenario: Enable for a project
 - **WHEN** an admin enables `context7` for project `DF`
@@ -127,7 +151,7 @@ Deleting an MCP server that is enabled for a project SHALL be refused, naming th
 
 #### Scenario: Delete a used server
 - **WHEN** an admin deletes `context7` while project `DF` has it enabled
-- **THEN** the deletion is refused with a message naming `DF`
+- **THEN** the deletion is refused, and the list shows the alert "MCP server context7 is enabled for DF; disable it there first."
 
 ### Requirement: Call records in the run view
 The control plane SHALL store the call records the gateway reports with their run and show them in the run view: time, server, tool (`tools/list` for a failed list), outcome, duration, request and response size. Arguments and results SHALL NOT be stored. Records SHALL be deleted with their run.
@@ -138,4 +162,8 @@ The control plane SHALL store the call records the gateway reports with their ru
 
 #### Scenario: Run with two calls
 - **WHEN** a run called `context7__resolve-library-id` once successfully and `wiki__search` once while `wiki` was disabled
-- **THEN** the run view lists both, the second with outcome "rejected"
+- **THEN** the run's entry in the run view has a section "Tool calls (MCP)" with the count 2, listing both oldest first, each with its tool name, an outcome badge (`ok`, then `rejected`), time, duration and request and response size
+
+#### Scenario: Run without calls
+- **WHEN** a run has no call records
+- **THEN** its entry in the run view has no "Tool calls (MCP)" section
