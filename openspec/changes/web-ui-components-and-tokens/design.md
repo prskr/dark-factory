@@ -101,6 +101,7 @@ pub fn tab_class(style: TabsStyle, selected: bool) -> &'static str;
   - `Side`: a 3 px `accent-strong` bar at the left edge on `sunk` (today's `Dialog` marker).
   - `Inline`: today it marks the selected tab by text colour only (`text-ink` vs `text-muted`). It gets the same 2 px `accent-strong` bar under the label as `Underline`, with `text` for the label, so the selection doesn't depend on a colour difference between two text colours. This is the "details tab marker" of the `question-kinds` review. `accent-strong` reaches 6.9:1 (light) and 13.4:1 (dark) on `panel`, above the 3:1 for non-text. Task 1.1 checks the marker against the details boards of PenPot.
   - `Folder`: the panel-coloured tab joined to the panel (today's `TAB_CLASS`).
+- `TabItem.count` renders today's count markup (`rounded-full bg-sunk px-1.5 text-xs`) inside `tabs.rs`, so 3.2 doesn't depend on PenPot. Task 3.4 later swaps that markup for `count_pill`, once the pill's style is checked.
 - Every row gets `role="tablist"`, `aria-label`, `aria-selected`, roving `tabindex`, `aria-controls` and `x-on:keydown="move($event)"`, and works with the existing Alpine component `tabs`. Tab ids become `tab-<id>` everywhere. Today `create_issue` uses `<panel>-tab`, and its test changes with it.
 - `tabbed_form` keeps its job (form, panels, footer) and calls `tabs`. `config_pages::TabsStyle` is removed and its callers pass `components::TabsStyle`.
 - The archive's link tabs keep their links (the server loads the tab's content) and take their classes from `tab_class(TabsStyle::Underline, …)`. That replaces the bright `border-accent` marker with the `accent-strong` underline of the settings pages. The bright accent is only 1.4:1 on the light panel, so it fails the 3:1 a selection marker needs. Arrow keys for these link tabs: backlog.
@@ -162,6 +163,7 @@ Alternative: value names (`text-13`, `rounded-10`). Rejected. A token named afte
 A unit test in `components/mod.rs` (`no_page_uses_a_palette_colour_or_an_arbitrary_type_or_radius_value`) reads `crate::assets::app_css()` and rejects every selector whose utility part (the part after the last escaped `:` variant separator) is:
 
 - a palette colour: `<utility>-<palette>-<number>` for the 22 Tailwind palettes (the 17 of today's list plus `violet`, `purple`, `fuchsia`, `pink`, `rose`);
+- an unnumbered fixed colour: `<colour utility>-white` and `<colour utility>-black`, with or without an opacity (`text-white`, `bg-white/80`). The only allowed forms are the scrim's `backdrop:bg-black/50` and `bg-black/40`. Neither `white` nor `black` is used anywhere else today;
 - an arbitrary type value: `text-[…]`, `leading-[…]`, `tracking-[…]`;
 - an arbitrary radius: `rounded-[…]` and `rounded-<side>-[…]`;
 - an arbitrary colour in any colour utility: `-[#…]`, `-[rgb(…)]`, `-[var(…)]`.
@@ -176,7 +178,7 @@ Side effect: a test that asserts the absence of a forbidden class, or a comment 
 
 Alternative: walk the `.rs` source files at test time. Rejected. It needs the sources as Bazel `data` and re-implements Tailwind's class detection (Alpine strings, `format!` pieces). `input.css` is the one source file the test reads directly, because only it holds `@apply`.
 
-Exempt: the black scrim behind modal dialogs and sheets (`backdrop:bg-black/50`, `bg-black/40`). Tailwind's `black` is no palette with a number, and the scrim is the same in both themes on purpose. `web-ui-shell` "Pages use only design tokens" names this exception.
+Exempt: the black scrim behind modal dialogs and sheets (`backdrop:bg-black/50`, `bg-black/40`), exactly these two classes. The scrim is the same in both themes on purpose. The rendered-page matcher (`testkit::forbidden_classes`) uses the same rules and the same allow list. `web-ui-shell` "Pages use only design tokens" names this exception.
 
 ### D8: The two hand-built tables stay
 
@@ -226,7 +228,9 @@ Tests: a unit test reads `app_css()` and checks that the cell rule resets `overf
 - **Markdown preview:** the persona page's System prompt tab in the Split view (the field's preview), on a persona the test creates.
 - **Settings:** Projects, Personas, Credentials, Model providers and Egress rules, read only.
 
-Each page is visited once in a light and once in a dark session. A dark session is a browser context with the dark colour scheme: playwright-rs support for the context option or `emulate_media` is (unverified), see task 6.1. The helper `browser::contrast_violations(page)` sends the source of `axe.min.js` with `page.evaluate`. That isn't subject to a page CSP, and there is no CSP anyway. It then runs `axe.run(document, { runOnly: ['color-contrast'] })` and returns the violations. The test fails with page, theme, selector, ratio and colours per violation. axe's `incomplete` results (text on images or gradients) are written to the test's diagnostics and don't fail the test. Before axe runs, the test waits for the page's state (`expect` on the content it seeded), so live regions don't change underneath it.
+Each page is visited once in a light and once in a dark session. A dark session is a browser context with the dark colour scheme: playwright-rs support for the context option or `emulate_media` is (unverified), see task 6.1. The helper `browser::contrast_violations(page)` sends the source of `axe.min.js` with `page.evaluate`. That isn't subject to a page CSP, and there is no CSP anyway. It then runs `axe.run(document, { runOnly: ['color-contrast'] })` and returns the violations. The test fails with page, theme, selector, ratio and colours per violation. axe sorts some measurable failures into `incomplete` rather than `violations`. Text whose colour equals its background (1:1) is the main case, reported with the message key `equalRatio` (unverified for the pinned version, see task 6.3). The helper therefore reads the `messageKey` of every `incomplete` node of `color-contrast`:
+- `equalRatio`, and any other key in the helper's list `MEASURED_INCOMPLETE`, counts as a violation, whichever axe version is pinned.
+- Every other `incomplete` node is written to the test's diagnostics and doesn't fail the test. These are text on images or gradients and other cases where axe can't measure the background. Before axe runs, the test waits for the page's state (`expect` on the content it seeded), so live regions don't change underneath it.
 
 axe-core source: pinned in `crates/df-e2e/package.json` with `pnpm-lock.yaml`, following the conventions of `crates/df-web`:
 - a `pnpm-workspace.yaml` with `allowBuilds: {}`, so no install script runs;

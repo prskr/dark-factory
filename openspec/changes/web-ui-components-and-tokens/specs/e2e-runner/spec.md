@@ -3,11 +3,19 @@
 ## ADDED Requirements
 
 ### Requirement: Contrast check of the main pages
-The suite SHALL check the text contrast of the main pages (request inbox, task timeline and details, chat, artifact view, Markdown preview, settings pages) in the light and the dark theme. It SHALL fail when text is below 4.5:1, or below 3:1 for large text, against its background, and SHALL name the page, the theme, the element and the measured ratio.
+The suite SHALL check the text contrast of the main pages (request inbox, task timeline and details, chat, artifact view, Markdown preview, settings pages) in the light and the dark theme. It SHALL fail when text is below 4.5:1, or below 3:1 for large text, against its background, including text in the colour of its background (1:1), and SHALL name the page, the theme, the element and the measured ratio.
 
 #### Scenario: Low-contrast text in dark mode
-- **WHEN** a page of the check renders text below 4.5:1 only in the dark theme
+- **WHEN** a page of the check renders normal-size text below 4.5:1 only in the dark theme
 - **THEN** the check fails and names the page, "dark", the element and the ratio
+
+#### Scenario: Large text between 3:1 and 4.5:1
+- **WHEN** a page renders large text at 4:1
+- **THEN** the check does not fail on it
+
+#### Scenario: Invisible text
+- **WHEN** a page renders text in the same colour as its background
+- **THEN** the check fails and names the element with the ratio 1:1
 
 #### Scenario: Every main page in both themes
 - **WHEN** the suite runs against a build without contrast defects
