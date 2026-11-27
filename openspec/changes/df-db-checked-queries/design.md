@@ -73,7 +73,9 @@ Clippy accepts any `reason`, so the spec requires only the `expect` (DF-45, find
 
 ### D4: Ban the hidden query functions
 
-`sqlx::__query_with_result` and `sqlx::__query_scalar_with_result` are `#[doc(hidden)]` re-exports that take SQL text (DF-45, finding 6). They join `disallowed-methods`. The checked macros expand to calls of these functions; clippy's `disallowed_methods` is expected to skip spans from external macro expansions (unverified). Task 1.2 checks that a `query!` does not trigger it; if it does, the two entries are dropped again and the result is recorded here.
+`sqlx::__query_with_result` and `sqlx::__query_scalar_with_result` are `#[doc(hidden)]` re-exports that take SQL text (DF-45, finding 6). They join `disallowed-methods`. The checked macros expand to calls of these functions; clippy's `disallowed_methods` is expected to skip spans from external macro expansions (unverified). Task 1.2 checks that a `query!` does not trigger it.
+
+Fallback if it does: drop the two entries, and change the spec in the same step. Delete the scenario "Hidden query function" and probe (c) of task 4.1, and add a Risks entry: a direct call of a hidden function passes clippy, and only review catches it. No other mechanism is added (no `xtask` grep, D1). Today nothing calls these functions by hand, and their `__` names mark them as internal.
 
 ### D5: Test code through the crate root
 
