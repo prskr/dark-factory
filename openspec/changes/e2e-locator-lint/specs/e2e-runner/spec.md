@@ -1,10 +1,10 @@
 ## ADDED Requirements
 
 ### Requirement: Unambiguous locators
-Every browser locator of the e2e suite SHALL match one element, so that Playwright's strict mode fails when a second match appears. Picking an element by position (first, last, n-th) SHALL be possible only in a helper whose name says what the position means. `cargo clippy` SHALL fail for a positional pick anywhere else in `crates/df-e2e`, and CI SHALL run that check.
+Every browser locator of the e2e suite SHALL match one element, so that Playwright's strict mode fails when a second match appears. Picking an element by position (first, last, n-th) SHALL be possible only in a helper whose name says what the position means. `cargo clippy` SHALL fail for a positional pick anywhere else in `crates/df-e2e`, except in a file that opts out of the database-access ban and uses no locator, and CI SHALL run that check.
 
 #### Scenario: New positional pick in a test
-- **WHEN** a test in `crates/df-e2e/tests/` calls `.first()` on a Playwright locator
+- **WHEN** a test file in `crates/df-e2e/tests/` without a database-access opt-out calls `.first()` on a Playwright locator
 - **THEN** `cargo clippy -p df-e2e --all-targets --all-features -- -D warnings` fails and names the call
 
 #### Scenario: Positional pick in a helper of `src/`

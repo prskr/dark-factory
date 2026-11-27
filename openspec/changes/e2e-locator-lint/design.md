@@ -15,7 +15,7 @@ See proposal.md, "Why". Facts this design builds on:
 
 ## Goals / Non-Goals
 
-**Goals:** a positional pick fails `cargo clippy` in all of `df-e2e`, locally and in CI. The opt-out is visible at the helper that uses it.
+**Goals:** a positional pick fails `cargo clippy` in all of `df-e2e`, locally and in CI, except in the five files that opt out of the database-access ban (`db.rs`, `seed/demo/write.rs` and three SQL integration tests). Those files use no `Locator`. Clippy does not enforce that; the skill rule and review do (Risks). The opt-out is visible at the helper that uses it.
 
 **Non-Goals:**
 - `FrameLocator`: not used. Rejected until its first use.
