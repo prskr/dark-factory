@@ -89,7 +89,6 @@ async fn a_chat_run_is_refused_every_tool_it_is_not_offered() {
     let (env, rc) = chat_run().await;
 
     for tool in [
-        "ask_question",
         "update_pull_request",
         "comment_on_issue",
         "read_pull_request_feedback",
@@ -104,4 +103,32 @@ async fn a_chat_run_is_refused_every_tool_it_is_not_offered() {
         );
     }
     assert_eq!(stored_calls(&env).await, 0);
+}
+
+#[tokio::test]
+async fn a_chat_run_can_ask_a_question_which_is_stored_on_the_chat() {
+    let (env, rc) = chat_run().await;
+    let options = json!([{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]);
+
+    let result = execute(
+        &env.ctx,
+        &rc,
+        call(
+            "ask_question",
+            json!({"text": "Which?", "kind": "single_choice", "options": options}),
+        ),
+    )
+    .await;
+
+    assert!(!result.is_error, "{}", message(&result));
+    assert!(result.await_input_after_turn);
+    let stored = df_db::requests::list_for_task(&env.ctx.pool, rc.task.id)
+        .await
+        .unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(
+        stored[0].question().kind,
+        df_core::QuestionKind::SingleChoice
+    );
+    assert_eq!(stored[0].state, df_db::requests::RequestState::Pending);
 }

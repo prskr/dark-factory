@@ -89,8 +89,7 @@ async fn a_request_of_a_chat_is_in_the_inbox_and_links_to_the_chat_page() {
                 actor: &actor,
                 blocking: false,
             },
-            &format!("Question of {id}"),
-            &[],
+            df_core::QuestionSpec::text_question(format!("Question of {id}")),
         )
         .await
         .unwrap();

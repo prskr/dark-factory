@@ -5,7 +5,9 @@ use df_proto::transcript::v1::{ArtifactKind, ArtifactWritten};
 use jiff::Timestamp;
 use maud::{Markup, html};
 
-use crate::components::{ICON_BUTTON_CLASS, INITIAL_DETAILS_TAB, Icon, icon};
+use crate::components::{
+    ICON_BUTTON_CLASS, INITIAL_DETAILS_TAB, Icon, MarkerInset, TAB_CLASS, icon, tab_marker,
+};
 use crate::markdown::{ImageArtifacts, highlight_by_extension, render_with_images};
 
 /// A card shows at most this many lines of a text artifact, and at most [`PREVIEW_BYTES`].
@@ -171,13 +173,13 @@ pub(crate) fn details_heading(subtasks: usize, artifacts: usize, oob: bool) -> M
                 h2 class="text-base font-semibold" { "Details" }
             } @else {
                 // The `tabs` component sits on the details panel (`details_panel_with_heading`).
-                div role="tablist" aria-label="Details" "x-on:keydown"="move($event)" x-init="adopt()" class="flex items-center gap-4 text-sm font-medium" {
+                div role="tablist" aria-label="Details" "x-on:keydown"="move($event)" x-init="adopt()" class="flex items-center gap-4 text-sm" {
                     (tab_button("overview", "panel-overview", html! { "Overview" }))
                     @if subtasks > 0 {
-                        (tab_button("subtasks", "panel-subtasks", html! { "Subtasks " span class="rounded-full bg-sunk px-1.5 text-xs" { (subtasks) } }))
+                        (tab_button("subtasks", "panel-subtasks", html! { "Subtasks " (count(subtasks)) }))
                     }
                     @if artifacts > 0 {
-                        (tab_button("artifacts", "panel-artifacts", html! { "Artifacts " span class="rounded-full bg-sunk px-1.5 text-xs" { (artifacts) } }))
+                        (tab_button("artifacts", "panel-artifacts", html! { "Artifacts " (count(artifacts)) }))
                     }
                 }
             }
@@ -190,10 +192,10 @@ pub(crate) fn details_heading(subtasks: usize, artifacts: usize, oob: bool) -> M
 pub(crate) fn chat_details_heading(subtasks: usize, artifacts: usize, oob: bool) -> Markup {
     html! {
         div id="ws-details-heading" hx-swap-oob=[oob.then_some("outerHTML")] class="min-w-0" {
-            div role="tablist" aria-label="Details" "x-on:keydown"="move($event)" x-init="adopt()" class="flex items-center gap-4 text-sm font-medium" {
+            div role="tablist" aria-label="Details" "x-on:keydown"="move($event)" x-init="adopt()" class="flex items-center gap-4 text-sm" {
                 (tab_button("overview", "panel-overview", html! { "Overview" }))
-                (tab_button("subtasks", "panel-subtasks", html! { "Subtasks " span class="rounded-full bg-sunk px-1.5 text-xs" { (subtasks) } }))
-                (tab_button("artifacts", "panel-artifacts", html! { "Artifacts " span class="rounded-full bg-sunk px-1.5 text-xs" { (artifacts) } }))
+                (tab_button("subtasks", "panel-subtasks", html! { "Subtasks " (count(subtasks)) }))
+                (tab_button("artifacts", "panel-artifacts", html! { "Artifacts " (count(artifacts)) }))
             }
         }
     }
@@ -204,11 +206,22 @@ pub(crate) fn chat_details_heading(subtasks: usize, artifacts: usize, oob: bool)
 fn tab_button(id: &str, panel: &str, label: Markup) -> Markup {
     let first = id == INITIAL_DETAILS_TAB;
     html! {
-        button type="button" role="tab" id={"tab-" (id)} data-tab=(id) aria-controls=(panel) class="min-h-11 lg:min-h-8"
+        // The selected tab: medium weight and a 2 px accent line, like the settings page tabs
+        // (`marker_class` in `config_pages.rs`); the others are muted and regular.
+        button type="button" role="tab" id={"tab-" (id)} data-tab=(id) aria-controls=(panel)
+            class={(TAB_CLASS) " px-2 lg:min-h-8"}
             aria-selected=(first) tabindex=(if first { "0" } else { "-1" })
             ":aria-selected"={"tab === '" (id) "'"} ":tabindex"={"tab === '" (id) "' ? 0 : -1"}
-            "x-on:click"={"tab = '" (id) "'"} ":class"={"tab === '" (id) "' ? 'text-ink' : 'text-muted'"} { (label) }
+            "x-on:click"={"tab = '" (id) "'"} {
+            (tab_marker(MarkerInset::Narrow))
+            (label)
+        }
     }
+}
+
+/// The count after a tab label: a plain muted number.
+fn count(n: usize) -> Markup {
+    html! { span class="ml-1.5 text-[13px] font-normal text-muted" { (n) } }
 }
 
 /// The Artifacts tab: the cards. It reloads itself on `artifacts-changed` (a `write_artifact` row
@@ -264,7 +277,7 @@ pub(super) fn artifact_view(
                 @if is_image(meta) {
                     img src={(url) "/raw"} alt=(meta.name) class="max-w-full";
                 } @else if is_markdown(meta) {
-                    div x-show="!source" class="md-body" {
+                    div x-show="!source" class="md-body md-page" {
                         (render_with_images(&text, &ImageArtifacts { task_key, names: images }))
                     }
                     div x-show="source" x-cloak { (highlight_by_extension("md", &text)) }

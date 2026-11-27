@@ -32,7 +32,7 @@ pub(crate) fn fragment(source: &str) -> Markup {
     if source.trim().is_empty() {
         return html! { p class="text-sm text-faint" { "Nothing to preview" } };
     }
-    html! { div class="md-body" { (crate::markdown::render(source)) } }
+    html! { div class="md-body md-page" { (crate::markdown::render(source)) } }
 }
 
 #[derive(Deserialize)]
@@ -68,7 +68,11 @@ mod tests {
         let cookie = app.login().await;
         let (status, body) = preview(&app, &cookie, "## Rules\n\n- one\n- two").await;
         assert_eq!(status, StatusCode::OK);
-        assert!(body.starts_with("<div class=\"md-body\">"), "{body}");
+        // `md-page`: inline code sits on the page, not on the agent bubble's background.
+        assert!(
+            body.starts_with("<div class=\"md-body md-page\">"),
+            "{body}"
+        );
         assert!(body.contains("<h2>Rules</h2>"), "{body}");
         assert!(body.contains("<li>two</li>"), "{body}");
     }

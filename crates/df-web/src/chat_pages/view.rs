@@ -26,7 +26,7 @@ pub(super) fn archive_blocker(detail: &TaskDetail) -> Option<String> {
         return None;
     }
     let reason =
-        df_core::task_transition::archive_rejection(detail.status, detail.has_pending_request)?
+        df_core::task_transition::archive_rejection(detail.status, detail.has_pending_approval)?
             .to_string();
     let mut chars = reason.chars();
     let first = chars.next()?;

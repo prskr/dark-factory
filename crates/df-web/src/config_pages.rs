@@ -23,11 +23,11 @@ use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::components::forms::{INPUT_CLASS, field, form_group, select_field_with_hint};
 use crate::components::{
-    ButtonKind, Cell, DialogStyle, FormErrors, HostRole, ICON_BUTTON_CLASS, Icon, Tone,
-    action_class, data_table, dialog_with, empty_panel, entry_button, entry_link, entry_tr,
-    faint_separator, forge_icon, form_error, icon, issue_role, name_cell,
+    ButtonKind, Cell, DialogStyle, FormErrors, HostRole, ICON_BUTTON_CLASS, Icon, MarkerInset,
+    TAB_CLASS, Tone, action_class, data_table, dialog_with, empty_panel, entry_button, entry_link,
+    entry_tr, faint_separator, forge_icon, form_error, icon, issue_role, name_cell,
     page_header_with_subtitle, phone_profile_menu, project_forge_kind, readonly_field, role_icon,
-    select_field, submit_button, td, text_field, th,
+    select_field, submit_button, tab_marker, td, text_field, th,
 };
 use crate::layout::{Nav, Shell, layout};
 use crate::responses::{htmx_location, internal_error, invalid, not_found};
@@ -506,21 +506,24 @@ pub(crate) fn tabbed_form(
         (
             "md:rounded-xl md:border md:border-line md:bg-panel",
             "flex shrink-0 gap-1 overflow-x-auto scroll-px-3 border-b border-line md:px-4",
-            "group relative flex min-h-11 shrink-0 items-center px-3 text-sm text-muted hover:text-ink aria-selected:font-medium aria-selected:text-ink md:px-4",
+            format!("{TAB_CLASS} flex shrink-0 items-center px-3 text-sm hover:text-ink md:px-4"),
             "min-w-0 flex-1 space-y-4 py-5 md:px-6",
         )
     } else {
         (
             "",
             "flex shrink-0 gap-1 overflow-x-auto scroll-px-3 border-b border-line px-3 py-2 md:w-42 md:flex-col md:overflow-visible md:border-r md:border-b-0 md:py-4",
-            "group relative flex min-h-11 shrink-0 items-center rounded-lg px-3 text-sm text-muted hover:bg-sunk aria-selected:bg-sunk aria-selected:font-medium aria-selected:text-ink md:min-h-9",
+            format!(
+                "{TAB_CLASS} flex shrink-0 items-center rounded-lg px-3 text-sm hover:bg-sunk aria-selected:bg-sunk md:min-h-9"
+            ),
             "min-w-0 flex-1 space-y-4 px-4 py-5 md:px-6",
         )
     };
-    let marker_class = if page {
-        "absolute inset-x-2 bottom-0 hidden h-0.5 rounded-full bg-accent-text group-aria-selected:block"
+    // The page tabs have the underline marker; the sidebar tabs a vertical bar of their own.
+    let marker = if page {
+        tab_marker(MarkerInset::Narrow)
     } else {
-        "absolute inset-y-2 left-0 hidden w-[3px] rounded-sm bg-accent-text group-aria-selected:block"
+        html! { span aria-hidden="true" class="absolute inset-y-2 left-0 hidden w-[3px] rounded-sm bg-accent-text group-aria-selected:block" {} }
     };
     html! {
         form id="form" class=(form_class) hx-post=(action) hx-target="#form" hx-swap="outerHTML"
@@ -535,7 +538,7 @@ pub(crate) fn tabbed_form(
                             ":aria-selected"={"tab === '" (tab.id) "'"} ":tabindex"={"tab === '" (tab.id) "' ? 0 : -1"}
                             "x-on:click"={"tab = '" (tab.id) "'"}
                             class=(tab_class) {
-                            span aria-hidden="true" class=(marker_class) {}
+                            (marker)
                             (tab.label)
                         }
                     }

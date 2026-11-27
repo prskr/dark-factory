@@ -4,7 +4,10 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use df_core::{IntegrationError, Principal, PullRequestUpdate, TitleSource, sanitize_title};
+use df_core::{
+    IntegrationError, Principal, PullRequestUpdate, QuestionSpec, RawQuestion, TitleSource,
+    sanitize_title,
+};
 use df_db::create_issue::CREATE_ISSUE;
 use df_db::requests::{
     Raise, Raised, RequestError, close_pending_for_task, raise_approval, raise_question,
@@ -32,6 +35,15 @@ mod ci;
 mod delegation;
 mod feedback;
 mod issues;
+
+/// Arguments a tool had once: (tool, argument, what to send instead). A call that still has one
+/// gets the hint instead of the schema's "unexpected property".
+const REMOVED_ARGUMENTS: &[(&str, &str, &str)] = &[(
+    "ask_question",
+    "suggested_answers",
+    "`suggested_answers` is gone: set `kind` (`single_choice`, `multi_choice` or `text`) and, \
+     for a choice, `options` as a list of {id, label}",
+)];
 
 static VALIDATORS: LazyLock<HashMap<&'static str, Validator>> = LazyLock::new(|| {
     tool_input_schemas()
@@ -132,6 +144,9 @@ async fn try_execute(
             }
         }
     };
+    if let Some(removed) = removed_argument_hint(&request.tool_name, &arguments) {
+        return Ok(result(&call_id, &Outcome::error(removed)));
+    }
     let problems: Vec<String> = validator
         .iter_errors(&arguments)
         .map(|e| e.to_string())
@@ -513,19 +528,18 @@ async fn ask_question(
     args: &Value,
 ) -> Result<Outcome, ChannelError> {
     let task_id = rc.task.id;
-    let answers: Vec<String> = args
-        .get("suggested_answers")
-        .and_then(Value::as_array)
-        .map_or_default(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        });
+    let question = match serde_json::from_value::<RawQuestion>(args.clone())
+        .map_err(|e| e.to_string())
+        .and_then(|raw| QuestionSpec::parse(raw).map_err(|e| e.to_string()))
+    {
+        Ok(question) => question,
+        Err(problem) => return Ok(Outcome::error(problem)),
+    };
+    // Questions block unless the agent says it can continue.
     let blocking = args
         .get("blocking")
         .and_then(Value::as_bool)
-        .unwrap_or(false);
+        .unwrap_or(true);
     let actor = Principal::agent(
         rc.persona.id,
         rc.persona.display_name.clone(),
@@ -538,30 +552,17 @@ async fn ask_question(
         actor: &actor,
         blocking,
     };
-    let raised = raise_question(
-        &ctx.pool,
-        from,
-        &text_arg(args, "text").unwrap_or_default(),
-        &answers,
-    )
-    .await;
+    let raised = raise_question(&ctx.pool, from, question).await;
     Ok(match raised {
-        Ok((request, _)) => Outcome {
-            await_input_after_turn: blocking,
-            structured: Some(
-                serde_json::json!({ "id": request.id, "state": request.state.as_str() }),
-            ),
-            ..Outcome::ok(if blocking {
-                format!(
-                    "Question {} raised. End your turn now; the answer arrives as a message and the run waits for it for a limited time.",
-                    request.id
-                )
-            } else {
-                format!(
-                    "Question {} raised. Continue your work; the answer arrives later as a message.",
-                    request.id
-                )
-            })
+        // A repeat merges into the pending question, which keeps its own blocking state.
+        Ok((request, is_new)) => Outcome {
+            await_input_after_turn: request.blocking,
+            structured: Some(serde_json::json!({
+                "id": request.id,
+                "state": request.state.as_str(),
+                "merged": !is_new,
+            })),
+            ..Outcome::ok(question_raised_text(request.id, is_new, request.blocking))
         },
         Err(
             e @ (RequestError::Invalid(_)
@@ -571,6 +572,32 @@ async fn ask_question(
         ) => Outcome::error(e.to_string()),
         Err(e) => return Err(e.into()),
     })
+}
+
+/// What the agent reads after `ask_question`: the question is new or merged into a pending one.
+fn question_raised_text(id: df_core::RequestId, is_new: bool, blocking: bool) -> String {
+    let raised = if is_new {
+        format!("Question {id} raised.")
+    } else {
+        format!(
+            "An identical question is already pending (id {id}); its kind and options are unchanged."
+        )
+    };
+    if blocking {
+        format!(
+            "{raised} End your turn now; the answer arrives as a message and the run waits for it for a limited time."
+        )
+    } else {
+        format!("{raised} Continue your work; the answer arrives later as a message.")
+    }
+}
+
+/// The hint for a call that still uses a removed argument of its tool, if it does.
+fn removed_argument_hint(tool: &str, arguments: &Value) -> Option<&'static str> {
+    REMOVED_ARGUMENTS
+        .iter()
+        .find(|(name, argument, _)| *name == tool && arguments.get(*argument).is_some())
+        .map(|(_, _, hint)| *hint)
 }
 
 /// Raises an approval request of a registered type unless the run has what it asks for already;

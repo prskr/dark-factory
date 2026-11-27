@@ -668,7 +668,7 @@ async fn non_blocking_question_returns_its_id_and_does_not_pause_the_run() {
             &rc,
             call(
                 "ask_question",
-                serde_json::json!({"text": "Should I also update the docs?", "suggested_answers": ["yes", "no"]}),
+                serde_json::json!({"text": "Should I also update the docs?", "kind": "text", "blocking": false}),
             ),
         )
         .await;
@@ -677,7 +677,216 @@ async fn non_blocking_question_returns_its_id_and_does_not_pause_the_run() {
     let structured: Value = serde_json::from_str(&res.structured_content_json).unwrap();
     assert_eq!(structured["state"], "pending");
     assert!(structured["id"].is_string());
+    assert_eq!(structured["merged"], false);
     assert_eq!(pending_requests(&pool).await, 1);
+}
+
+async fn ask(env: &Env, rc: &RunContext, args: Value) -> ToolCallResult {
+    execute(&env.ctx, rc, call("ask_question", args)).await
+}
+
+fn json_of(res: &ToolCallResult) -> Value {
+    serde_json::from_str(&res.structured_content_json).unwrap()
+}
+
+#[tokio::test]
+async fn a_question_without_blocking_awaits_input_after_the_turn() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let (env, rc) = setup(pool).await;
+
+    let res = ask(
+        &env,
+        &rc,
+        serde_json::json!({"text": "Which?", "kind": "text"}),
+    )
+    .await;
+
+    assert!(!res.is_error, "{}", message(&res));
+    assert!(res.await_input_after_turn);
+    assert!(!res.end_run_after_turn);
+}
+
+#[tokio::test]
+async fn a_repeated_question_follows_the_stored_blocking_state() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let (env, rc) = setup(pool).await;
+    let first = serde_json::json!({"text": "Which?", "kind": "text", "blocking": false});
+    ask(&env, &rc, first).await;
+
+    let res = ask(
+        &env,
+        &rc,
+        serde_json::json!({"text": "Which?", "kind": "text"}),
+    )
+    .await;
+
+    assert!(!res.is_error, "{}", message(&res));
+    assert_eq!(json_of(&res)["merged"], true);
+    assert!(!res.await_input_after_turn);
+}
+
+#[tokio::test]
+async fn a_single_choice_question_is_stored_with_its_options_and_other() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let (env, rc) = setup(pool.clone()).await;
+    let options = serde_json::json!([
+        {"id": "pg16", "label": "PostgreSQL 16"},
+        {"id": "pg17", "label": "PostgreSQL 17", "description": "Supported until 2029"},
+    ]);
+
+    let res = ask(
+        &env,
+        &rc,
+        serde_json::json!({"text": "Which?", "kind": "single_choice", "options": options}),
+    )
+    .await;
+
+    assert!(!res.is_error, "{}", message(&res));
+    let stored = df_db::requests::list_for_task(&pool, rc.task.id)
+        .await
+        .unwrap();
+    let question = stored[0].question();
+    assert_eq!(question.kind, df_core::QuestionKind::SingleChoice);
+    assert_eq!(question.options.len(), 2);
+    assert!(question.allow_other);
+}
+
+#[tokio::test]
+async fn a_multiple_choice_question_is_stored_with_its_limits() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let (env, rc) = setup(pool.clone()).await;
+    let options = serde_json::json!([
+        {"id": "api", "label": "API"}, {"id": "ui", "label": "UI"}, {"id": "cli", "label": "CLI"},
+    ]);
+
+    let res = ask(
+        &env,
+        &rc,
+        serde_json::json!({
+            "text": "Which?", "kind": "multi_choice", "options": options,
+            "max_selected": 2, "allow_other": false,
+        }),
+    )
+    .await;
+
+    assert!(!res.is_error, "{}", message(&res));
+    let question = df_db::requests::list_for_task(&pool, rc.task.id)
+        .await
+        .unwrap()[0]
+        .question();
+    assert_eq!(question.kind, df_core::QuestionKind::MultiChoice);
+    assert_eq!(
+        (question.min_selected, question.max_selected),
+        (Some(1), Some(2))
+    );
+    assert!(!question.allow_other);
+}
+
+#[tokio::test]
+async fn the_removed_suggested_answers_argument_is_an_error_naming_kind_and_options() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let (env, rc) = setup(pool.clone()).await;
+
+    let res = ask(
+        &env,
+        &rc,
+        serde_json::json!({"text": "Which?", "suggested_answers": ["a", "b"]}),
+    )
+    .await;
+
+    assert!(res.is_error);
+    let text = message(&res);
+    assert!(text.contains("kind") && text.contains("options"), "{text}");
+    assert_eq!(pending_requests(&pool).await, 0);
+}
+
+#[tokio::test]
+async fn arguments_that_break_the_question_rules_are_errors_naming_the_argument() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let (env, rc) = setup(pool.clone()).await;
+    let two = serde_json::json!([{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]);
+    let three = serde_json::json!([
+        {"id": "a", "label": "A"}, {"id": "b", "label": "B"}, {"id": "c", "label": "C"},
+    ]);
+    let duplicate = serde_json::json!([{"id": "api", "label": "A"}, {"id": "api", "label": "B"}]);
+    let cases = [
+        (
+            serde_json::json!({"kind": "text", "options": two}),
+            "options",
+        ),
+        (
+            serde_json::json!({"kind": "multi_choice", "options": duplicate}),
+            "api",
+        ),
+        (
+            serde_json::json!({"kind": "multi_choice", "options": three, "allow_other": false, "min_selected": 4}),
+            "min_selected",
+        ),
+        (
+            serde_json::json!({"kind": "single_choice", "options": two, "max_selected": 2}),
+            "max_selected",
+        ),
+    ];
+    for (mut args, named) in cases {
+        args["text"] = "Which?".into();
+        let res = ask(&env, &rc, args.clone()).await;
+        assert!(res.is_error, "{args}");
+        assert!(message(&res).contains(named), "{args}: {}", message(&res));
+    }
+    assert_eq!(pending_requests(&pool).await, 0);
+}
+
+#[tokio::test]
+async fn neutral_arguments_of_another_kind_are_ignored() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let (env, rc) = setup(pool.clone()).await;
+
+    let res = ask(
+        &env,
+        &rc,
+        serde_json::json!({
+            "text": "Which?", "kind": "text", "options": [], "allow_other": false,
+            "min_selected": null,
+        }),
+    )
+    .await;
+
+    assert!(!res.is_error, "{}", message(&res));
+    assert_eq!(pending_requests(&pool).await, 1);
+}
+
+#[tokio::test]
+async fn asking_the_same_text_again_reports_the_merged_question_and_keeps_it_unchanged() {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let (env, rc) = setup(pool.clone()).await;
+    let first = ask(
+        &env,
+        &rc,
+        serde_json::json!({"text": "Which version?", "kind": "text"}),
+    )
+    .await;
+    let options = serde_json::json!([{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]);
+
+    let second = ask(
+        &env,
+        &rc,
+        serde_json::json!({"text": "Which version?", "kind": "single_choice", "options": options}),
+    )
+    .await;
+
+    assert!(!second.is_error, "{}", message(&second));
+    assert_eq!(json_of(&second)["id"], json_of(&first)["id"]);
+    assert_eq!(json_of(&second)["merged"], true);
+    assert!(
+        message(&second).contains("its kind and options are unchanged"),
+        "{}",
+        message(&second)
+    );
+    let stored = df_db::requests::list_for_task(&pool, rc.task.id)
+        .await
+        .unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].question().kind, df_core::QuestionKind::Text);
 }
 
 #[tokio::test]
@@ -689,7 +898,7 @@ async fn blocking_question_awaits_input_after_the_turn() {
         &rc,
         call(
             "ask_question",
-            serde_json::json!({"text": "Which?", "blocking": true}),
+            serde_json::json!({"text": "Which?", "kind": "text", "blocking": true}),
         ),
     )
     .await;
@@ -705,7 +914,10 @@ async fn too_many_questions_is_an_error_the_agent_can_read() {
         let res = execute(
             &env.ctx,
             &rc,
-            call("ask_question", serde_json::json!({"text": format!("q{i}")})),
+            call(
+                "ask_question",
+                serde_json::json!({"text": format!("q{i}"), "kind": "text"}),
+            ),
         )
         .await;
         assert_eq!(res.is_error, i == 20, "{}", message(&res));
@@ -722,7 +934,10 @@ async fn completing_the_task_closes_its_pending_questions() {
     execute(
         &env.ctx,
         &rc,
-        call("ask_question", serde_json::json!({"text": "Which?"})),
+        call(
+            "ask_question",
+            serde_json::json!({"text": "Which?", "kind": "text"}),
+        ),
     )
     .await;
     execute(

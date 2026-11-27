@@ -2,7 +2,7 @@
 //! view.
 
 use df_core::{PersonaId, Principal, ProjectId, TaskStatus};
-use df_db::requests::{Raise, raise_question};
+use df_db::requests::{Raise, raise_approval, raise_question};
 use serde_json::json;
 
 use super::{between, idle_chat};
@@ -205,25 +205,40 @@ async fn archive_is_disabled_with_its_reason_while_the_chat_runs_or_has_an_open_
 
     set_task_status(&app.pool, chat.id, TaskStatus::Waiting).await;
     let actor = crate::testkit::actor().0;
+    let from = Raise {
+        task_id: chat.id,
+        run_id: None,
+        actor: &actor,
+        blocking: false,
+    };
+    // A pending question does not keep the chat from being archived: archiving closes it.
     raise_question(
         &app.pool,
-        Raise {
-            task_id: chat.id,
-            run_id: None,
-            actor: &actor,
-            blocking: false,
-        },
-        "Which one?",
-        &[],
+        from,
+        df_core::QuestionSpec::text_question("Which one?"),
     )
     .await
     .unwrap();
     let asked = text(app.get("/chats/DF-1-CHAT", &cookie).await).await;
     let button = between(&asked, "hx-post=\"/chats/DF-1-CHAT/archive\"", ">");
+    assert!(!crate::testkit::has_disabled_attribute(button), "{button}");
+
+    raise_approval(
+        &app.pool,
+        &TestApp::approval_types(),
+        from,
+        "fake-approval",
+        serde_json::json!({"what": "a host"}),
+        "needs a host",
+    )
+    .await
+    .unwrap();
+    let approval = text(app.get("/chats/DF-1-CHAT", &cookie).await).await;
+    let button = between(&approval, "hx-post=\"/chats/DF-1-CHAT/archive\"", ">");
     assert!(crate::testkit::has_disabled_attribute(button), "{button}");
     assert!(
-        asked.contains("The chat has an open request; answer it before archiving"),
-        "{asked}"
+        approval.contains("The chat has an open request; answer it before archiving"),
+        "{approval}"
     );
 }
 

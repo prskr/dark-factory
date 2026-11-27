@@ -203,9 +203,11 @@ impl DemoRun {
     }
 }
 
+/// A question of the task as `ask_question` gets it (JSON arguments), pending or answered.
 pub(super) struct Question {
-    pub text: &'static str,
-    pub suggested_answers: &'static [&'static str],
+    pub args: &'static str,
+    /// The stored answer (JSON) of an answered question; `None` while it is pending.
+    pub answer: Option<&'static str>,
 }
 
 #[derive(Clone, Copy)]
@@ -244,7 +246,7 @@ pub(super) struct DemoTask {
     /// was merged.
     pub done_ago: Option<i64>,
     pub runs: Vec<DemoRun>,
-    pub question: Option<Question>,
+    pub questions: Vec<Question>,
     /// Written by the last run.
     pub artifacts: Vec<Artifact>,
 }
@@ -275,7 +277,7 @@ impl DemoTask {
             auto_resumes: 0,
             done_ago: None,
             runs: Vec::new(),
-            question: None,
+            questions: Vec::new(),
             artifacts: Vec::new(),
         }
     }

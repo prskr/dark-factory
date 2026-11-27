@@ -4,7 +4,7 @@
 - **Storage** (`crates/df-db/src/requests.rs`, table `agent_requests`): a question's `payload` is `{"text", "suggested_answers"}`; its `decision` is `{"answer": "<text>"}`. Identical pending questions merge by a fingerprint of the normalized text. `Decision::Answer(String)`; the web and every later caller go through `decide`.
 - **Delivery:** `decision_message` writes one hidden text block on the task (`request.decided`): `Request <id> (your question "<text>") was answered by <name>: <answer>`. The agent gets prose.
 - **UI** (`crates/df-web/src/requests.rs`): one `request_card` for the inbox (`/requests`), the task timeline and the chat timeline (`sse.rs` sends the same markup). For a question it renders the text with `markdown::render`, the suggested answers as one-tap buttons and a one-line input with "Answer". A failed decision re-renders the card with a card-wide `role=alert` line. The inbox list is re-sent with `outerMorph` on every request change (`events`).
-- **Markdown field** (`markdown-editor`, merged, not built yet): `markdown_field` with `Preview::Tabs` and `Preview::SideBySide`. From 768 px every layout attaches the CodeMirror highlighting editor when the bundle is loaded. `iter6-agent-memory` adds `Preview::SourceOnly`. There is no tabs layout without highlighting.
+- **Markdown field** (`markdown-editor`, built and archived; `crates/df-web/src/components/forms.rs`): `markdown_field` with `Preview::Switch` (a centred "Editor | Preview" segment switch) and `Preview::Split` (adds "Split" from 1280 px). From 768 px every layout attaches the CodeMirror highlighting editor when the bundle is loaded, with a "Highlighting" switch to turn it off. `iter6-agent-memory` adds `Preview::SourceOnly`. There is no layout without highlighting.
 - **Chats** are not offered `ask_question` today (`chats` spec), and archiving a chat is rejected while it has a pending approval request. `iter3-parent-questions` adds `to` to `ask_question` and the tool `answer_question`; this PR also updates it (D11).
 - **Accessibility** (`web-ui-shell`): interactive elements at least 44×44 px below 1024 px; checked radios and checkboxes in `accent-text`. The approval card's scope radios already use `min-h-11 lg:min-h-9` rows.
 
@@ -203,9 +203,9 @@ Answer: PostgreSQL 17
 
 Inputs, all inside one `<form hx-post="/requests/{id}/answer">`:
 
-- **Single choice:** `<fieldset>` labelled by the question (`aria-labelledby` the question's id), one `<label>` row per option: radio, label in `ink`, description in `muted` below. "Other" is the last row: a radio "Other" (`value="_other"`, D2) and a text input (`name="other"`, 1,000 characters) that shows and takes focus when the radio is checked (Alpine). Nothing is preselected. Without scripts the input is always visible; its text counts only when "Other" is checked.
+- **Single choice:** `<fieldset>` labelled by the question (`aria-labelledby` the question's id), one `<label>` row per option: radio, label in `ink`, description in `muted` below. "Other" is the last row: a radio "Other" (`value="_other"`, D2) and a text input below it (`name="other"`, 1,000 characters, placeholder "Your Other answer") that shows and takes focus when the radio is checked (Alpine). Nothing is preselected. Without scripts the input is always visible; its text counts only when "Other" is checked.
 - **Multiple choice:** the same rows with checkboxes, and a hint line from `limit_hint` (D2) in `muted`, linked by `aria-describedby`. "Other" is a checkbox (`value="_other"`) with the same input.
-- **Text:** `markdown_field` with `Preview::TabsPlain` (D7), label "Your answer", `rows: 4`, name `text`.
+- **Text:** `markdown_field` with `Preview::PlainTabs` (D7), label "Your answer" with the "Write" and "Preview" tabs on the same row at the right, `rows: 4`, name `text`. Board layout and sizes: `design-boards.md`.
 
 Rows are at least 44 px high below 1024 px (`min-h-11 lg:min-h-9`), the whole row is the click target, and the control is 20 px. Checked controls use `accent-text` (`web-ui-shell`).
 
@@ -227,16 +227,16 @@ The form posts `selected` once per checked option, `other` and `text`. The handl
 - **Not kept:** the 422 card of a rejected answer (the form's own `hx-swap="outerHTML"`, not the sink) and a decided or closed card replace the form, as they must.
 - **Without the script** the sink stays hidden and live card updates do nothing until reload; the forms still post.
 
-### D7: `Preview::TabsPlain`
+### D7: `Preview::PlainTabs`
 
-The tabs layout of `markdown-editor` minus the highlighting editor:
+A third layout of `markdown_field` next to `Preview::Switch` and `Preview::Split`: the label on the left, the tabs "Write" and "Preview" at the right end of the same row, the text field or the preview below at full width. No highlighting editor.
 
-- Write and Preview tabs, the server-rendered preview, its errors and limits, the no-JS fallback and the 16 px text below 1024 px apply as for `Preview::Tabs`.
-- The field never attaches CodeMirror, never loads the editor bundle, shows no "Plain text editor" switch and no indent hint, at any width.
-- Reason: the issue asks for no highlighting; an answer is short; the inbox may show several text questions at once, and none should load the 175 KB (gzip) bundle.
-- Alternative: a `highlight: bool` field on `MarkdownField`. Rejected for now: it would open combinations (side by side without highlighting) with no caller, which `markdown-editor` D2 avoids.
-- `markdown-editor` says highlighting, the "Plain text editor" switch and the indent hint apply to every Markdown field from 768 px. The delta modifies those three requirements ("Highlighting while typing", "Editor keyboard and screen reader access", "Plain text field on phones") so they exclude the plain tabs layout.
-- **Order:** `markdown-editor` (both steps ship in one PR) is implemented and archived before this change is archived, so the MODIFIED blocks apply to its synced spec, as `iter6-agent-memory` does for `Preview::SourceOnly`. If `iter6-agent-memory` is archived first, its own wording of those requirements is the base the MODIFIED blocks are merged onto.
+- The server-rendered preview, its errors and limits, the no-JS fallback (plain labelled text field, no tabs) and the 16 px text below 1024 px apply as for `Preview::Switch`.
+- The tabs follow the WAI-ARIA tabs pattern (`role=tablist`, arrow keys), open on "Write" and reuse the view state of the `markdownField` component; the layout only changes the markup of the switch row.
+- The field never attaches CodeMirror, never loads the editor bundle, shows no view switch, no "Highlighting" switch and no indent hint, at any width.
+- Reason: the issue asks for no highlighting; an answer is short; the inbox may show several text questions at once, and none should load the 175 KB (gzip) bundle. Plain tabs instead of the centred segment switch: decided in the design review (there is no split view, so a segment switch with icons is too much for a card).
+- Alternative: `Preview::Switch` with a `highlight: bool` field on `MarkdownField`. Rejected: it opens combinations (split without highlighting) with no caller, which `markdown-editor` D2 avoids, and keeps the segment switch the review rejected.
+- The archived `markdown-editor` spec gives every Markdown field the view switch and highlighting from 768 px. The delta adds "Plain tabs layout" and modifies "View switch", "Highlighting while typing" and "Plain text field on phones" so they exclude the plain tabs layout. "Highlighting switch" and "Indent hint" apply only where the highlighting editor is shown and need no change. `iter6-agent-memory` only adds requirements to `markdown-editor`, so the order of archiving does not matter.
 
 ### D8: History and transcript
 

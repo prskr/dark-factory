@@ -35,8 +35,9 @@ pub struct TaskSnapshot {
     pub kind: TaskKind,
     /// A chat that is archived.
     pub archived: bool,
-    /// The task has an agent request that is still pending.
-    pub pending_requests: bool,
+    /// The task has an approval request that is still pending. A pending question does not count:
+    /// archiving a chat closes its questions.
+    pub pending_approvals: bool,
 }
 
 impl TaskSnapshot {
@@ -54,7 +55,7 @@ impl TaskSnapshot {
             has_parent: false,
             kind: TaskKind::Task,
             archived: false,
-            pending_requests: false,
+            pending_approvals: false,
         }
     }
 }
@@ -330,12 +331,12 @@ fn apply_event(task: &TaskSnapshot, event: TaskEvent) -> Result<Transition, Reje
     })
 }
 
-/// Why a chat with this `status` and `pending_requests` cannot be archived right now; the UI
+/// Why a chat with this `status` and `pending_approvals` cannot be archived right now; the UI
 /// shows it before the command is sent.
-pub const fn archive_rejection(status: TaskStatus, pending_requests: bool) -> Option<Rejected> {
+pub const fn archive_rejection(status: TaskStatus, pending_approvals: bool) -> Option<Rejected> {
     if matches!(status, TaskStatus::Queued | TaskStatus::Running) {
         Some(Rejected::ArchiveBusy(status))
-    } else if pending_requests {
+    } else if pending_approvals {
         Some(Rejected::ArchiveOpenRequest)
     } else {
         None
@@ -351,7 +352,7 @@ fn archived(task: &TaskSnapshot, by: Principal) -> Result<Transition, Rejected> 
     if task.archived {
         return Err(Rejected::AlreadyArchived);
     }
-    if let Some(rejected) = archive_rejection(task.status, task.pending_requests) {
+    if let Some(rejected) = archive_rejection(task.status, task.pending_approvals) {
         return Err(rejected);
     }
     Ok(Transition::unchanged(task)

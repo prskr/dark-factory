@@ -608,6 +608,52 @@ impl Session {
             .context("unarchive the chat")
     }
 
+    /// Cuts (`true`) or restores the network of the session's context, which drops the live
+    /// connections of its pages: the way a test loses and regains the live updates.
+    pub async fn set_offline(&self, offline: bool) -> Result<()> {
+        within_for(
+            UI_TIMEOUT,
+            &format!("set the context offline = {offline}"),
+            self.context.set_offline(offline),
+        )
+        .await
+    }
+
+    /// Evaluates `script` on the open page within [`UI_TIMEOUT`]; `what` names the step.
+    pub async fn evaluate(&self, what: &str, script: &str) -> Result<String> {
+        within_for(UI_TIMEOUT, what, self.page.evaluate_value(script)).await
+    }
+
+    /// The card of request `id` on the open page.
+    pub fn request_card(&self, id: df_core::RequestId) -> Locator {
+        self.page.locator(format!("#request-{id}"))
+    }
+
+    /// Opens the requests inbox and waits for the card of request `id`.
+    pub async fn open_inbox_card(&self, env: &E2eEnv, id: df_core::RequestId) -> Result<Locator> {
+        within_for(
+            CARD_TIMEOUT,
+            "open the requests inbox",
+            self.page.goto(&format!("{}/requests", env.base_url), None),
+        )
+        .await?;
+        let card = self.request_card(id);
+        expect(card.clone())
+            .with_timeout(CARD_TIMEOUT)
+            .to_be_visible()
+            .await
+            .with_context(|| format!("wait for the card of {id} in the inbox"))?;
+        Ok(card)
+    }
+
+    /// Whether the open page requested the highlighting editor bundle.
+    pub async fn requested_editor_bundle(&self) -> Result<bool> {
+        let script =
+            "performance.getEntriesByType('resource').some(e => e.name.includes('editor.js'))";
+        let answer = self.evaluate("check for the editor bundle", script).await?;
+        Ok(answer.trim_matches('"') == "true")
+    }
+
     /// Opens the page of task `key`.
     pub async fn open_task(&self, env: &E2eEnv, key: &str) -> Result<()> {
         self.page
@@ -1026,7 +1072,14 @@ impl Session {
             const view = scroll.getBoundingClientRect();
             const padding = parseFloat(getComputedStyle(scroll).paddingBottom);
             const blank = view.bottom - padding - box.bottom;
-            if (page.scrollHeight > page.clientHeight || page.scrollTop !== 0) return 'the page scrolls: ' + page.scrollTop + ' of ' + (page.scrollHeight - page.clientHeight);
+            if (page.scrollHeight > page.clientHeight || page.scrollTop !== 0) {
+                // Name the lowest elements, which are what makes the page taller than the window.
+                const lowest = [...document.body.querySelectorAll('*')]
+                    .map((e) => [e.getBoundingClientRect().bottom, e.tagName + (e.id ? '#' + e.id : '') + '.' + String(e.className).slice(0, 50) + ' < ' + (e.parentElement ? e.parentElement.tagName + (e.parentElement.id ? '#' + e.parentElement.id : '') : '')])
+                    .filter((x) => x[0] > window.innerHeight && x[0] <= page.scrollHeight + 2)
+                    .sort((a, b) => b[0] - a[0]).slice(0, 5).map((x) => Math.round(x[0]) + ' ' + x[1]);
+                return 'the page scrolls: ' + page.scrollTop + ' of ' + (page.scrollHeight - page.clientHeight) + '; lowest: ' + lowest.join(' | ');
+            }
             if (box.top < view.top || box.bottom > view.bottom) return 'the last item is not in view: ' + box.top + '..' + box.bottom + ' in ' + view.top + '..' + view.bottom;
             if (Math.abs(blank) > 2) return 'blank space of ' + blank + 'px follows the last item';
             return 'ok';
@@ -1099,6 +1152,28 @@ pub fn button(page: &Page, name: &str) -> Locator {
         AriaRole::Button,
         Some(GetByRoleOptions::default().name(name).exact(true)),
     )
+}
+
+/// The radio button or checkbox (`role`) of the option labelled `label` inside `scope`.
+pub fn option_in(scope: &Locator, role: AriaRole, label: &str) -> Locator {
+    scope.get_by_role(role, Some(GetByRoleOptions::default().name(label)))
+}
+
+/// Presses "Answer" on the question card `card`.
+pub async fn press_answer(card: &Locator) -> Result<()> {
+    button_in(card, "Answer")
+        .click(None)
+        .await
+        .context("press Answer")
+}
+
+/// Waits until `scope` contains `text`.
+pub async fn expect_text_in(scope: &Locator, text: &str, timeout: Duration) -> Result<()> {
+    expect(scope.clone())
+        .with_timeout(timeout)
+        .to_contain_text(text)
+        .await
+        .with_context(|| format!("wait for `{text}`"))
 }
 
 /// The button inside `scope` with the accessible name `name` (exactly).

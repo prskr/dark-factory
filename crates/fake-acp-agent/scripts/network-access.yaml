@@ -14,6 +14,7 @@ sessions:
                 tool: ask_question
                 args:
                   text: "Which inputs should the next turn receive?"
+                  kind: text
                   blocking: false
       - when:
           prompt_contains: "[blocking-question]"
@@ -23,6 +24,66 @@ sessions:
                 tool: ask_question
                 args:
                   text: "Which greeting should the file contain?"
+                  kind: text
+                  blocking: true
+      # Question kinds (crates/df-e2e/tests/questions.rs): the held fetch below keeps the turn
+      # open while the board member answers.
+      - when:
+          prompt_contains: "[kind-single]"
+          steps:
+            - mcp:
+                server: factory
+                tool: ask_question
+                args:
+                  text: "Which PostgreSQL version should the chart default to?"
+                  kind: single_choice
+                  options:
+                    - { id: pg16, label: "PostgreSQL 16", description: "Supported until 2028" }
+                    - { id: pg17, label: "PostgreSQL 17" }
+                  blocking: true
+      - when:
+          prompt_contains: "[kind-choices]"
+          steps:
+            - mcp:
+                server: factory
+                tool: ask_question
+                args:
+                  text: "Which parts does the change touch?"
+                  kind: multi_choice
+                  options:
+                    - { id: api, label: "API" }
+                    - { id: ui, label: "UI" }
+                    - { id: cli, label: "CLI" }
+                    - { id: docs, label: "Docs" }
+                  max_selected: 2
+                  blocking: true
+            - mcp:
+                server: factory
+                tool: ask_question
+                args:
+                  text: "Why did the build fail?"
+                  kind: text
+                  blocking: true
+      - when:
+          prompt_contains: "[kind-drafts]"
+          steps:
+            - mcp:
+                server: factory
+                tool: ask_question
+                args:
+                  text: "Describe the rollout."
+                  kind: text
+                  blocking: true
+            - mcp:
+                server: factory
+                tool: ask_question
+                args:
+                  text: "Which environments get it first?"
+                  kind: multi_choice
+                  options:
+                    - { id: dev, label: "Dev" }
+                    - { id: stage, label: "Stage" }
+                    - { id: prod, label: "Prod" }
                   blocking: true
       - fetch:
           url: https://pypi.org/simple/pip/
@@ -39,6 +100,10 @@ sessions:
                 steps:
                   - say: "Received the queued follow-up and question answer with author lines."
       - when:
+          prompt_contains: '"selected":[{"id":"pg17","label":"PostgreSQL 17"}]'
+          steps:
+            - say: "Chose pg17 from the JSON block."
+      - when:
           prompt_contains: "Hello, blocking world."
           steps:
             - say: "Got the first answer in the same run."
@@ -47,6 +112,7 @@ sessions:
                 tool: ask_question
                 args:
                   text: "Should I also add a test?"
+                  kind: text
                   blocking: true
       - end: end_turn
   # Run 2 of the blocking-question flow, started by the second answer.

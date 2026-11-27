@@ -460,7 +460,7 @@ async fn load_snapshot(
     Ok(TaskSnapshot {
         kind: kind.parse()?,
         archived,
-        pending_requests: has_pending_request(tx, task_id).await?,
+        pending_approvals: has_pending_approval(tx, task_id).await?,
         status: status.parse()?,
         resume_at: resume_at.map(Into::into),
         auto_resumes,
@@ -483,16 +483,18 @@ async fn load_snapshot(
     })
 }
 
-/// Whether an agent request of the task is pending.
-async fn has_pending_request(
+/// Whether an approval request of the task is pending.
+async fn has_pending_approval(
     tx: &mut Transaction<'_, Postgres>,
     task_id: TaskId,
 ) -> Result<bool, DbError> {
     Ok(sqlx::query_scalar!(
-        r#"SELECT EXISTS (SELECT 1 FROM agent_requests WHERE task_id = $1 AND state = $2)
+        r#"SELECT EXISTS (
+               SELECT 1 FROM agent_requests WHERE task_id = $1 AND state = $2 AND kind = $3)
            AS "pending!""#,
         task_id.as_uuid(),
-        crate::requests::RequestState::Pending.as_str()
+        crate::requests::RequestState::Pending.as_str(),
+        crate::requests::RequestKind::Approval.as_str()
     )
     .fetch_one(&mut **tx)
     .await?)

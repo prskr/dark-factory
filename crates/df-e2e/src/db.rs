@@ -13,7 +13,7 @@ use sqlx::Executor;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use uuid::Uuid;
 
-use crate::wait::{RUN_TIMEOUT, eventually, status_reached};
+use crate::wait::{RUN_TIMEOUT, UI_TIMEOUT, eventually, status_reached};
 
 /// Schema of the control plane tables unless `E2E_DATABASE_SCHEMA` says otherwise.
 pub const DEFAULT_SCHEMA: &str = "dark_factory";
@@ -30,6 +30,8 @@ pub async fn connect(url: &str) -> Result<PgPool> {
             Box::pin(async move {
                 // `schema` was validated by `validate_sql_identifier`.
                 conn.execute(sqlx::AssertSqlSafe(query)).await?;
+                // Bounds every lookup of the suite: a stalled query fails instead of hanging the job.
+                conn.execute("SET statement_timeout = '30s'").await?;
                 Ok(())
             })
         })
@@ -588,4 +590,66 @@ pub async fn http_host_scopes(
     .fetch_all(pool)
     .await
     .with_context(|| format!("allowlist entries for {host}:{port} of task {key}"))
+}
+
+/// Waits until the agent of task `key` asked the question with `text`; returns its row.
+pub async fn question(pool: &PgPool, key: &str, text: &str) -> Result<df_db::requests::RequestRow> {
+    let task = df_core::TaskId::from_uuid(task_id(pool, key).await?);
+    eventually(
+        &format!("question `{text}` of {key}"),
+        RUN_TIMEOUT,
+        || async {
+            Ok(df_db::requests::list_for_task(pool, task)
+                .await?
+                .into_iter()
+                .find(|r| r.question_text() == text))
+        },
+    )
+    .await
+}
+
+/// The request `id` as stored now.
+pub async fn request(pool: &PgPool, id: df_core::RequestId) -> Result<df_db::requests::RequestRow> {
+    df_db::requests::get_request(pool, id)
+        .await?
+        .with_context(|| format!("request {id}"))
+}
+
+/// Waits until the question `id` is answered; returns the row.
+pub async fn answered_question(
+    pool: &PgPool,
+    id: df_core::RequestId,
+) -> Result<df_db::requests::RequestRow> {
+    eventually(
+        &format!("question {id} to be answered"),
+        UI_TIMEOUT,
+        || async {
+            let row = request(pool, id).await?;
+            Ok((row.state == RequestState::Answered).then_some(row))
+        },
+    )
+    .await
+}
+
+/// Raises a text question on task `key` the way its agent's `ask_question` call does (the same
+/// storage call), for a test that needs one more request at a chosen moment.
+pub async fn raise_text_question(
+    pool: &PgPool,
+    key: &str,
+    text: &str,
+) -> Result<df_core::RequestId> {
+    let task = df_core::TaskId::from_uuid(task_id(pool, key).await?);
+    let actor = df_core::Principal::system("e2e");
+    let (row, _) = df_db::requests::raise_question(
+        pool,
+        df_db::requests::Raise {
+            task_id: task,
+            run_id: None,
+            actor: &actor,
+            blocking: false,
+        },
+        df_core::QuestionSpec::text_question(text),
+    )
+    .await?;
+    Ok(row.id)
 }

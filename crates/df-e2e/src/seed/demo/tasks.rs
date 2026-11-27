@@ -264,14 +264,24 @@ fn payments() -> Vec<DemoTask> {
         DemoTask {
             description: "Clients retry POST /v1/charges after timeouts and sometimes charge twice. Accept an `Idempotency-Key` header and return the stored response for a repeated key.",
             status_line: "Waiting for an answer",
-            question: Some(Question {
-                text: "Should a retry with the same key after 24 hours create a new charge or return the original response?",
-                suggested_answers: &[
-                    "Return the original response for 24 hours, then accept the key again",
-                    "Return the original response for as long as the key is stored",
-                    "Reject a reused key with 409 Conflict",
-                ],
-            }),
+            questions: vec![
+                Question {
+                    args: r#"{"kind":"single_choice","text":"Should a retry with the same key after 24 hours create a new charge or return the original response?","options":[{"id":"expire","label":"Return the original response for 24 hours, then accept the key again","description":"Keys expire with the stored response"},{"id":"keep","label":"Return the original response for as long as the key is stored","description":"No expiry, the table grows"},{"id":"conflict","label":"Reject a reused key with 409 Conflict"}]}"#,
+                    answer: None,
+                },
+                Question {
+                    args: r#"{"kind":"multi_choice","text":"Which clients should send the `Idempotency-Key` header first?","min_selected":1,"max_selected":3,"options":[{"id":"api","label":"API"},{"id":"web","label":"Web checkout"},{"id":"mobile","label":"Mobile app"},{"id":"cli","label":"CLI"}]}"#,
+                    answer: None,
+                },
+                Question {
+                    args: r#"{"kind":"text","text":"Describe how a stored response should be **invalidated** after a refund."}"#,
+                    answer: None,
+                },
+                Question {
+                    args: r#"{"kind":"multi_choice","text":"Which services should log the key?","options":[{"id":"api","label":"API"},{"id":"worker","label":"Worker"},{"id":"gateway","label":"Gateway"}]}"#,
+                    answer: Some(r#"{"selected":["api","worker"],"other":"also the CLI"}"#),
+                },
+            ],
             runs: vec![
                 DemoRun::new(26 * HOUR, 16, RunOutcome::Blocked)
                     .steps(vec![

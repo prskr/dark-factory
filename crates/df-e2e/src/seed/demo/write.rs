@@ -208,7 +208,7 @@ async fn insert_task(
     };
     write_runs(tx, &written, task, &message).await?;
     set_task_fields(tx, &written, task, &message, pr_url.as_deref()).await?;
-    if let Some(question) = &task.question {
+    for question in &task.questions {
         write_question(tx, &written, task, question).await?;
     }
     Ok(written)
@@ -697,22 +697,36 @@ async fn write_question(
     question: &super::data::Question,
 ) -> Result<()> {
     let run = spec.runs.last().context("a blocked task has a run")?;
+    let parsed = df_core::QuestionSpec::parse(serde_json::from_str(question.args)?)
+        .context("a demo question follows the question rules")?;
+    let answer: Option<serde_json::Value> = question
+        .answer
+        .map(serde_json::from_str)
+        .transpose()
+        .context("the demo answer is JSON")?;
+    let decided_by = answer
+        .as_ref()
+        .map(|_| serde_json::to_value(Principal::human(human_id("Mara Okafor"), "Mara Okafor")))
+        .transpose()?;
     sqlx::query(
         "INSERT INTO agent_requests (id, task_id, run_id, kind, payload, blocking, fingerprint,
-                                     state, created_at)
+                                     state, decision, decided_by, decided_at, created_at)
          VALUES ($1, $2, (SELECT id FROM runs WHERE task_id = $2 AND number = $3), 'question', $4,
-                 true, encode(sha256(convert_to($5, 'UTF8')), 'hex'), 'pending',
+                 $7, encode(sha256(convert_to($5, 'UTF8')), 'hex'),
+                 CASE WHEN $8::jsonb IS NULL THEN 'pending' ELSE 'answered' END,
+                 CASE WHEN $8::jsonb IS NULL THEN NULL ELSE jsonb_build_object('answer', $8::jsonb) END,
+                 $9::jsonb, CASE WHEN $8::jsonb IS NULL THEN NULL ELSE now() - make_interval(secs => $6 - 600) END,
                  now() - make_interval(secs => $6))",
     )
     .bind(Uuid::now_v7())
     .bind(task.id)
     .bind(i64::try_from(spec.runs.len())?)
-    .bind(serde_json::json!({
-        "text": question.text,
-        "suggested_answers": question.suggested_answers,
-    }))
-    .bind(question.text.to_lowercase())
+    .bind(parsed.to_payload())
+    .bind(parsed.text.to_lowercase())
     .bind(secs(run.start_ago - run.minutes * 60 + 60))
+    .bind(answer.is_none())
+    .bind(&answer)
+    .bind(&decided_by)
     .execute(&mut **tx)
     .await?;
     Ok(())

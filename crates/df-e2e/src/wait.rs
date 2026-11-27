@@ -13,6 +13,11 @@ pub const RUN_TIMEOUT: Duration = Duration::from_secs(300);
 /// that left): the UI follows within seconds, a longer wait only hides a failure.
 pub const UI_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// A page whose live connection was dropped and restored shows what happened meanwhile again:
+/// the stream reconnects after the backoff of the htmx SSE extension (at most 60 s,
+/// `reconnectMaxDelay`) and sends the state, and a lost notification is caught by the 5 s poll.
+pub const RECONNECT_TIMEOUT: Duration = Duration::from_secs(75);
+
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// A task ended in a final status other than the awaited one: no later check can succeed.
