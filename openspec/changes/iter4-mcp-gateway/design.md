@@ -255,12 +255,7 @@ Taken on 2026-11-27:
 | Q6 | Apply the private-address check to inference and Git upstreams too? | No, not in this change. |
 | Q8 | Server name `ext` and separator `__`? | Yes. |
 | Q9 | PenPot designs for the three screens? | Yes, drawn when the change is prepared for implementation (task group 6, first task). |
-
-Still open:
-
-| # | Question | Recommendation |
-|---|---|---|
-| Q7 | The limits (request 1 MiB, result 4 MiB, tool list 1,000 tools / 4 MiB per server, connect 10 s, list 15 s per server and 20 s overall, list cache 60 s, call 120 s, 8 concurrent calls per run and gateway pod, upstream session idle 10 min): fixed constants or settings? | Fixed constants in the code for this slice, as for inference. A setting (instance-wide or per server) when a real server needs more, most likely the call timeout and the result size. |
+| Q7 | The limits (request 1 MiB, result 4 MiB, tool list 1,000 tools / 4 MiB per server, connect 10 s, list 15 s per server and 20 s overall, list cache 60 s, call 120 s, 8 concurrent calls per run and gateway pod, upstream session idle 10 min): fixed constants or settings? | Fixed constants in the code for this slice, as for inference. A limit becomes a setting (instance-wide or per server) when a real server needs more, most likely the call timeout and the result size. |
 
 ## Open Questions
 
