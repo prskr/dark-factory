@@ -2,7 +2,7 @@
 
 ## Why
 
-`CODING_STANDARDS.md` ("Tests") already says: "Avoid timing-based tests (`sleep` to wait for an effect). Wait on the condition, use a channel, or use `tokio::time::pause()`." Seven unit tests still sleep a fixed 50–100 ms in real time and hope that the effect has happened by then. One live-cluster test sleeps 3 s. On a slow CI runner such a test is flaky, or it passes while it tests a different path than the one it names. A similar problem exists in the database tests: seven test modules have their own copy of "wait until a session waits for a lock", although `df_test_postgres::wait_for_lock_wait` exists. One copy has no timeout and no database filter, so a lock wait of another test can end its wait.
+`CODING_STANDARDS.md` ("Tests") already says: "Avoid timing-based tests (`sleep` to wait for an effect). Wait on the condition, use a channel, or use `tokio::time::pause()`." Seven unit tests still sleep a fixed 50–100 ms in real time and hope that the effect has happened by then. One live-cluster test sleeps 3 s. On a slow CI runner such a test is flaky, or it passes while it tests a different path than the one it names. A similar problem exists in the database tests: seven test modules have their own copy of "wait until a session waits for a lock", although `df_test_postgres::wait_for_lock_wait` exists. Three copies have no timeout, and one of them also has no database filter, so a lock wait of another test can end its wait.
 
 The DF-46 retro sweep found these sites. Three of them are already entries in `docs/tech_debt.md`:
 - TD-5: the shutdown-while-disconnected test sleeps 100 ms.
@@ -28,7 +28,7 @@ The sites are fixed by hand and not by a lint, see design, Decision 3.
 - **Tech-debt register.** TD-5, TD-50 and TD-101 are deleted from `docs/tech_debt.md`, both the entry and the summary row, as the register asks for a fixed entry.
 - **Rule made concrete.** The bullet in `CODING_STANDARDS.md` ("Tests") gets two additions:
   - a sleep in a test is allowed only on a paused clock (`start_paused`, `time::pause`) or inside a bounded poll loop;
-  - a database test waits for a lock with `df_test_postgres::wait_for_lock_wait`.
+  - a database test waits for a row or table lock with `df_test_postgres::wait_for_lock_wait`. A wait for an advisory lock (`pg_locks`) keeps its own helper (see "Out of Scope").
 
 ## Capabilities
 

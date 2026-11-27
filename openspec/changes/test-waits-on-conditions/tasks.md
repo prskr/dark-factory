@@ -1,6 +1,6 @@
 # Tasks
 
-Write each test change so that it runs green, then remove the sleep. The red state here is a flaky or wrong path, not a compile error. Prove the fix with a loop: `cargo nextest run -p <crate> <test> --retries 0` 50 times (`for i in $(seq 50); do …; done`), with a parallel CPU load (`stress-ng --cpu 0` or a parallel `cargo build`), when the tool is there. Tests that need PostgreSQL run only with a container socket (skill `rust`). Name the ones you could not run.
+Write each test change so that it runs green, then remove the sleep. The red state here is a flaky or wrong path, not a compile error. Prove the fix with a loop: `cargo nextest run -p <crate> <test> --retries 0` 50 times, stopping at the first failure (`for i in $(seq 50); do … || { echo "run $i failed"; exit 1; }; done` in a subshell; a plain loop reports only the last run's status), with a parallel CPU load (`stress-ng --cpu 0` or a parallel `cargo build`), when the tool is there. Tests that need PostgreSQL run only with a container socket (skill `rust`). Name the ones you could not run.
 
 ## 1. `factory-agent`: connection tests (design, Decision 1)
 
@@ -12,7 +12,7 @@ Write each test change so that it runs green, then remove the sleep. The red sta
 
 - [ ] 2.1 `tests/outbox.rs` `test_outbox_bounded_backpressure` and `test_append_or_stop_appends_when_stopped_while_full`: switch them to `#[tokio::test(start_paused = true)]` (design, Decision 2). Keep the sleep, which now advances the paused clock only, and add `assert!(!handle.is_finished())` before the space is freed in the first test. Verify: both pass 50 times in the loop. As a check, remove the ack in the first test: the `is_finished` assertion still holds and the test fails at the timeout.
 - [ ] 2.2 `tests/runner.rs:494`: the control-plane task reads from `outbound_rx` until the first message of the turn (the first `PhaseChanged` with phase `Running`, or the first transcript event, whichever the runner sends first; check in `runner.rs`). Only then does it send `Cancel`. Remove the sleep. Verify: the test passes 50 times in the loop and still ends with outcome `Cancelled`.
-- [ ] 2.3 `tests/runner_runtime.rs:644`: replace sleep and `abort` with `tokio::time::timeout(Duration::from_secs(5), cp_task2).await`. That works when `run_session` drops the last `outbound_tx2`. If the collector does not end because another clone of the sender lives on, drop that clone in the test, or drain `outbound_rx2` until it is empty and then abort. Verify: the test passes 50 times in the loop, and the assertions on `run2_messages` still see every message.
+- [ ] 2.3 `tests/runner_runtime.rs:644`: replace sleep and `abort` with `tokio::time::timeout(Duration::from_secs(5), cp_task2).await`, and fail the test on both errors (`.expect("collector ended")` for the timeout, `.expect("collector did not panic")` for the join) before reading `run2_messages`. That works when `run_session` drops the last `outbound_tx2`. If the collector does not end because another clone of the sender lives on, drop that clone in the test, or drain `outbound_rx2` until it is empty and then abort. Verify: the test passes 50 times in the loop, and the assertions on `run2_messages` still see every message.
 - [ ] 2.4 `fake-acp-agent/src/tests.rs:1100`: send the `CancelNotification` after the client has received the session update "Starting long task..." of the script, not after 100 ms. Remove the sleep. Verify: the test passes 50 times in the loop.
 
 ## 3. `df-k8s` live test
@@ -32,7 +32,7 @@ Write each test change so that it runs green, then remove the sleep. The red sta
 
 ## 5. Rule and checks
 
-- [ ] 5.1 In `CODING_STANDARDS.md`, section "Tests": extend the sleep bullet. A sleep in a test is allowed only on a paused clock (`start_paused`, `time::pause`) or inside a poll loop with a deadline. To fake an outage, refuse in the mock instead of waiting. A database test waits for a lock with `df_test_postgres::wait_for_lock_wait`. Verify by reading it against design, Decisions 1, 2 and 4.
+- [ ] 5.1 In `CODING_STANDARDS.md`, section "Tests": extend the sleep bullet. A sleep in a test is allowed only on a paused clock (`start_paused`, `time::pause`) or inside a poll loop with a deadline. To fake an outage, refuse in the mock instead of waiting. A database test waits for a row or table lock with `df_test_postgres::wait_for_lock_wait`; a wait for an advisory lock keeps its own `pg_locks` helper. Verify by reading it against design, Decisions 1, 2 and 4.
 - [ ] 5.2 Verify that no real-time fixed sleep is left: `grep -rnE "sleep\(" crates --include=*.rs` lists, in test code, only sleeps on a paused clock or in bounded poll loops. Check each remaining test hit by hand and list them in the PR description.
 - [ ] 5.3 Run the checks: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete`, and `cargo nextest run -p factory-agent -p fake-acp-agent`. Verify: all pass.
 - [ ] 5.4 Published docs: none. The change touches only test code and `CODING_STANDARDS.md`.
