@@ -860,7 +860,7 @@ Origin of TD-132: code review of `web-htmx-robustness` (`df-web`, 2026-11-27). T
 
 `crates/df-web/scripts/workspace.ts`, `crates/df-web/scripts/chatLayout.ts`
 
-Both components carry the same `selected(row, event)`: once the row's own load succeeded, set `body.dataset.view = 'task'`, close the details, clear the marked row of `row.closest('[data-rows]')` and mark the new one. The tests `both_workspaces_clear_the_marked_row_of_their_own_list_only` and `both_workspaces_mark_a_row_only_after_its_own_request_succeeded` have to check both copies.
+Both components carry the same `showPane()` (on the click: set `body.dataset.view = 'task'`, close the details) and `selected(row, event)`: once the row's own load succeeded, clear the marked row of `row.closest('[data-rows]')` and mark the new one. The tests `both_workspaces_clear_the_marked_row_of_their_own_list_only` and `both_workspaces_mark_a_row_only_after_its_own_request_succeeded` have to check both copies.
 
 **Matters when:** a third list view needs row selection, or the selection behaviour changes; both copies must change in step.
 
@@ -876,7 +876,7 @@ Dialogs open with `showModal()` and sit in the top layer; the toast region (`z-4
 
 **Matters when:** a dialog action can fail with a status other than 422 in practice (a deleted entity, a server error).
 
-**Fix:** keep `#toasts` the single live region, but move it into the topmost `dialog:modal` while one is open (and back on `close`), or open the region as a `popover` above the dialog. Cover it with an e2e test that fails a dialog action.
+**Fix:** keep `#toasts` the single live region, but move it into the topmost `dialog:modal` while one is open and back on `close`. A popover outside the dialog is not enough: it would show above the dialog but stay inert. Cover it with an e2e test that fails a dialog action.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122

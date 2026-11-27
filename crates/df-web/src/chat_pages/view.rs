@@ -63,7 +63,7 @@ pub(crate) fn chat_rows(
                         a href=(href) hx-get=(href) hx-target=(Region::WsDetail.selector()) hx-select=(Region::WsDetail.selector()) hx-swap="outerHTML" hx-push-url="true"
                             data-focus-after-swap=(Region::ChatHead.selector())
                             aria-current=[(current == Some(chat.key.as_str())).then_some("page")]
-                            "x-on:htmx:after:swap.document"="selected($el, $event)"
+                            "x-on:click"="showPane()" "x-on:htmx:after:swap.document"="selected($el, $event)"
                             class="block min-h-11 border-b border-line border-l-[3px] border-l-transparent py-3.5 pr-5 pl-[17px] hover:bg-sunk aria-[current=page]:border-l-accent aria-[current=page]:bg-accent-soft" {
                             div class="flex items-center gap-2" {
                                 (avatar(&initials(&chat.persona_display_name)))
