@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM project_mcp_servers WHERE project_id = $1 AND server_id <> ALL($2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2992c959e18f964505a609df5cf2d1ba059b638e4587e175d482f84b9d213c8e"
+}

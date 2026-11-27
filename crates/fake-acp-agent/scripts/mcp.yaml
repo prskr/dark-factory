@@ -1,14 +1,15 @@
 # Script of the MCP end-to-end test (`crates/df-e2e/tests/mcp.rs`): the agent calls a tool of a
 # registered MCP server through the `ext` relay, and one of a server that is registered but not
-# enabled for the project. The servers are registered by the test under the names `e2e-docs` and
-# `e2e-other`.
+# enabled for the project. The test registers servers under names of its own and passes them in
+# the task description as the markers `[docs=<name>]` and `[other=<name>]`, which become the
+# variables `${docs}` and `${other}` (`src/prompt_vars.rs`).
 sessions:
   new:
     - - say: "Looking up documentation through the MCP servers."
       - mcp:
           server: ext
-          tool: e2e-docs__whoami
+          tool: ${docs}__whoami
       - mcp:
           server: ext
-          tool: e2e-other__whoami
+          tool: ${other}__whoami
       - end: end_turn

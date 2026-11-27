@@ -10,7 +10,7 @@ use std::fmt;
 
 use df_core::mcp::{McpCredentialScheme, url_without_query};
 use serde::Serialize;
-use sqlx::{FromRow, PgExecutor, PgPool, Postgres, Transaction};
+use sqlx::{PgExecutor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
@@ -71,7 +71,6 @@ impl fmt::Debug for McpServerRecord {
     }
 }
 
-#[derive(FromRow)]
 struct ServerRow {
     id: Uuid,
     name: String,
@@ -123,40 +122,43 @@ impl TryFrom<ServerRow> for McpServerRecord {
     }
 }
 
-/// `SELECT` of servers with the keys of the projects that enable them, plus a trailing clause.
-macro_rules! select_servers {
-    ($tail:literal) => {
-        concat!(
-            "SELECT s.id, s.name, s.url, s.credential_ref_id, s.credential_scheme, \
-             s.credential_header, s.credential_prefix, s.credential_query_param, \
-             s.private_network, s.config_version, \
-             COALESCE(array_agg(p.key ORDER BY p.key) FILTER (WHERE p.key IS NOT NULL), \
-                      '{}') AS projects \
-             FROM mcp_servers s \
-             LEFT JOIN project_mcp_servers ps ON ps.server_id = s.id \
-             LEFT JOIN projects p ON p.id = ps.project_id ",
-            $tail
-        )
-    };
+/// The servers with `ids` (all of them without), with the keys of the projects that enable
+/// them, by name.
+async fn load_servers(
+    executor: impl PgExecutor<'_>,
+    ids: Option<&[Uuid]>,
+) -> Result<Vec<McpServerRecord>, DbError> {
+    let rows = sqlx::query_as!(
+        ServerRow,
+        r#"
+        SELECT s.id, s.name, s.url, s.credential_ref_id, s.credential_scheme,
+               s.credential_header, s.credential_prefix, s.credential_query_param,
+               s.private_network, s.config_version,
+               COALESCE(array_agg(p.key ORDER BY p.key) FILTER (WHERE p.key IS NOT NULL),
+                        '{}') AS "projects!"
+        FROM mcp_servers s
+        LEFT JOIN project_mcp_servers ps ON ps.server_id = s.id
+        LEFT JOIN projects p ON p.id = ps.project_id
+        WHERE ($1::uuid[] IS NULL OR s.id = ANY($1))
+        GROUP BY s.id ORDER BY s.name
+        "#,
+        ids
+    )
+    .fetch_all(executor)
+    .await?;
+    rows.into_iter().map(McpServerRecord::try_from).collect()
 }
 
 /// Every server, by name.
 pub async fn list_mcp_servers(pool: &PgPool) -> Result<Vec<McpServerRecord>, DbError> {
-    let rows: Vec<ServerRow> = sqlx::query_as(select_servers!("GROUP BY s.id ORDER BY s.name"))
-        .fetch_all(pool)
-        .await?;
-    rows.into_iter().map(McpServerRecord::try_from).collect()
+    load_servers(pool, None).await
 }
 
 pub async fn get_mcp_server(
     executor: impl PgExecutor<'_>,
     id: Uuid,
 ) -> Result<Option<McpServerRecord>, DbError> {
-    let row: Option<ServerRow> = sqlx::query_as(select_servers!("WHERE s.id = $1 GROUP BY s.id"))
-        .bind(id)
-        .fetch_optional(executor)
-        .await?;
-    row.map(McpServerRecord::try_from).transpose()
+    Ok(load_servers(executor, Some(&[id])).await?.pop())
 }
 
 /// Creates (`id` is `None`) or updates a server and audits the change. An update increases
@@ -172,8 +174,7 @@ pub async fn save_mcp_server(
     check_credential_free_of_factory_use(&mut tx, input.credential_ref_id).await?;
     let before = match id {
         Some(id) => {
-            sqlx::query_scalar::<_, i32>("SELECT 1 FROM mcp_servers WHERE id = $1 FOR UPDATE")
-                .bind(id)
+            sqlx::query!("SELECT id FROM mcp_servers WHERE id = $1 FOR UPDATE", id)
                 .fetch_optional(&mut *tx)
                 .await?
                 .ok_or_else(|| DbError::NotFound(format!("MCP server `{id}`")))?;
@@ -188,36 +189,12 @@ pub async fn save_mcp_server(
             "the name cannot change after creation".into(),
         ));
     }
-    let (header, prefix, query_param) = scheme_columns(&input.scheme);
     let saved_id = id.unwrap_or_else(Uuid::now_v7);
-    let query = if before.is_some() {
-        "UPDATE mcp_servers SET url = $3, credential_ref_id = $4, credential_scheme = $5, \
-         credential_header = $6, credential_prefix = $7, credential_query_param = $8, \
-         private_network = $9, config_version = config_version + 1, updated_at = now() \
-         WHERE id = $1 AND name = $2"
+    if before.is_some() {
+        update_server(&mut tx, saved_id, input).await?;
     } else {
-        "INSERT INTO mcp_servers (id, name, url, credential_ref_id, credential_scheme, \
-         credential_header, credential_prefix, credential_query_param, private_network) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
-    };
-    sqlx::query(query)
-        .bind(saved_id)
-        .bind(&input.name)
-        .bind(&input.url)
-        .bind(input.credential_ref_id)
-        .bind(input.scheme.as_str())
-        .bind(header)
-        .bind(prefix)
-        .bind(query_param)
-        .bind(input.private_network)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| match &e {
-            sqlx::Error::Database(db) if db.is_unique_violation() => {
-                DbError::Conflict("an MCP server with this name already exists".into())
-            }
-            _ => DbError::Sqlx(e),
-        })?;
+        insert_server(&mut tx, saved_id, input).await?;
+    }
     audit(
         &mut tx,
         actor,
@@ -236,12 +213,75 @@ pub async fn save_mcp_server(
     Ok(record)
 }
 
+/// Stores a new server.
+async fn insert_server(
+    tx: &mut Transaction<'_, Postgres>,
+    id: Uuid,
+    input: &McpServerInput,
+) -> Result<(), DbError> {
+    let (header, prefix, query_param) = scheme_columns(&input.scheme);
+    sqlx::query!(
+        "INSERT INTO mcp_servers (id, name, url, credential_ref_id, credential_scheme,
+             credential_header, credential_prefix, credential_query_param, private_network)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        id,
+        input.name,
+        input.url,
+        input.credential_ref_id,
+        input.scheme.as_str(),
+        header,
+        prefix,
+        query_param,
+        input.private_network
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(name_conflict)?;
+    Ok(())
+}
+
+/// Changes a stored server and increases its `config_version`; the name stays.
+async fn update_server(
+    tx: &mut Transaction<'_, Postgres>,
+    id: Uuid,
+    input: &McpServerInput,
+) -> Result<(), DbError> {
+    let (header, prefix, query_param) = scheme_columns(&input.scheme);
+    sqlx::query!(
+        "UPDATE mcp_servers SET url = $3, credential_ref_id = $4, credential_scheme = $5,
+             credential_header = $6, credential_prefix = $7, credential_query_param = $8,
+             private_network = $9, config_version = config_version + 1, updated_at = now()
+         WHERE id = $1 AND name = $2",
+        id,
+        input.name,
+        input.url,
+        input.credential_ref_id,
+        input.scheme.as_str(),
+        header,
+        prefix,
+        query_param,
+        input.private_network
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(name_conflict)?;
+    Ok(())
+}
+
+fn name_conflict(error: sqlx::Error) -> DbError {
+    match &error {
+        sqlx::Error::Database(db) if db.is_unique_violation() => {
+            DbError::Conflict("an MCP server with this name already exists".into())
+        }
+        _ => DbError::Sqlx(error),
+    }
+}
+
 /// Deletes a server no project enables and audits it. A server in use is a
 /// [`DbError::Conflict`] naming the projects.
 pub async fn delete_mcp_server(pool: &PgPool, actor: Actor<'_>, id: Uuid) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    sqlx::query_scalar::<_, i32>("SELECT 1 FROM mcp_servers WHERE id = $1 FOR UPDATE")
-        .bind(id)
+    sqlx::query!("SELECT id FROM mcp_servers WHERE id = $1 FOR UPDATE", id)
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| DbError::NotFound(format!("MCP server `{id}`")))?;
@@ -255,8 +295,7 @@ pub async fn delete_mcp_server(pool: &PgPool, actor: Actor<'_>, id: Uuid) -> Res
             record.projects.join(", ")
         )));
     }
-    sqlx::query("DELETE FROM mcp_servers WHERE id = $1")
-        .bind(id)
+    sqlx::query!("DELETE FROM mcp_servers WHERE id = $1", id)
         .execute(&mut *tx)
         .await?;
     let entry = NewAuditEntry::new(
@@ -278,12 +317,12 @@ pub async fn project_mcp_server_ids(
     executor: impl PgExecutor<'_>,
     project_id: Uuid,
 ) -> Result<Vec<Uuid>, DbError> {
-    Ok(sqlx::query_scalar(
-        "SELECT ps.server_id FROM project_mcp_servers ps \
-         JOIN mcp_servers s ON s.id = ps.server_id \
+    Ok(sqlx::query_scalar!(
+        "SELECT ps.server_id FROM project_mcp_servers ps
+         JOIN mcp_servers s ON s.id = ps.server_id
          WHERE ps.project_id = $1 ORDER BY s.name",
+        project_id
     )
-    .bind(project_id)
     .fetch_all(executor)
     .await?)
 }
@@ -297,31 +336,37 @@ pub async fn set_project_mcp_servers(
     server_ids: &[Uuid],
 ) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    let key: String = sqlx::query_scalar("SELECT key FROM projects WHERE id = $1 FOR UPDATE")
-        .bind(project_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| DbError::NotFound(format!("project `{project_id}`")))?;
+    let key = sqlx::query_scalar!(
+        "SELECT key FROM projects WHERE id = $1 FOR UPDATE",
+        project_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| DbError::NotFound(format!("project `{project_id}`")))?;
     let before = enabled_names(&mut tx, project_id).await?;
-    let known: i64 = sqlx::query_scalar("SELECT count(*) FROM mcp_servers WHERE id = ANY($1)")
-        .bind(server_ids)
-        .fetch_one(&mut *tx)
-        .await?;
+    let known = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "count!" FROM mcp_servers WHERE id = ANY($1)"#,
+        server_ids
+    )
+    .fetch_one(&mut *tx)
+    .await?;
     let distinct: std::collections::HashSet<&Uuid> = server_ids.iter().collect();
     if usize::try_from(known).ok() != Some(distinct.len()) {
         return Err(DbError::NotFound("MCP server".into()));
     }
-    sqlx::query("DELETE FROM project_mcp_servers WHERE project_id = $1 AND server_id <> ALL($2)")
-        .bind(project_id)
-        .bind(server_ids)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query(
-        "INSERT INTO project_mcp_servers (project_id, server_id) \
-         SELECT $1, id FROM mcp_servers WHERE id = ANY($2) ON CONFLICT DO NOTHING",
+    sqlx::query!(
+        "DELETE FROM project_mcp_servers WHERE project_id = $1 AND server_id <> ALL($2)",
+        project_id,
+        server_ids
     )
-    .bind(project_id)
-    .bind(server_ids)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        "INSERT INTO project_mcp_servers (project_id, server_id)
+         SELECT $1, id FROM mcp_servers WHERE id = ANY($2) ON CONFLICT DO NOTHING",
+        project_id,
+        server_ids
+    )
     .execute(&mut *tx)
     .await?;
     let after = enabled_names(&mut tx, project_id).await?;
@@ -343,11 +388,11 @@ async fn enabled_names(
     tx: &mut Transaction<'_, Postgres>,
     project_id: Uuid,
 ) -> Result<Vec<String>, DbError> {
-    Ok(sqlx::query_scalar(
-        "SELECT s.name FROM project_mcp_servers ps JOIN mcp_servers s ON s.id = ps.server_id \
+    Ok(sqlx::query_scalar!(
+        "SELECT s.name FROM project_mcp_servers ps JOIN mcp_servers s ON s.id = ps.server_id
          WHERE ps.project_id = $1 ORDER BY s.name",
+        project_id
     )
-    .bind(project_id)
     .fetch_all(&mut **tx)
     .await?)
 }
@@ -358,30 +403,27 @@ pub async fn enabled_servers_of_projects(
     pool: &PgPool,
     project_ids: &[Uuid],
 ) -> Result<HashMap<Uuid, Vec<McpServerRecord>>, DbError> {
-    let pairs: Vec<(Uuid, Uuid)> = sqlx::query_as(
-        "SELECT ps.project_id, ps.server_id FROM project_mcp_servers ps \
-         JOIN mcp_servers s ON s.id = ps.server_id WHERE ps.project_id = ANY($1) \
+    let pairs = sqlx::query!(
+        "SELECT ps.project_id, ps.server_id FROM project_mcp_servers ps
+         JOIN mcp_servers s ON s.id = ps.server_id WHERE ps.project_id = ANY($1)
          ORDER BY s.name",
+        project_ids
     )
-    .bind(project_ids)
     .fetch_all(pool)
     .await?;
+    let wanted: Vec<Uuid> = pairs.iter().map(|pair| pair.server_id).collect();
     let mut servers: HashMap<Uuid, McpServerRecord> = HashMap::new();
-    let wanted: Vec<Uuid> = pairs.iter().map(|(_, server)| *server).collect();
-    let rows: Vec<ServerRow> =
-        sqlx::query_as(select_servers!("WHERE s.id = ANY($1) GROUP BY s.id"))
-            .bind(&wanted)
-            .fetch_all(pool)
-            .await?;
-    for row in rows {
-        let mut record = McpServerRecord::try_from(row)?;
+    for mut record in load_servers(pool, Some(&wanted)).await? {
         record.projects.clear();
         servers.insert(record.id, record);
     }
     let mut by_project: HashMap<Uuid, Vec<McpServerRecord>> = HashMap::new();
-    for (project, server) in pairs {
-        if let Some(record) = servers.get(&server) {
-            by_project.entry(project).or_default().push(record.clone());
+    for pair in pairs {
+        if let Some(record) = servers.get(&pair.server_id) {
+            by_project
+                .entry(pair.project_id)
+                .or_default()
+                .push(record.clone());
         }
     }
     Ok(by_project)
@@ -392,10 +434,10 @@ pub async fn servers_using_credential(
     executor: impl PgExecutor<'_>,
     credential_ref_id: Uuid,
 ) -> Result<Vec<String>, DbError> {
-    Ok(sqlx::query_scalar(
+    Ok(sqlx::query_scalar!(
         "SELECT name FROM mcp_servers WHERE credential_ref_id = $1 ORDER BY name",
+        credential_ref_id
     )
-    .bind(credential_ref_id)
     .fetch_all(executor)
     .await?)
 }
@@ -411,10 +453,12 @@ pub(crate) async fn check_credential_not_used_by_a_server(
     if users.is_empty() {
         return Ok(());
     }
-    let credential: String = sqlx::query_scalar("SELECT name FROM credential_refs WHERE id = $1")
-        .bind(credential_ref_id)
-        .fetch_one(&mut *conn)
-        .await?;
+    let credential = sqlx::query_scalar!(
+        "SELECT name FROM credential_refs WHERE id = $1",
+        credential_ref_id
+    )
+    .fetch_one(&mut *conn)
+    .await?;
     Err(DbError::Conflict(format!(
         "credential `{credential}` is used by MCP server {}",
         users.join(", ")
@@ -427,28 +471,32 @@ async fn check_credential_free_of_factory_use(
     executor: &mut sqlx::PgConnection,
     credential_ref_id: Uuid,
 ) -> Result<(), DbError> {
-    let project: Option<(String, String)> = sqlx::query_as(
-        "SELECT c.name, p.key FROM projects p JOIN credential_refs c ON c.id = p.forge_credential_id \
+    let project = sqlx::query!(
+        "SELECT c.name AS credential, p.key FROM projects p
+         JOIN credential_refs c ON c.id = p.forge_credential_id
          WHERE c.id = $1 ORDER BY p.key LIMIT 1",
+        credential_ref_id
     )
-    .bind(credential_ref_id)
     .fetch_optional(&mut *executor)
     .await?;
-    if let Some((credential, key)) = project {
+    if let Some(project) = project {
         return Err(DbError::Conflict(format!(
-            "credential `{credential}` is the forge credential of project {key}"
+            "credential `{}` is the forge credential of project {}",
+            project.credential, project.key
         )));
     }
-    let provider: Option<(String, String)> = sqlx::query_as(
-        "SELECT c.name, m.name FROM model_providers m JOIN credential_refs c ON c.id = m.credential_ref_id \
+    let provider = sqlx::query!(
+        "SELECT c.name AS credential, m.name FROM model_providers m
+         JOIN credential_refs c ON c.id = m.credential_ref_id
          WHERE c.id = $1 ORDER BY m.name LIMIT 1",
+        credential_ref_id
     )
-    .bind(credential_ref_id)
     .fetch_optional(&mut *executor)
     .await?;
-    if let Some((credential, name)) = provider {
+    if let Some(provider) = provider {
         return Err(DbError::Conflict(format!(
-            "credential `{credential}` is the credential of model provider {name}"
+            "credential `{}` is the credential of model provider {}",
+            provider.credential, provider.name
         )));
     }
     Ok(())

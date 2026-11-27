@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.name AS credential, m.name FROM model_providers m\n         JOIN credential_refs c ON c.id = m.credential_ref_id\n         WHERE c.id = $1 ORDER BY m.name LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "credential",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "credential_refs",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_providers",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a148af198c1dde51eee0febd458ac182ed17affa76f68b90f12fc60fdde42684"
+}

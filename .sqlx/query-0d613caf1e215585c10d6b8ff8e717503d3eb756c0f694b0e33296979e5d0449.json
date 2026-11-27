@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.name AS credential, p.key FROM projects p\n         JOIN credential_refs c ON c.id = p.forge_credential_id\n         WHERE c.id = $1 ORDER BY p.key LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "credential",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "credential_refs",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "0d613caf1e215585c10d6b8ff8e717503d3eb756c0f694b0e33296979e5d0449"
+}

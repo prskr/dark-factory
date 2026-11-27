@@ -1,0 +1,143 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT s.id, s.name, s.url, s.credential_ref_id, s.credential_scheme,\n               s.credential_header, s.credential_prefix, s.credential_query_param,\n               s.private_network, s.config_version,\n               COALESCE(array_agg(p.key ORDER BY p.key) FILTER (WHERE p.key IS NOT NULL),\n                        '{}') AS \"projects!\"\n        FROM mcp_servers s\n        LEFT JOIN project_mcp_servers ps ON ps.server_id = s.id\n        LEFT JOIN projects p ON p.id = ps.project_id\n        WHERE ($1::uuid[] IS NULL OR s.id = ANY($1))\n        GROUP BY s.id ORDER BY s.name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "credential_ref_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "credential_ref_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "credential_scheme",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "credential_scheme"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "credential_header",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "credential_header"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "credential_prefix",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "credential_prefix"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "credential_query_param",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "credential_query_param"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "private_network",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "private_network"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "config_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mcp_servers",
+            "name": "config_version"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "projects!",
+        "type_info": "TextArray",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "e5b9d7036766559dba279da441dc784c201371b9bd906b5327b64d05c944d167"
+}

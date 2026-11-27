@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::JoinSet;
 
 const MAX_HEAD_BYTES: usize = 64 * 1024;
 
@@ -21,15 +22,23 @@ pub async fn serve(address: &str, token: String) -> Result<()> {
     serve_on(listener, token).await
 }
 
+/// Serves on `listener`. The connection tasks belong to the server: they end with it.
 async fn serve_on(listener: TcpListener, token: String) -> Result<()> {
+    let mut connections = JoinSet::new();
     loop {
-        let (stream, _peer) = listener.accept().await.context("accept")?;
-        let token = token.clone();
-        tokio::spawn(async move {
-            if let Err(error) = answer(stream, &token).await {
-                log(&error);
+        tokio::select! {
+            accepted = listener.accept() => {
+                let (stream, _peer) = accepted.context("accept")?;
+                let token = token.clone();
+                connections.spawn(async move {
+                    if let Err(error) = answer(stream, &token).await {
+                        log(&error);
+                    }
+                });
             }
-        });
+            // Finished connections are collected, so the set does not grow.
+            Some(_finished) = connections.join_next(), if !connections.is_empty() => {}
+        }
     }
 }
 
@@ -148,6 +157,37 @@ mod tests {
         let mut response = String::new();
         stream.read_to_string(&mut response).await.unwrap();
         response
+    }
+
+    #[tokio::test]
+    async fn connections_end_with_the_server() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let server = tokio::spawn(serve_on(listener, "secret".into()));
+        // A request whose head never ends keeps its connection task waiting.
+        let mut stream = TcpStream::connect(&address).await.unwrap();
+        stream
+            .write_all(b"POST /mcp HTTP/1.1\r\nhost: x\r\n")
+            .await
+            .unwrap();
+        let mut buffer = [0_u8; 1];
+        let held = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            stream.read(&mut buffer),
+        )
+        .await;
+        assert!(
+            held.is_err(),
+            "the connection is held open while the server runs"
+        );
+
+        server.abort();
+
+        let ended =
+            tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buffer))
+                .await
+                .expect("the connection was not closed when the server stopped");
+        assert!(matches!(ended, Ok(0) | Err(_)));
     }
 
     #[tokio::test]

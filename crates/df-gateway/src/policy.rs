@@ -227,6 +227,11 @@ impl Policy {
         servers
     }
 
+    /// The MCP server with this id, whichever runs have it enabled.
+    pub fn mcp_server_by_id(&self, id: &str) -> Option<&McpServer> {
+        self.mcp_servers.get(id)
+    }
+
     /// The MCP server `name` enabled for the sandbox at `ip`.
     pub fn mcp_server(&self, ip: IpAddr, name: &str) -> Option<&McpServer> {
         self.mcp_servers(ip)

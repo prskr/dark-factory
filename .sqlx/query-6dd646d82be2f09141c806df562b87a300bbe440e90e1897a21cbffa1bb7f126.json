@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO project_mcp_servers (project_id, server_id)\n         SELECT $1, id FROM mcp_servers WHERE id = ANY($2) ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6dd646d82be2f09141c806df562b87a300bbe440e90e1897a21cbffa1bb7f126"
+}

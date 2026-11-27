@@ -7,9 +7,7 @@ use std::fmt;
 
 use df_proto::gateway::v1 as pb;
 use hyper::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::Value;
-use url::form_urlencoded::byte_serialize;
 
 use super::url::McpUrl;
 
@@ -139,37 +137,53 @@ impl Target {
     }
 }
 
-/// Replaces a credential value, raw and URL-encoded, with `[redacted]`.
+/// Replaces a credential value with `[redacted]`: raw, and percent-encoded in any way an
+/// upstream may echo it. Every byte of the credential matches itself, its escape `%XX` (hex digits
+/// of either case, and any subset of the bytes escaped) and, for a space, `+`.
 #[derive(Debug, Clone)]
 pub(crate) struct Redactor {
-    /// Longest first, so a form that contains another is replaced whole.
-    forms: Vec<Secret>,
+    secret: Secret,
 }
 
 impl Redactor {
     fn new(secret: &str) -> Self {
-        let mut forms = Vec::new();
-        if !secret.is_empty() {
-            let form: String = byte_serialize(secret.as_bytes()).collect();
-            let percent = utf8_percent_encode(secret, NON_ALPHANUMERIC).to_string();
-            for candidate in [secret.to_owned(), form, percent] {
-                if !forms.iter().any(|known: &Secret| known.0 == candidate) {
-                    forms.push(Secret(candidate));
-                }
-            }
-            forms.sort_by_key(|form| std::cmp::Reverse(form.0.len()));
+        Self {
+            secret: Secret(secret.to_owned()),
         }
-        Self { forms }
     }
 
     pub(crate) fn text<'a>(&self, text: &'a str) -> Cow<'a, str> {
-        let mut result = Cow::Borrowed(text);
-        for form in &self.forms {
-            if result.contains(form.0.as_str()) {
-                result = Cow::Owned(result.replace(form.0.as_str(), REDACTED));
+        let secret = self.secret.0.as_bytes();
+        let Some(first) = secret.first().copied() else {
+            return Cow::Borrowed(text);
+        };
+        let haystack = text.as_bytes();
+        let mut output: Option<Vec<u8>> = None;
+        let mut copied = 0;
+        let mut at = 0;
+        while at < haystack.len() {
+            // Cheap test first: the match starts with the first byte, or with its escape.
+            let starts = haystack.get(at).is_some_and(|byte| {
+                *byte == first || *byte == b'%' || (first == b' ' && *byte == b'+')
+            });
+            let matched = starts.then(|| match_secret(haystack, at, secret)).flatten();
+            let Some(end) = matched else {
+                at += 1;
+                continue;
+            };
+            let out = output.get_or_insert_with(Vec::new);
+            out.extend_from_slice(haystack.get(copied..at).unwrap_or_default());
+            out.extend_from_slice(REDACTED.as_bytes());
+            copied = end;
+            at = end;
+        }
+        match output {
+            None => Cow::Borrowed(text),
+            Some(mut out) => {
+                out.extend_from_slice(haystack.get(copied..).unwrap_or_default());
+                Cow::Owned(String::from_utf8_lossy(&out).into_owned())
             }
         }
-        result
     }
 
     /// Redacts every string of `value`, object keys included.
@@ -190,6 +204,34 @@ impl Redactor {
             }
             Value::Null | Value::Bool(_) | Value::Number(_) => {}
         }
+    }
+}
+
+/// The end of a match of `secret` in `haystack` that starts at `start`, if there is one.
+fn match_secret(haystack: &[u8], start: usize, secret: &[u8]) -> Option<usize> {
+    let mut at = start;
+    for byte in secret {
+        let here = *haystack.get(at)?;
+        if here == *byte || (*byte == b' ' && here == b'+') {
+            at += 1;
+            continue;
+        }
+        let (high, low) = (*haystack.get(at + 1)?, *haystack.get(at + 2)?);
+        let escaped = here == b'%' && (hex_value(high)? << 4 | hex_value(low)?) == *byte;
+        if !escaped {
+            return None;
+        }
+        at += 3;
+    }
+    Some(at)
+}
+
+const fn hex_value(digit: u8) -> Option<u8> {
+    match digit {
+        b'0'..=b'9' => Some(digit - b'0'),
+        b'a'..=b'f' => Some(digit - b'a' + 10),
+        b'A'..=b'F' => Some(digit - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -323,6 +365,31 @@ mod tests {
                 "n": 5, "ok": true, "nothing": null
             })
         );
+    }
+
+    #[test]
+    fn redaction_matches_percent_escapes_of_any_case_and_any_subset_of_the_bytes() {
+        let redactor = Redactor::new("a b/c?\u{e9}");
+        for echoed in [
+            "a%20b%2fc%3f%c3%a9",
+            "a%20b%2Fc%3F%C3%A9",
+            "a%20b%2fc%3F%c3%A9",
+            "a+b/c?%c3%A9",
+            "a b%2fc?\u{e9}",
+            "a%20b/c%3F\u{e9}",
+        ] {
+            assert_eq!(
+                redactor.text(&format!("url ?t={echoed}&x=1")),
+                "url ?t=[redacted]&x=1",
+                "{echoed}"
+            );
+        }
+        assert_eq!(
+            redactor.text("a%20b%2"),
+            "a%20b%2",
+            "an incomplete escape is no match"
+        );
+        assert_eq!(redactor.text("a%20b%2gc?\u{e9}"), "a%20b%2gc?\u{e9}");
     }
 
     #[test]

@@ -18,7 +18,7 @@ use hyper::header::{
 };
 use hyper::{Method, Request};
 use serde_json::{Value, json};
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::Notify;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -110,22 +110,144 @@ pub(crate) struct ToolList {
     pub(crate) tools: Vec<Value>,
 }
 
+/// An upstream session. `opened_with` is the server configuration it was opened with: needed to
+/// end it after the configuration changed (the old URL), never to send requests, which carry the
+/// credential of the current snapshot.
 #[derive(Clone)]
 struct Session {
-    target: Target,
+    opened_with: Target,
     id: Option<String>,
     protocol: String,
     used: Instant,
 }
 
-type Slot = Arc<AsyncMutex<Option<Session>>>;
+#[derive(Default)]
+enum SlotState {
+    #[default]
+    Empty,
+    /// A task is initializing the session; others wait on [`Slot::changed`].
+    Opening,
+    Open(Box<Session>),
+}
+
+/// The session of one run and server. The lock is held only to read or change the state, never
+/// across a request.
+#[derive(Default)]
+struct Slot {
+    state: std::sync::Mutex<SlotState>,
+    changed: Notify,
+}
+
+/// What a task asking for a session finds.
+enum Claim {
+    Ready(Session),
+    Wait,
+    /// The task opens the session; `stale` is the session of an older configuration to end.
+    Open {
+        stale: Option<Session>,
+    },
+}
+
+impl Slot {
+    fn set(&self, state: SlotState) {
+        if let Ok(mut current) = self.state.lock() {
+            *current = state;
+        }
+        self.changed.notify_waiters();
+    }
+
+    fn claim(&self, config_version: u64) -> Claim {
+        let Ok(mut state) = self.state.lock() else {
+            return Claim::Open { stale: None };
+        };
+        match &mut *state {
+            SlotState::Open(session) if session.opened_with.config_version == config_version => {
+                session.used = Instant::now();
+                Claim::Ready(Session::clone(session))
+            }
+            SlotState::Open(_) => {
+                let SlotState::Open(stale) = std::mem::replace(&mut *state, SlotState::Opening)
+                else {
+                    return Claim::Wait;
+                };
+                Claim::Open {
+                    stale: Some(*stale),
+                }
+            }
+            SlotState::Opening => Claim::Wait,
+            SlotState::Empty => {
+                *state = SlotState::Opening;
+                Claim::Open { stale: None }
+            }
+        }
+    }
+
+    /// The open session of this configuration version.
+    fn open(&self, config_version: u64) -> Option<Session> {
+        match &*self.state.lock().ok()? {
+            SlotState::Open(session) if session.opened_with.config_version == config_version => {
+                Some(Session::clone(session))
+            }
+            _ => None,
+        }
+    }
+
+    /// Drops the open session `id` (it expired upstream); a newer one stays.
+    fn forget(&self, id: Option<&str>) {
+        let expired = self.state.lock().is_ok_and(
+            |state| matches!(&*state, SlotState::Open(session) if session.id.as_deref() == id),
+        );
+        if expired {
+            self.set(SlotState::Empty);
+        }
+    }
+
+    /// Takes the open session out (the slot is empty afterwards) if `ended` says so.
+    fn take_if(&self, ended: impl Fn(&Session) -> bool) -> Option<Session> {
+        let mut state = self.state.lock().ok()?;
+        let SlotState::Open(session) = &*state else {
+            return None;
+        };
+        if !ended(session) {
+            return None;
+        }
+        let SlotState::Open(session) = std::mem::take(&mut *state) else {
+            return None;
+        };
+        drop(state);
+        self.changed.notify_waiters();
+        Some(*session)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.state
+            .lock()
+            .is_ok_and(|state| matches!(&*state, SlotState::Empty))
+    }
+}
+
+/// Puts the slot back to empty if the task that was opening its session is dropped first.
+struct OpeningGuard<'a> {
+    slot: &'a Slot,
+    opened: bool,
+}
+
+impl Drop for OpeningGuard<'_> {
+    fn drop(&mut self) {
+        if !self.opened {
+            self.slot.set(SlotState::Empty);
+        }
+    }
+}
+
+type SlotRef = Arc<Slot>;
 
 /// The client of every upstream of a gateway pod.
 pub(crate) struct Client {
     connector: UpstreamConnector,
     resolver: Arc<dyn Resolver>,
     blocked: BlockedRanges,
-    sessions: std::sync::Mutex<HashMap<SessionKey, Slot>>,
+    sessions: std::sync::Mutex<HashMap<SessionKey, SlotRef>>,
     next_id: AtomicU64,
     list_timeout: Duration,
 }
@@ -251,9 +373,9 @@ impl Client {
         let request = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         for attempt in 0..2 {
             let session = self.session(key, target).await?;
-            match self.post(&session, &request, Some(id)).await {
+            match self.post(&session, target, &request, Some(id)).await {
                 Err(ClientError::Status(404)) if session.id.is_some() => {
-                    self.forget(key).await;
+                    self.slot(key).forget(session.id.as_deref());
                     if attempt == 1 {
                         return Err(ClientError::Status(404));
                     }
@@ -265,29 +387,69 @@ impl Client {
         Err(ClientError::Status(404))
     }
 
-    /// The initialized session of `key`; one with another configuration version is ended first.
+    /// The initialized session of `key`. The task that finds none (or one of another
+    /// configuration version) opens it while the others wait for it, so a run and server never
+    /// have two sessions; no lock is held while a request is made.
     async fn session(&self, key: &SessionKey, target: &Target) -> Result<Session, ClientError> {
         let slot = self.slot(key);
-        let mut guard = slot.lock().await;
-        if let Some(session) = guard.as_mut() {
-            if session.target.config_version == target.config_version {
-                session.used = Instant::now();
-                return Ok(session.clone());
-            }
-            let old = guard.take();
-            if let Some(old) = old {
-                self.close(&old).await;
+        loop {
+            // Registered before the state is looked at: a change in between wakes us.
+            let changed = slot.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            match slot.claim(target.config_version) {
+                Claim::Ready(session) => return Ok(session),
+                Claim::Wait => changed.await,
+                Claim::Open { stale } => return self.open_session(&slot, target, stale).await,
             }
         }
-        let session = self.initialize(target).await?;
-        *guard = Some(session.clone());
-        Ok(session)
+    }
+
+    /// Initializes the session of `slot` and publishes it as soon as it is ready; the session of
+    /// an older configuration is ended alongside, without holding anyone back.
+    async fn open_session(
+        &self,
+        slot: &Slot,
+        target: &Target,
+        stale: Option<Session>,
+    ) -> Result<Session, ClientError> {
+        let mut guard = OpeningGuard {
+            slot,
+            opened: false,
+        };
+        let mut closing = stale.map(|old| {
+            Box::pin(async move {
+                let target = old.opened_with.clone();
+                self.close(&old, &target).await;
+            })
+        });
+        let mut init = Box::pin(self.initialize(target));
+        let mut closed = closing.is_none();
+        let opened = if let Some(closing) = closing.as_mut() {
+            tokio::select! {
+                opened = &mut init => opened,
+                () = closing.as_mut() => {
+                    closed = true;
+                    init.await
+                }
+            }
+        } else {
+            init.await
+        };
+        if let Ok(session) = &opened {
+            slot.set(SlotState::Open(Box::new(session.clone())));
+            guard.opened = true;
+        }
+        if let (false, Some(closing)) = (closed, closing) {
+            closing.await;
+        }
+        opened
     }
 
     /// `initialize`, its successful response, then `notifications/initialized`.
     async fn initialize(&self, target: &Target) -> Result<Session, ClientError> {
         let blank = Session {
-            target: target.clone(),
+            opened_with: target.clone(),
             id: None,
             protocol: String::new(),
             used: Instant::now(),
@@ -301,7 +463,7 @@ impl Client {
                 "clientInfo": { "name": "dark-factory-gateway", "version": env!("CARGO_PKG_VERSION") },
             },
         });
-        let answer = self.post(&blank, &request, Some(id)).await?;
+        let answer = self.post(&blank, target, &request, Some(id)).await?;
         let session_id = answer.session_id.clone();
         let (reply, _size) = parse_reply(answer, target)?;
         let Reply::Result(result) = reply else {
@@ -318,51 +480,43 @@ impl Client {
             ..blank
         };
         let initialized = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
-        self.post(&session, &initialized, None).await?;
+        self.post(&session, target, &initialized, None).await?;
         Ok(session)
     }
 
     async fn send_cancelled(&self, key: &SessionKey, target: &Target, request_id: u64) {
-        let Some(session) = self.existing(key, target).await else {
+        let Some(session) = self.slot(key).open(target.config_version) else {
             return;
         };
         let body = json!({
             "jsonrpc": "2.0", "method": "notifications/cancelled",
             "params": { "requestId": request_id, "reason": "cancelled by the client" },
         });
-        let sent = tokio::time::timeout(CLOSE_TIMEOUT, self.post(&session, &body, None)).await;
+        let sent =
+            tokio::time::timeout(CLOSE_TIMEOUT, self.post(&session, target, &body, None)).await;
         if !matches!(sent, Ok(Ok(_))) {
             tracing::debug!(server = %target.name, "could not forward a cancellation to the upstream");
         }
     }
 
-    async fn existing(&self, key: &SessionKey, target: &Target) -> Option<Session> {
-        let slot = self.sessions.lock().ok()?.get(key).cloned()?;
-        let guard = slot.lock().await;
-        guard
-            .clone()
-            .filter(|session| session.target.config_version == target.config_version)
-    }
-
-    fn slot(&self, key: &SessionKey) -> Slot {
+    fn slot(&self, key: &SessionKey) -> SlotRef {
         let Ok(mut sessions) = self.sessions.lock() else {
-            return Slot::default();
+            return SlotRef::default();
         };
         sessions.entry(key.clone()).or_default().clone()
     }
 
-    async fn forget(&self, key: &SessionKey) {
-        let slot = self.slot(key);
-        *slot.lock().await = None;
-    }
-
     /// Ends the sessions `keep` refuses (`DELETE`), and those idle for longer than `max_idle`.
+    /// `keep` gets the configuration version a session was opened with. The `DELETE` carries the
+    /// credential `current` gives for the session's server; the one the session was opened with
+    /// only if its configuration changed since (or the server is gone).
     pub(crate) async fn sweep(
         &self,
-        keep: &(dyn Fn(&SessionKey, &Target) -> bool + Sync),
+        keep: &(dyn Fn(&SessionKey, u64) -> bool + Sync),
+        current: &(dyn Fn(&SessionKey) -> Option<Target> + Sync),
         max_idle: Duration,
     ) {
-        let slots: Vec<(SessionKey, Slot)> = match self.sessions.lock() {
+        let slots: Vec<(SessionKey, SlotRef)> = match self.sessions.lock() {
             Ok(sessions) => sessions
                 .iter()
                 .map(|(key, slot)| (key.clone(), slot.clone()))
@@ -370,27 +524,28 @@ impl Client {
             Err(_poisoned) => return,
         };
         for (key, slot) in slots {
-            let ended = {
-                let mut guard = slot.lock().await;
-                let end = guard.as_ref().is_some_and(|session| {
-                    !keep(&key, &session.target) || session.used.elapsed() >= max_idle
-                });
-                if end { guard.take() } else { None }
-            };
-            if let Some(session) = ended {
-                self.close(&session).await;
+            if let Some(session) = slot.take_if(|session| {
+                !keep(&key, session.opened_with.config_version)
+                    || session.used.elapsed() >= max_idle
+            }) {
+                let version = session.opened_with.config_version;
+                let target = current(&key)
+                    .filter(|target| target.config_version == version)
+                    .unwrap_or_else(|| session.opened_with.clone());
+                self.close(&session, &target).await;
             }
             self.drop_empty(&key, &slot);
         }
     }
 
-    /// Removes the entry of `key` if its slot holds no session.
-    fn drop_empty(&self, key: &SessionKey, slot: &Slot) {
+    /// Removes the entry of `key` if its slot is empty and nobody else holds it.
+    fn drop_empty(&self, key: &SessionKey, slot: &SlotRef) {
         let Ok(mut sessions) = self.sessions.lock() else {
             return;
         };
-        let empty = slot.try_lock().is_ok_and(|guard| guard.is_none());
-        if empty
+        // The map and the caller hold the slot; a task that asked for it since holds a third.
+        if Arc::strong_count(slot) <= 2
+            && slot.is_empty()
             && sessions
                 .get(key)
                 .is_some_and(|current| Arc::ptr_eq(current, slot))
@@ -400,14 +555,17 @@ impl Client {
     }
 
     /// `DELETE` of the session, best-effort: a stateless upstream has no session to end.
-    async fn close(&self, session: &Session) {
+    async fn close(&self, session: &Session, target: &Target) {
         if session.id.is_none() {
             return;
         }
-        let closed =
-            tokio::time::timeout(CLOSE_TIMEOUT, self.exchange(session, Method::DELETE, None)).await;
+        let closed = tokio::time::timeout(
+            CLOSE_TIMEOUT,
+            self.exchange(session, target, Method::DELETE, None),
+        )
+        .await;
         if !matches!(closed, Ok(Ok(_))) {
-            tracing::debug!(server = %session.target.name, "upstream session could not be ended");
+            tracing::debug!(server = %target.name, "upstream session could not be ended");
         }
     }
 
@@ -416,11 +574,14 @@ impl Client {
     async fn post(
         &self,
         session: &Session,
+        target: &Target,
         body: &Value,
         await_id: Option<u64>,
     ) -> Result<Answer, ClientError> {
         let bytes = Bytes::from(serde_json::to_vec(body).map_err(|_error| ClientError::NotMcp)?);
-        let (parts, incoming, task) = self.exchange(session, Method::POST, Some(bytes)).await?;
+        let (parts, incoming, task) = self
+            .exchange(session, target, Method::POST, Some(bytes))
+            .await?;
         let session_id = parts
             .headers
             .get("mcp-session-id")
@@ -441,7 +602,7 @@ impl Client {
                     .and_then(|value| value.to_str().ok())
                     .is_some_and(|value| value.starts_with("text/event-stream"));
                 if is_sse {
-                    self.read_sse(session, limited, id)
+                    self.read_sse(session, target, limited, id)
                         .await
                         .map(|(reply, bytes)| (Some(reply), bytes))
                 } else {
@@ -465,9 +626,16 @@ impl Client {
     }
 
     /// Posts `body` and discards the answer.
-    async fn post_discard(&self, session: &Session, body: &Value) -> Result<(), ClientError> {
+    async fn post_discard(
+        &self,
+        session: &Session,
+        target: &Target,
+        body: &Value,
+    ) -> Result<(), ClientError> {
         let bytes = Bytes::from(serde_json::to_vec(body).map_err(|_error| ClientError::NotMcp)?);
-        let (_parts, incoming, _task) = self.exchange(session, Method::POST, Some(bytes)).await?;
+        let (_parts, incoming, _task) = self
+            .exchange(session, target, Method::POST, Some(bytes))
+            .await?;
         let limited = LimitedBody::new(
             incoming.map_err(BoxError::from).boxed_unsync(),
             MAX_RESPONSE_BYTES,
@@ -481,6 +649,7 @@ impl Client {
     async fn read_sse(
         &self,
         session: &Session,
+        target: &Target,
         mut body: LimitedBody,
         id: u64,
     ) -> Result<(Value, u64), ClientError> {
@@ -497,7 +666,8 @@ impl Client {
                     continue;
                 };
                 if message.get("method").is_some() {
-                    self.refuse_server_request(session, message.get("id")).await;
+                    self.refuse_server_request(session, target, message.get("id"))
+                        .await;
                     continue;
                 }
                 if is_response_to(&message, id) {
@@ -509,13 +679,13 @@ impl Client {
     }
 
     /// Answers a request of the upstream with `-32601`; a notification (no `id`) is dropped.
-    async fn refuse_server_request(&self, session: &Session, id: Option<&Value>) {
+    async fn refuse_server_request(&self, session: &Session, target: &Target, id: Option<&Value>) {
         let Some(id) = id else {
             return;
         };
         let body = json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "Method not found" } });
-        if let Err(error) = self.post_discard(session, &body).await {
-            tracing::debug!(server = %session.target.name, ?error, "refusing an upstream request failed");
+        if let Err(error) = self.post_discard(session, target, &body).await {
+            tracing::debug!(server = %target.name, ?error, "refusing an upstream request failed");
         }
     }
 
@@ -523,6 +693,7 @@ impl Client {
     async fn exchange(
         &self,
         session: &Session,
+        target: &Target,
         method: Method,
         body: Option<Bytes>,
     ) -> Result<
@@ -533,7 +704,6 @@ impl Client {
         ),
         ClientError,
     > {
-        let target = &session.target;
         let url = target.request_url();
         let address = self.checked_address(target, url.host()).await?;
         let destination = Destination {

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use df_core::mcp::McpCallOutcome;
 use jiff::Timestamp;
 use jiff_sqlx::ToSqlx;
-use sqlx::{FromRow, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::model_usage::Inserted;
@@ -28,14 +28,13 @@ pub struct McpCallRecord {
     pub response_bytes: i64,
 }
 
-#[derive(FromRow)]
 struct CallRow {
     call_id: Uuid,
     run_id: Uuid,
     server_name: String,
     tool: String,
     outcome: String,
-    started_at: jiff_sqlx::Timestamp,
+    started_at: Timestamp,
     duration_ms: i64,
     request_bytes: i64,
     response_bytes: i64,
@@ -51,7 +50,7 @@ impl TryFrom<CallRow> for McpCallRecord {
             server_name: row.server_name,
             tool: row.tool,
             outcome: row.outcome.parse()?,
-            started_at: row.started_at.to_jiff(),
+            started_at: row.started_at,
             duration_ms: row.duration_ms,
             request_bytes: row.request_bytes,
             response_bytes: row.response_bytes,
@@ -62,32 +61,35 @@ impl TryFrom<CallRow> for McpCallRecord {
 /// Stores `record` unless its call id is already stored. A record is stored for a run in any
 /// state: records may arrive after the run ended.
 pub async fn insert_mcp_call(pool: &PgPool, record: &McpCallRecord) -> Result<Inserted, DbError> {
-    let inserted = sqlx::query(
-        "INSERT INTO mcp_calls (call_id, run_id, server_name, tool, outcome, started_at, \
-            duration_ms, request_bytes, response_bytes) \
-         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9 \
-         WHERE EXISTS (SELECT 1 FROM runs WHERE id = $2) \
+    let inserted = sqlx::query!(
+        "INSERT INTO mcp_calls (call_id, run_id, server_name, tool, outcome, started_at,
+            duration_ms, request_bytes, response_bytes)
+         SELECT $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::timestamptz,
+                $7::bigint, $8::bigint, $9::bigint
+         WHERE EXISTS (SELECT 1 FROM runs WHERE id = $2)
          ON CONFLICT (call_id) DO NOTHING",
+        record.call_id,
+        record.run_id,
+        record.server_name,
+        record.tool,
+        record.outcome.as_str(),
+        record.started_at.to_sqlx(),
+        record.duration_ms,
+        record.request_bytes,
+        record.response_bytes
     )
-    .bind(record.call_id)
-    .bind(record.run_id)
-    .bind(&record.server_name)
-    .bind(&record.tool)
-    .bind(record.outcome.as_str())
-    .bind(record.started_at.to_sqlx())
-    .bind(record.duration_ms)
-    .bind(record.request_bytes)
-    .bind(record.response_bytes)
     .execute(pool)
     .await?
     .rows_affected();
     if inserted > 0 {
         return Ok(Inserted::New);
     }
-    let run_exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM runs WHERE id = $1)")
-        .bind(record.run_id)
-        .fetch_one(pool)
-        .await?;
+    let run_exists = sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM runs WHERE id = $1) AS "exists!""#,
+        record.run_id
+    )
+    .fetch_one(pool)
+    .await?;
     Ok(if run_exists {
         Inserted::Duplicate
     } else {
@@ -100,12 +102,13 @@ pub async fn list_mcp_calls_of_runs(
     pool: &PgPool,
     run_ids: &[Uuid],
 ) -> Result<HashMap<Uuid, Vec<McpCallRecord>>, DbError> {
-    let rows: Vec<CallRow> = sqlx::query_as(
-        "SELECT call_id, run_id, server_name, tool, outcome, started_at, duration_ms, \
-            request_bytes, response_bytes \
+    let rows = sqlx::query_as!(
+        CallRow,
+        "SELECT call_id, run_id, server_name, tool, outcome, started_at, duration_ms,
+            request_bytes, response_bytes
          FROM mcp_calls WHERE run_id = ANY($1) ORDER BY started_at, call_id",
+        run_ids
     )
-    .bind(run_ids)
     .fetch_all(pool)
     .await?;
     let mut calls: HashMap<Uuid, Vec<McpCallRecord>> = HashMap::new();

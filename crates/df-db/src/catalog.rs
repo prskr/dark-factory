@@ -441,22 +441,24 @@ pub async fn delete_credential_ref(
     id: Uuid,
 ) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    let (name,): (String,) =
-        sqlx::query_as("SELECT name FROM credential_refs WHERE id = $1 FOR UPDATE")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| DbError::NotFound(format!("credential reference `{id}`")))?;
-    let servers = crate::mcp_servers::servers_using_credential(&mut *tx, id).await?;
-    let projects: Vec<String> =
-        sqlx::query_scalar("SELECT key FROM projects WHERE forge_credential_id = $1 ORDER BY key")
-            .bind(id)
-            .fetch_all(&mut *tx)
-            .await?;
-    let providers: Vec<String> = sqlx::query_scalar(
-        "SELECT name FROM model_providers WHERE credential_ref_id = $1 ORDER BY name",
+    let name = sqlx::query_scalar!(
+        "SELECT name FROM credential_refs WHERE id = $1 FOR UPDATE",
+        id
     )
-    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| DbError::NotFound(format!("credential reference `{id}`")))?;
+    let servers = crate::mcp_servers::servers_using_credential(&mut *tx, id).await?;
+    let projects = sqlx::query_scalar!(
+        "SELECT key FROM projects WHERE forge_credential_id = $1 ORDER BY key",
+        id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let providers = sqlx::query_scalar!(
+        "SELECT name FROM model_providers WHERE credential_ref_id = $1 ORDER BY name",
+        id
+    )
     .fetch_all(&mut *tx)
     .await?;
     for (what, users) in [
@@ -471,8 +473,7 @@ pub async fn delete_credential_ref(
             )));
         }
     }
-    sqlx::query("DELETE FROM credential_refs WHERE id = $1")
-        .bind(id)
+    sqlx::query!("DELETE FROM credential_refs WHERE id = $1", id)
         .execute(&mut *tx)
         .await?;
     let entry = NewAuditEntry::new(

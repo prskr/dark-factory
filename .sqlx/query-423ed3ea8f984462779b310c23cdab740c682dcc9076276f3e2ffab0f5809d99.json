@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ps.project_id, ps.server_id FROM project_mcp_servers ps\n         JOIN mcp_servers s ON s.id = ps.server_id WHERE ps.project_id = ANY($1)\n         ORDER BY s.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "project_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "project_mcp_servers",
+            "name": "project_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "project_mcp_servers",
+            "name": "server_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "423ed3ea8f984462779b310c23cdab740c682dcc9076276f3e2ffab0f5809d99"
+}

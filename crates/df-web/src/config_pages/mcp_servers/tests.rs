@@ -697,3 +697,33 @@ async fn a_project_form_save_that_carries_mcp_fields_changes_no_enablement() {
         [wiki]
     );
 }
+
+#[tokio::test]
+async fn on_a_phone_the_tab_ends_with_a_full_width_save_button_and_on_a_desktop_the_button_stays_inline()
+ {
+    let app = TestApp::new().await;
+    seed(&app.pool).await;
+    let key = credential(&app, "k").await;
+    register(&app, "context7", key, false).await;
+
+    let html = text(app.get_htmx(TAB, &app.login_admin().await).await).await;
+
+    let marker = "<button type=\"submit\" form=\"mcp-servers-form\"";
+    let buttons: Vec<&str> = html
+        .match_indices(marker)
+        .map(|(at, _)| &html[at..=at + html[at..].find('>').unwrap()])
+        .collect();
+    assert_eq!(buttons.len(), 2, "{html}");
+    let desktop = buttons
+        .iter()
+        .find(|b| b.contains("max-md:hidden"))
+        .expect("desktop button");
+    let phone = buttons
+        .iter()
+        .find(|b| b.contains("w-full"))
+        .expect("phone button");
+    assert!(!desktop.contains("w-full") && !phone.contains("max-md:hidden"));
+    // The phone button sits in the wrapper that ends the form below 768 px, as on the other tabs.
+    let wrapper = html.find("pt-2 pb-5 md:hidden").expect("phone wrapper");
+    assert!(html[wrapper..].contains("w-full"), "{html}");
+}

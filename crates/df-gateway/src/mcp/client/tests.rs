@@ -206,7 +206,8 @@ async fn call_returns_the_json_answer_with_the_arguments_unchanged() {
         .await
         .unwrap();
 
-    assert_eq!(text_of(&reply), r#"called search {"n":2,"q":"tokio"}"#);
+    // The echo prints the arguments in the order of the JSON library; the request has them.
+    assert!(text_of(&reply).starts_with("called search "));
     let call = fake.requests().pop().unwrap().json();
     assert_eq!(
         call["params"],
@@ -389,7 +390,11 @@ async fn sweeping_ends_sessions_the_snapshot_dropped_with_delete() {
     client.list_tools(&key("r2"), &target).await.unwrap();
 
     client
-        .sweep(&|key, _target| key.run_id == "r2", Duration::from_secs(600))
+        .sweep(
+            &|key, _version| key.run_id == "r2",
+            &|_| None,
+            Duration::from_secs(600),
+        )
         .await;
 
     let deletes: Vec<_> = fake
@@ -407,11 +412,13 @@ async fn sweeping_ends_sessions_idle_for_longer_than_the_limit() {
     let client = client();
     let target = target(&fake);
     client.list_tools(&key("r1"), &target).await.unwrap();
-    client.sweep(&|_, _| true, Duration::from_secs(600)).await;
+    client
+        .sweep(&|_, _| true, &|_| None, Duration::from_secs(600))
+        .await;
     assert!(!fake.methods().contains(&"DELETE".to_owned()));
 
     // Every session is idle for at least zero seconds.
-    client.sweep(&|_, _| true, Duration::ZERO).await;
+    client.sweep(&|_, _| true, &|_| None, Duration::ZERO).await;
 
     assert!(fake.methods().contains(&"DELETE".to_owned()));
     // The next call starts a new session.
@@ -423,7 +430,7 @@ async fn sweeping_ends_sessions_idle_for_longer_than_the_limit() {
 }
 
 #[tokio::test]
-async fn a_new_config_version_ends_the_old_session_before_the_next_request() {
+async fn a_new_config_version_ends_the_old_session_and_the_next_request_opens_a_new_one() {
     let fake = FakeMcp::start(vec![tool("search")]).await;
     let client = client();
     let first = target(&fake);
@@ -450,9 +457,24 @@ async fn a_new_config_version_ends_the_old_session_before_the_next_request() {
     client.list_tools(&key("r1"), &second).await.unwrap();
 
     let methods = fake.methods();
-    assert_eq!(&methods[3..5], ["DELETE", "initialize"]);
-    let last = fake.requests().pop().unwrap();
-    assert_eq!(last.header("authorization"), Some("Bearer new"));
+    let mut ended_and_opened = methods[3..5].to_vec();
+    ended_and_opened.sort();
+    assert_eq!(ended_and_opened, ["DELETE", "initialize"]);
+    let requests = fake.requests();
+    let list = requests
+        .iter()
+        .rfind(|seen| seen.rpc_method().as_deref() == Some("tools/list"))
+        .unwrap();
+    assert_eq!(list.header("authorization"), Some("Bearer new"));
+    let delete = requests
+        .iter()
+        .find(|seen| seen.method == Method::DELETE)
+        .unwrap();
+    assert_eq!(
+        delete.header("authorization"),
+        Some("Bearer tok-123"),
+        "the old session is ended with the configuration it was opened with"
+    );
 }
 
 fn sent_headers(seen: &Seen) -> Vec<String> {
@@ -793,4 +815,258 @@ async fn cancelling_a_call_drops_the_request_and_tells_the_upstream() {
     {
         tokio::task::yield_now().await;
     }
+}
+
+/// A bearer target for `url` with `secret` and the given configuration version.
+fn target_version(url: &str, secret: &str, config_version: u64) -> Target {
+    let server = pb::McpServer {
+        id: "s1".into(),
+        name: "wiki".into(),
+        url: url.into(),
+        credential_ref: "c".into(),
+        credential_scheme: Some(scheme_bearer()),
+        private_network: true,
+        config_version,
+    };
+    let credential = pb::ProviderCredential {
+        value: secret.into(),
+    };
+    Target::from_proto(&server, Some(&credential), true).unwrap()
+}
+
+/// An upstream whose `tools/call` answers with the `Authorization` header it received.
+fn echoing_authorization() -> Handler {
+    Arc::new(|seen: &Seen| {
+        let message = seen.json();
+        match message.get("method").and_then(Value::as_str) {
+            Some("initialize") => Answer::JsonWith(
+                vec![("mcp-session-id", "sess".into())],
+                json!({"jsonrpc": "2.0", "id": message["id"],
+                    "result": {"protocolVersion": "2025-06-18", "capabilities": {}}}),
+            ),
+            Some("tools/call") => Answer::Json(json!({"jsonrpc": "2.0", "id": message["id"],
+                "result": {"content": [{"type": "text",
+                    "text": format!("you sent {}", seen.header("authorization").unwrap_or_default())}]}})),
+            _ => Answer::Accepted,
+        }
+    })
+}
+
+#[tokio::test]
+async fn a_rotated_credential_is_used_by_an_open_session_and_redacted_in_its_answers() {
+    let fake = FakeMcp::start_with(echoing_authorization()).await;
+    let client = client();
+    let before = target_version(&fake.url(), "old-token", 1);
+    client
+        .call_tool(
+            &key("r1"),
+            &before,
+            "t",
+            json!({}),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    // The Secret changed: the next snapshot has the new value, the configuration version stays.
+    let after = target_version(&fake.url(), "new-token", 1);
+    let reply = client
+        .call_tool(
+            &key("r1"),
+            &after,
+            "t",
+            json!({}),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    let calls: Vec<_> = fake
+        .requests()
+        .into_iter()
+        .filter(|seen| seen.rpc_method().as_deref() == Some("tools/call"))
+        .collect();
+    assert_eq!(calls[1].header("authorization"), Some("Bearer new-token"));
+    assert_eq!(text_of(&reply), "you sent Bearer [redacted]");
+    assert_eq!(
+        fake.methods().iter().filter(|m| *m == "initialize").count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_session_is_ended_with_the_credential_of_the_current_snapshot() {
+    let fake = FakeMcp::start_with(echoing_authorization()).await;
+    let client = client();
+    let before = target_version(&fake.url(), "old-token", 1);
+    client
+        .call_tool(
+            &key("r1"),
+            &before,
+            "t",
+            json!({}),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let current = target_version(&fake.url(), "new-token", 1);
+
+    client
+        .sweep(
+            &|_, _| false,
+            &|_| Some(current.clone()),
+            Duration::from_secs(600),
+        )
+        .await;
+
+    let delete = fake
+        .requests()
+        .into_iter()
+        .find(|seen| seen.method == Method::DELETE)
+        .unwrap();
+    assert_eq!(delete.header("authorization"), Some("Bearer new-token"));
+}
+
+#[tokio::test]
+async fn an_echoed_credential_is_redacted_whatever_the_case_of_its_percent_escapes() {
+    let secret = "k/e?y=1 &z";
+    for echoed in [
+        "k%2fe%3fy%3d1%20%26z",
+        "k%2Fe%3Fy%3D1%20%26z",
+        "k%2fe%3Fy%3d1+%26z",
+        "k/e%3fy=1%20&z",
+    ] {
+        let fake = FakeMcp::start_with(Arc::new(move |seen: &Seen| {
+            let m = seen.json();
+            match m.get("method").and_then(Value::as_str) {
+                Some("initialize") => Answer::Json(json!({"jsonrpc": "2.0", "id": m["id"],
+                    "result": {"protocolVersion": "2025-06-18", "capabilities": {}}})),
+                Some("tools/list") => Answer::Json(json!({"jsonrpc": "2.0", "id": m["id"],
+                    "result": {"tools": [{"name": "t", "description": format!("see ?token={echoed}"),
+                        "inputSchema": {"type": "object"}}]}})),
+                Some("tools/call") if m["params"]["name"] == "fail" => Answer::Json(json!({
+                    "jsonrpc": "2.0", "id": m["id"],
+                    "error": {"code": -1, "message": format!("bad https://x/mcp?token={echoed}")}})),
+                Some("tools/call") => Answer::Json(json!({"jsonrpc": "2.0", "id": m["id"],
+                    "result": {"content": [{"type": "text", "text": format!("url ?token={echoed}")}]}})),
+                _ => Answer::Accepted,
+            }
+        }))
+        .await;
+        let scheme = pb::mcp_server::CredentialScheme::Query(pb::McpQueryScheme {
+            parameter: "token".into(),
+        });
+        let target = target_at(&fake.url(), scheme, secret);
+        let client = client();
+
+        let list = client.list_tools(&key("r1"), &target).await.unwrap();
+        let ok = client
+            .call_tool(
+                &key("r1"),
+                &target,
+                "t",
+                json!({}),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let failed = client
+            .call_tool(
+                &key("r1"),
+                &target,
+                "fail",
+                json!({}),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            list.tools[0]["description"], "see ?token=[redacted]",
+            "{echoed}"
+        );
+        assert_eq!(text_of(&ok), "url ?token=[redacted]", "{echoed}");
+        assert_eq!(
+            text_of(&failed),
+            "bad https://x/mcp?token=[redacted]",
+            "{echoed}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn concurrent_first_calls_of_a_run_and_server_share_one_upstream_session() {
+    let fake = FakeMcp::start(vec![tool("search")]).await;
+    let client = Arc::new(client());
+    let target = target(&fake);
+
+    let calls: Vec<_> = (0..6)
+        .map(|_| {
+            let (client, target) = (client.clone(), target.clone());
+            tokio::spawn(async move { client.list_tools(&key("r1"), &target).await })
+        })
+        .collect();
+    for call in calls {
+        call.await.unwrap().unwrap();
+    }
+
+    let methods = fake.methods();
+    assert_eq!(
+        methods.iter().filter(|m| *m == "initialize").count(),
+        1,
+        "{methods:?}"
+    );
+    assert_eq!(methods.iter().filter(|m| *m == "tools/list").count(), 6);
+    assert!(
+        fake.requests()
+            .iter()
+            .all(|seen| seen.method != Method::DELETE)
+    );
+}
+
+#[tokio::test]
+async fn a_slow_end_of_a_stale_session_does_not_hold_back_a_concurrent_call() {
+    let standard = Arc::new(Standard::new(vec![tool("search")]));
+    let inner = standard.handler();
+    let fake = FakeMcp::start_with(Arc::new(move |seen: &Seen| {
+        let answer = inner(seen);
+        if seen.method == Method::DELETE {
+            Answer::After(Duration::from_millis(600), Box::new(answer))
+        } else {
+            answer
+        }
+    }))
+    .await;
+    let client = Arc::new(client());
+    client
+        .list_tools(&key("r1"), &target_version(&fake.url(), "tok", 1))
+        .await
+        .unwrap();
+    let current = target_version(&fake.url(), "tok", 2);
+    // The first call with the new configuration version ends the old session: its DELETE is slow.
+    let opener = tokio::spawn({
+        let (client, current) = (client.clone(), current.clone());
+        async move { client.list_tools(&key("r1"), &current).await }
+    });
+    while !fake.methods().contains(&"DELETE".to_owned()) {
+        tokio::task::yield_now().await;
+    }
+
+    let concurrent = tokio::time::timeout(
+        Duration::from_millis(400),
+        client.list_tools(&key("r1"), &current),
+    )
+    .await;
+
+    assert!(
+        concurrent
+            .expect("the concurrent call waited for the DELETE")
+            .is_ok()
+    );
+    assert!(!opener.is_finished(), "the DELETE was still pending");
+    opener.await.unwrap().unwrap();
+    assert_eq!(
+        fake.methods().iter().filter(|m| *m == "initialize").count(),
+        2
+    );
 }

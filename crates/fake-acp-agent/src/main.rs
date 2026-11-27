@@ -9,6 +9,7 @@ pub mod agent;
 pub mod mcp_upstream;
 pub mod mock_mcp;
 pub mod model;
+pub mod prompt_vars;
 pub mod script;
 pub mod upstream;
 

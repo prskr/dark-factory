@@ -66,10 +66,15 @@ fn content(servers: &[McpServerRecord], enabled: &[Uuid], saved: bool) -> Markup
                         @for server in servers { (row(server, enabled.contains(&server.id))) }
                     }
                     div class="flex items-center gap-3" {
-                        button type="submit" form=(FORM_ID) class=(crate::components::action_class(ButtonKind::Primary)) { "Save MCP servers" }
+                        button type="submit" form=(FORM_ID) class={(crate::components::action_class(ButtonKind::Primary)) " max-md:hidden"} { "Save MCP servers" }
                         @if saved {
                             span role="status" class="inline-flex items-center gap-1.5 text-sm text-accent-text" { (icon(Icon::Check)) "MCP servers saved" }
                         }
+                    }
+                    // Phone: the button ends the page at full width, like the save button of the
+                    // other project settings forms.
+                    div class="pt-2 pb-5 md:hidden" {
+                        button type="submit" form=(FORM_ID) class={(crate::components::action_class(ButtonKind::Primary)) " w-full"} { "Save MCP servers" }
                     }
                 }
             }))

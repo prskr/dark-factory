@@ -40,6 +40,7 @@ use self::jsonrpc::{
     negotiated_version, rpc_error, rpc_result,
 };
 use self::report::CallSink;
+use self::target::Target;
 use crate::gateway::{Outside, Settings};
 use crate::policy::{Policy, Sandbox};
 use crate::resolve::{BlockedRanges, Resolver};
@@ -269,10 +270,14 @@ impl Mcp {
         let Some(policy) = policy else {
             return;
         };
+        let allow_plain_http = self.client.allows_plain_http();
         self.client
             .sweep(
-                &|key, target| {
-                    policy.enables_mcp_server(&key.run_id, &key.server_id, target.config_version)
+                &|key, version| policy.enables_mcp_server(&key.run_id, &key.server_id, version),
+                &|key| {
+                    let server = policy.mcp_server_by_id(&key.server_id)?;
+                    let credential = policy.provider_credential(&server.credential_ref);
+                    Target::from_proto(server, credential, allow_plain_http).ok()
                 },
                 SESSION_IDLE,
             )

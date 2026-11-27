@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mcp_servers (id, name, url, credential_ref_id, credential_scheme,\n             credential_header, credential_prefix, credential_query_param, private_network)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cc3286618045243de5facb59a2ecc5da98e623a2e9a58484bb6d8e6722619a81"
+}

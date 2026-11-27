@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mcp_calls (call_id, run_id, server_name, tool, outcome, started_at,\n            duration_ms, request_bytes, response_bytes)\n         SELECT $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::timestamptz,\n                $7::bigint, $8::bigint, $9::bigint\n         WHERE EXISTS (SELECT 1 FROM runs WHERE id = $2)\n         ON CONFLICT (call_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2803740cf721b1d59be6f50adc6a5ae7af6aed64ab0df6323229ebd51a08454c"
+}
