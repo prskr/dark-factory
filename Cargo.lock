@@ -2139,7 +2139,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.3",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2382,7 +2382,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e35d6e78f4cebb90e51d543db8fe41528851d6deeef6ef21ebd4bfdc1e784776"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5380,7 +5380,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6582,7 +6582,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6946,9 +6946,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-agent"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1f44933c915d4390af9d759a72b80716622dac1628248d9c4a69c50b8f6b6b3"
+checksum = "e0cda5c0bdd2a37cca09729d31d654d6e12352ea5d80b0d696d73773c6fe71d7"
 dependencies = [
  "async-trait",
  "futures",
@@ -6965,9 +6965,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-ai"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e752e09e26744474c3e40e5e1dc48a9d5fe86313177df1352412434ba185683"
+checksum = "737bdee8f29143307b0605a5e670e19d5f5b50d35dfdb78894c42da84127052f"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6990,9 +6990,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-plugin-sdk"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "600b9bd7341ecc5a28c743afe0d7c879f4911c97d2ccd01c40051dc87b22ccda"
+checksum = "c35adc32f705926997ce19fd090f6b6d05c80c025fcce8f32c86a6f9c659a1a8"
 dependencies = [
  "libc",
  "serde_json",
@@ -7001,9 +7001,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-telemetry"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9fb3e852a29f14865e0f4554ca0f967a1b70efe5d43b5683d2d928d1aba774f"
+checksum = "0990672e94af3a4f930168f5697707f7c1742f7173d5ac047b6f2b4a6f732058"
 dependencies = [
  "async-trait",
  "serde",
@@ -7013,9 +7013,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-tools"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eeb5c93dd1aeb39366e659a2ffe931d19d08abd80e1997c757a322a9c8ab10f9"
+checksum = "60352fd9f3f39a7833e0e5576496dee63520332470b603a42b2ac53be54e1ea3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7166,7 +7166,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7234,7 +7234,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7426,7 +7426,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "969cde0349344dbbf58b5f9badbfb8f806db13969364eb8007c057ef687007d9"
 dependencies = [
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.23.1",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",
@@ -8245,10 +8245,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9722,7 +9722,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10034,7 +10034,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
