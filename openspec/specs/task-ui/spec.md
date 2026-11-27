@@ -772,10 +772,6 @@ The selected tab of the details column, on the task page and on the chat page, S
 - **WHEN** a board member opens the Artifacts tab of `DF-12`, which has 2 subtasks and 3 artifacts
 - **THEN** "Artifacts 3" has the accent line and medium weight, "Overview" and "Subtasks 2" are muted without a line, and the counts are plain numbers
 
-#### Scenario: Live update keeps the marked tab
-- **WHEN** the Artifacts tab of a chat is open and another viewer renames the chat, which updates its tab bar live
-- **THEN** "Artifacts" stays marked and the Artifacts panel stays open; "Overview" is not marked
-
 ### Requirement: Transcript is announced to screen readers
 The transcript of a task or chat SHALL be a log live region: screen readers SHALL announce items that the live update adds, without moving focus and without interrupting the user.
 
