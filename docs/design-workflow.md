@@ -53,7 +53,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 
 | Page | Content |
 |---|---|
-| Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button` (phone floating create action), `Button`, `Task row`, `Request card`, `Icon button` (properties Icon, Size, State; every icon-only control on the boards is an instance) |
+| Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button` (phone floating create action), `Button`, `Task row`, `Request card`, `Icon button` (properties Icon, Size, State; every icon-only control on the boards is an instance), `Settings nav` (property Active; the settings sidebar on every settings board is an instance) |
 | Chat | Chat conversation, subtasks tab with compaction notice; phone chat list, chat, details sheet (overview, subtasks) |
 | Chat - New chat | New chat dialog and persona picker (partial boards: dialog only), new chat started; phone |
 | Chat - Artifacts | Artifacts tab, scrolled, markdown split with sidebars collapsed; phone artifacts sheet and artifact page |
@@ -75,11 +75,12 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Config - Project integrations | Integrations tab (full screen) and its subscription states (partial boards: main column only) |
 | Config - Project integrations off | Integrations tab without the feature, publicUrl, webhook support or forge integration, with unrestricted URLs (partial boards: main column only); phone |
 | Config - Project egress | Egress tab (full screen) and its states (partial boards: main column only); phone |
-| Config - Personas | Personas: cards (full screen), identity (main column only), edit modal and its states (modal only); phone edit sheet; variant set `Settings nav` (property Active; the settings sidebar on every settings board is an instance) |
+| Config - Personas | Personas: cards (full screen), identity (main column only), edit modal and its states (modal only); phone edit sheet |
 | Config - Personas Signing | Grouped persona edit modal with the Commits group (modal only); Commits group states (group only); rotate key confirmations (dialog only); "Verify key on Forgejo" dialog and its states (dialog only); phone edit sheet |
 | Config - Persona page | Persona settings page: general, with a model error, commits (main column only); system prompt in the split, preview and editor views and the Markdown field states (partial boards); new persona modal (modal only); phone |
 | Config - Credentials | Credentials: two-line list rows, new with validation error; error page (not found) |
 | Config - Model providers | Model providers: two-line list rows (full screen); new provider modal per credential scheme (modal only); provider settings page general, models, model errors (main column only) |
+| Config - MCP Servers | MCP servers: two-line list rows (full screen); new server modal per credential scheme with errors, edit (modal only); project tab MCP servers (full screen), none registered (panel only); phone project tab and form sheet |
 | Empty states | One board per empty state |
 | Network | Egress rules: table with task entries (full screen); deny rule listed, search (partial boards: main column only); new and edit modals (modal only) |
 | Network - Graph | Traffic view: live traffic (full screen); node hover (graph panel and popover); allow modals (modal only); deny always (events panel only) |
