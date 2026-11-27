@@ -815,10 +815,12 @@ impl Session {
             .context("type the system prompt")
     }
 
-    /// The highlighting editor of the System prompt: a text box named by the field's label.
-    /// (Without an editor the textarea has the same role and name.)
+    /// The highlighting editor of the System prompt: the text box inside the attached editor,
+    /// named by the field's label. Scoped to `.cm-editor` because the textarea has the same
+    /// role and name until the editor hides it: an action on the textarea that the editor hides
+    /// meanwhile waits for it to show again and times out.
     pub fn system_prompt_editor(&self) -> Locator {
-        self.page.get_by_role(
+        self.page.locator(".cm-editor").get_by_role(
             AriaRole::Textbox,
             Some(
                 GetByRoleOptions::default()
