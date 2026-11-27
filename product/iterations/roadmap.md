@@ -94,7 +94,7 @@ Dependency: API-key harnesses need the inference endpoint of iteration 3, otherw
 ## 5 — Configurable projects
 
 - **Repository configuration file (F11, ADR-0039)** with the `project-config` approval. Needs the proxy's protection of `.dark-factory/**` (iteration 2).
-- **Workspace lifecycle hooks (F9)** and **sidecar services (F10).**
+- **Workspace lifecycle hooks (F9)** and **sidecar services (F10**, first step: `sidecar-services`, UI-defined sidecars with ephemeral data, MCP endpoint and Playwright as leading use case**).**
 - **Build and test secrets** (private registries, test databases; ADR-0010 "out of scope for now"): injected by the gateway like Git, inference and MCP credentials, never stored in the sandbox. Needs an ADR.
 - **Per-project image pull secrets:** set in the UI and merged after the instance-wide `sandbox.imagePullSecrets` (instance first, then project, deduplicated; never replacing the instance list). Builds on `sandbox-image-pull-secrets`.
 - **Egress:** persona allowlist scope, CIDR targets (task scope moved to iteration 2).
