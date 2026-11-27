@@ -137,7 +137,7 @@
     {
       "name": "ask_question",
       "title": "Ask a question",
-      "description": "Ask the humans of this task a question. Use blocking=false when you can continue without the answer: the answer arrives later as a message. Use blocking=true only when you cannot make progress without it: your turn then ends and the run waits for the answer for a limited time (about 10 minutes); after that the run ends as blocked and the answer starts a new run. Offer suggested_answers when the choice is among a few options. Asking the same question again while it is pending returns the existing question.",
+      "description": "Ask the humans of this task a question. Pick the kind: single_choice when the answer is one of a few known options, multi_choice when several options may apply (min_selected and max_selected set limits), text for an open answer the human writes in Markdown. Give every option an id of your own (lowercase letters, digits, - and _): the answer names the option ids you chose. A choice question also offers Other, a free text, unless you set allow_other=false for a strict choice. The answer arrives as a message that holds a JSON block with the structured answer (kind, selected options with id and label, other, or text) followed by the readable answer: read the JSON block. Questions block by default: your turn then ends and the run waits for the answer for a limited time (about 10 minutes); after that the run ends as blocked and the answer starts a new run. Set blocking=false only when you can continue with a fallback and revisit it later: the answer then arrives later as a message. Asking the same text again while it is pending returns the pending question, whatever kind and options you send (the result says merged: true).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -147,24 +147,78 @@
             "maxLength": 4000,
             "description": "The question in Markdown, self-contained."
           },
-          "suggested_answers": {
-            "type": "array",
+          "kind": {
+            "type": "string",
+            "enum": [
+              "single_choice",
+              "multi_choice",
+              "text"
+            ],
+            "description": "single_choice: one of the options. multi_choice: several of the options. text: a free answer in Markdown (no options)."
+          },
+          "options": {
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Your id for the option, returned in the answer: lowercase letters, digits, - and _, starting with a letter or digit, at most 40 characters, unique in the question."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "What the human reads: plain text on one line, 1 to 200 characters, unique in the question."
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Optional detail: plain text on one line, at most 300 characters."
+                }
+              },
+              "required": [
+                "id",
+                "label"
+              ],
+              "additionalProperties": false
             },
-            "maxItems": 5,
-            "description": "Up to 5 short answers a human can pick with one tap."
+            "description": "2 to 10 options for single_choice and multi_choice; leave empty or omit for text."
+          },
+          "allow_other": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "default": true,
+            "description": "Choice kinds: also offer Other, a free text of up to 1,000 characters. Set false for a strict choice."
+          },
+          "min_selected": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "multi_choice only: fewest choices (Other counts as one), default 1."
+          },
+          "max_selected": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "multi_choice only: most choices (Other counts as one), default no limit."
           },
           "blocking": {
             "type": "boolean",
-            "default": false,
-            "description": "True if you cannot continue without the answer."
+            "default": true,
+            "description": "Default true: your turn ends and the run waits for the answer. False only when you can continue with a fallback."
           }
         },
         "required": [
-          "text"
+          "text",
+          "kind"
         ],
         "additionalProperties": false
       },

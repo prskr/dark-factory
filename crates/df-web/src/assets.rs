@@ -570,11 +570,83 @@ mod tests {
             assert!(js.contains(key), "{key}");
         }
         assert!(js.contains("move(event: KeyboardEvent)"), "{js}");
+        assert!(js.contains("[role=\"radio\"]"), "{js}");
+    }
+
+    #[test]
+    fn question_other_shows_and_focuses_its_input_while_other_is_checked() {
+        let js = script_source("questionOther.ts");
         assert!(
-            js.contains("'[role=\"radio\"]'") || js.contains("[role=\"radio\"]"),
+            js.contains("Alpine.data('questionOther', (otherValue: string)"),
             "{js}"
         );
-        assert!(!js.contains("[role=\"tab\"]"), "{js}");
+        // The form value of Other comes from the server, not from a literal in the script.
+        assert!(js.contains("input[value=\"${otherValue}\"]"), "{js}");
+        assert!(!js.contains("_other"), "{js}");
+        assert!(js.contains("this.open = Boolean(other?.checked)"), "{js}");
+        // Focus only when Other just got checked by a click, not while the component starts or
+        // when the Other input itself fires `change` on blur.
+        assert!(
+            js.contains("if (wasOpen || !this.open || !focus) return;"),
+            "{js}"
+        );
+        assert!(js.contains("[data-other-input]')?.focus()"), "{js}");
+        // Hiding is a binding on the server markup (`:hidden`), so without the component the
+        // input stays visible.
+        assert!(!js.contains("style.display"), "{js}");
+    }
+
+    #[test]
+    fn request_cards_insert_replace_move_the_old_form_and_delete() {
+        let js = script_source("requestCards.ts");
+        assert!(js.contains("Alpine.data('requestCards'"), "{js}");
+        // Insert before the anchor, else at the end of the list.
+        assert!(js.contains("anchor.before(card)"), "{js}");
+        assert!(js.contains(".append(card)"), "{js}");
+        // Replace; the old form moves only when both cards are pending with the same question.
+        assert!(js.contains("old.replaceWith(card)"), "{js}");
+        assert!(
+            js.contains(
+                "if (old.dataset.state !== 'pending' || card.dataset.state !== 'pending') return none;"
+            ),
+            "{js}"
+        );
+        assert!(
+            js.contains("oldForm.dataset.question !== newForm.dataset.question) return none;"),
+            "{js}"
+        );
+        assert!(js.contains("newForm.replaceWith(oldForm)"), "{js}");
+        // The moved form gets its focus and selection back once the card is on the page.
+        assert!(js.contains("field?.focus()"), "{js}");
+        assert!(js.contains("setSelectionRange(start, end)"), "{js}");
+        // A keep template removes the list's cards it does not name.
+        assert!(js.contains("dataset.requestKeep"), "{js}");
+        assert!(
+            js.contains("if (!keep.has(card.id)) card.remove();"),
+            "{js}"
+        );
+        // Inserted cards are processed by htmx, or their forms would not post through it.
+        assert_eq!(js.matches("htmx.process(card)").count(), 2, "{js}");
+        // Delete.
+        assert!(js.contains("dataset.requestDelete"), "{js}");
+        assert!(js.contains("?.remove()"), "{js}");
+    }
+
+    #[test]
+    fn markdown_field_plain_tabs_move_with_the_arrow_keys_and_never_attach_the_editor() {
+        let js = script_source("markdownField.ts");
+        // The same keys serve the radio group of the switch and the tabs of the plain layout.
+        assert!(js.contains("[role=\"radio\"], [role=\"tab\"]"), "{js}");
+        // The marked field leaves out everything about the highlighting editor.
+        assert!(
+            js.contains("options: { split?: boolean; plain?: boolean }"),
+            "{js}"
+        );
+        assert!(
+            js.contains("if (!options.plain) this.initEditor(this.textarea)"),
+            "{js}"
+        );
+        assert!(js.contains("options.split && this.wide.matches"), "{js}");
     }
 
     #[test]

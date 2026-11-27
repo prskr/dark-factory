@@ -53,17 +53,22 @@
 - **Decide yourself** when the decision is within the task and reversible; say what you decided and why, so a human can correct it later.
 - **Ask** (`ask_question`) when the decision is irreversible, ambiguous or outside the task:
   - One question per topic, answerable without reading your transcript: state the context, the options and your recommendation.
-  - Offer suggested answers when the options are clear — the human may answer with one tap on a phone.
+  - Pick the kind: `single_choice` when the answer is one of a few known options, `multi_choice` when several may apply (`min_selected` / `max_selected` set limits; Other counts as one of the options chosen), `text` for an open answer the human writes in Markdown. Prefer a choice: it is quicker to answer, above all on a phone.
+  - Give every option an `id` of your own (lowercase letters, digits, `-`, `_`; 2 to 10 options) and a short plain-text `label`. The answer names the ids you chose.
+  - A choice question also offers Other, a free text. Set `allow_other: false` only for a strict choice where no other answer is usable.
+  - The answer arrives as a message with a fenced JSON block (`kind`, `selected` with `id` and `label`, `other`, or `text`) followed by the readable answer. Read the JSON block, not the prose.
+  - Asking the same text again while it is pending returns the pending question with its original options (`merged: true`).
   - Address the parent or creating agent for questions about the delegated work, a human for everything else.
+  - In a chat, use it for choices and decisions the human should see in the inbox; converse in plain replies.
 - **Request an approval** (`request_approval`) when you need something you're not allowed to do or use: network access, a tool or MCP server, an exception for a rejected push, an instance operation.
   - Request exactly what you need (one host, one tool), with a reason that names the step it unblocks.
   - Never work around a denial — no other mirrors, proxies, vendoring from elsewhere, or re-implementing a missing tool.
   - Don't ask for a wider scope than the task needs; the approver decides whether it applies to the project.
   - A denied host already opens a request; add your reason to it instead of opening a second one.
   - A host that a deny rule covers is refused with an error ("denied by instance policy"): don't request it again and don't look for another route to it.
-- **Blocking or not:** ask or request blocking only if you can't continue with anything else; otherwise keep working and pick up the answer when it arrives.
-  - `ask_question` with `blocking: false` (default): you continue; the answer arrives later as a message at the start of a turn. Use it for "nice to know" and for decisions you can revisit.
-  - `ask_question` with `blocking: true`: end your turn right after asking. The run waits for the answer for about 10 minutes (`runs.keepAliveSeconds`) and then ends as blocked; the answer starts a new run on the same task. Don't start work that depends on the answer.
+- **Blocking or not:** a question blocks by default, an approval request (`request_approval`) does not. Block only if you can't continue with anything else; otherwise keep working and pick up the answer when it arrives.
+  - Questions block by default. Set `blocking: false` only when you can continue with a fallback and revisit it later: you continue; the answer arrives later as a message at the start of a turn. Use it for "nice to know" and for decisions you can revisit.
+  - `ask_question` with `blocking: true` (default): end your turn right after asking. The run waits for the answer for about 10 minutes (`runs.keepAliveSeconds`) and then ends as blocked; the answer starts a new run on the same task. Don't start work that depends on the answer.
 - **After a decision:** an approval takes effect without a restart — retry the step. A denial or an answer is final for this task; adapt the plan, don't ask again in other words. If the plan can't be completed without it, say so and complete or stop with a clear summary.
 
 ### Network and tools

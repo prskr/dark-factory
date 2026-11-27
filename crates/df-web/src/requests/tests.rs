@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use df_core::{Principal, RequestId, TaskId};
+use df_core::{Principal, QuestionSpec, RequestId, TaskId};
 use df_db::requests::{Raised, raise_approval, raise_question};
 use serde_json::json;
 
@@ -9,6 +9,7 @@ use crate::testkit::{SseReader, TestApp, add_event, form, insert_run, new_task, 
 
 mod create_issue;
 mod deny_always;
+mod question;
 
 const LIVE: Duration = Duration::from_secs(1);
 const _: () = assert!(LIVE.as_millis() * 2 <= super::POLL.as_millis());
@@ -44,10 +45,28 @@ impl Fixture {
         }
     }
 
-    async fn ask(&self, question: &str, suggested: &[&str]) -> RequestId {
+    /// A text question, or a single choice with the options `o1`, `o2`... when `options` is given.
+    async fn ask(&self, question: &str, options: &[&str]) -> RequestId {
         let agent = self.agent();
-        let suggested: Vec<String> = suggested.iter().map(ToString::to_string).collect();
-        raise_question(&self.app.pool, self.from(&agent), question, &suggested)
+        let spec = if options.is_empty() {
+            QuestionSpec::text_question(question)
+        } else {
+            QuestionSpec {
+                kind: df_core::QuestionKind::SingleChoice,
+                allow_other: true,
+                options: options
+                    .iter()
+                    .enumerate()
+                    .map(|(i, label)| df_core::QuestionOption {
+                        id: format!("o{}", i + 1),
+                        label: (*label).to_string(),
+                        description: None,
+                    })
+                    .collect(),
+                ..QuestionSpec::text_question(question)
+            }
+        };
+        raise_question(&self.app.pool, self.from(&agent), spec)
             .await
             .unwrap()
             .0
@@ -171,7 +190,7 @@ async fn the_navigation_count_follows_the_decisions() {
     let (status, _) = f
         .post(
             &format!("/requests/{first}/answer"),
-            &form(&[("answer", "yes")]),
+            &form(&[("text", "yes")]),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
@@ -180,25 +199,22 @@ async fn the_navigation_count_follows_the_decisions() {
 }
 
 #[tokio::test]
-async fn one_tap_on_a_suggested_answer_answers_the_question() {
+async fn a_radio_and_answer_answer_a_single_choice_without_another_step() {
     let f = fixture().await;
     let id = f.ask("Postgres?", &["16", "17"]).await;
     let page = f.page("/requests").await;
-    // The button carries the answer; tapping it posts it without another step.
-    assert!(
-        page.contains("hx-vals=\"{&quot;answer&quot;:&quot;17&quot;}\""),
-        "{page}"
-    );
+    // No one-tap button: a radio is picked and "Answer" sends it.
+    assert!(!page.contains("hx-vals"), "{page}");
     let (status, card) = f
         .post(
             &format!("/requests/{id}/answer"),
-            &form(&[("answer", "17")]),
+            &form(&[("selected", "o2")]),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(card.contains("Answered by Peter: 17"), "{card}");
+    assert!(card.contains("Answered by Peter"), "{card}");
     assert!(
-        !card.contains("Your answer"),
+        !card.contains("<form") && !card.contains(">Answer<"),
         "no actions after the decision: {card}"
     );
 }
@@ -215,10 +231,10 @@ async fn request_card_inline_code_uses_panel_background() {
 #[tokio::test]
 async fn card_inputs_use_the_shared_input_class() {
     let f = fixture().await;
-    f.ask("Postgres?", &[]).await;
+    f.ask("Postgres?", &["16", "17"]).await;
     f.approval("needs it").await;
     let page = f.page("/requests").await;
-    for name in ["name=\"answer\"", "name=\"comment\""] {
+    for name in ["name=\"other\"", "name=\"comment\""] {
         let tag = crate::testkit::tag_around(&page, name);
         assert!(tag.contains(crate::components::forms::INPUT_CLASS), "{tag}");
     }
@@ -231,22 +247,20 @@ async fn questions_and_approvals_share_the_neutral_frame_in_every_state() {
     let approval = f.approval("Allow the backup connection").await;
     let denial = f.approval("Allow the restore connection").await;
     let pending = f.page("/tasks/DF-1").await;
-    assert!(pending.contains("Your answer"), "{pending}");
+    assert!(pending.contains("value=\"o2\""), "{pending}");
     assert!(
-        pending.contains("hx-vals=\"{&quot;answer&quot;:&quot;17&quot;}\"")
-            && pending.contains("value=\"task\" checked")
-            && pending.contains("value=\"project\""),
+        pending.contains("value=\"task\" checked") && pending.contains("value=\"project\""),
         "{pending}"
     );
 
     let (status, answered) = f
         .post(
             &format!("/requests/{question}/answer"),
-            &form(&[("answer", "17")]),
+            &form(&[("selected", "o2")]),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(answered.contains("Answered by Peter: 17"), "{answered}");
+    assert!(answered.contains("Answered by Peter"), "{answered}");
     assert!(answered.contains("bg-status-completed-bg"), "{answered}");
 
     let (status, approved) = f
@@ -392,7 +406,7 @@ async fn answered_question_hides_its_decision_message_unless_hidden_blocks_are_s
         let (status, _) = f
             .post(
                 &format!("/requests/{id}/answer"),
-                &form(&[("answer", "16")]),
+                &form(&[("selected", "o1")]),
             )
             .await;
         assert_eq!(status, StatusCode::OK);
@@ -431,14 +445,15 @@ async fn answered_question_hides_its_decision_message_unless_hidden_blocks_are_s
             "{page}"
         );
         assert!(
-            page.contains("Postgres?") && page.contains("Answered by Peter: 16"),
+            page.contains("Postgres?") && page.contains("Answered by Peter"),
             "{page}"
         );
         assert_eq!(page.contains(&format!("id=\"ev-{event}\"")), show_hidden);
         assert_eq!(page.contains("Instruction for the agent"), show_hidden);
         assert_eq!(page.contains("Request decision"), show_hidden);
         assert_eq!(
-            page.matches("was answered by Peter: 16").count(),
+            page.matches("was answered by Peter. Structured answer:")
+                .count(),
             usize::from(show_hidden),
             "{page}"
         );
@@ -469,22 +484,25 @@ async fn a_new_card_is_appended_after_the_events_streamed_before_it() {
     while !card.data.contains(&format!("request-{id}")) {
         card = sse.next_within(LIVE).await;
     }
-    let delete = card
+    // An upsert with no anchor: the card goes to the end of the transcript.
+    let template = card
         .data
-        .find(&format!("hx-target=\"#request-{id}\" hx-swap=\"delete\""))
-        .expect("delete partial");
-    let append = card
-        .data
-        .find(r##"hx-target="#transcript" hx-swap="beforeend""##)
-        .expect("append partial");
+        .find("<template data-request-card")
+        .expect("upsert template");
     let markup = card
         .data
         .find(&format!("id=\"request-{id}\""))
         .expect("card markup");
-    assert!(delete < append && append < markup, "{}", card.data);
+    assert!(template < markup, "{}", card.data);
+    assert!(
+        card.data.contains("data-into=\"#transcript\"") && !card.data.contains("data-before"),
+        "{}",
+        card.data
+    );
+    assert!(!card.data.contains("hx-swap=\"delete\""), "{}", card.data);
     f.post(
         &format!("/requests/{id}/answer"),
-        &form(&[("answer", "16")]),
+        &form(&[("selected", "o1")]),
     )
     .await;
     let mut changed = sse.next_within(LIVE).await;
@@ -492,10 +510,11 @@ async fn a_new_card_is_appended_after_the_events_streamed_before_it() {
         changed = sse.next_within(LIVE).await;
     }
     // Sent once, a card changes in place: it does not jump to the end.
+    // (an upsert: the card with its id is replaced where it is, and no anchor is given).
     assert!(
-        changed.data.contains(&format!(
-            "hx-target=\"#request-{id}\" hx-swap=\"outerMorph\""
-        )),
+        changed.data.contains("<template data-request-card")
+            && changed.data.contains(&format!("id=\"request-{id}\""))
+            && !changed.data.contains("data-before"),
         "{}",
         changed.data
     );
@@ -539,9 +558,9 @@ async fn assert_card_placed_before(sse: &mut SseReader, id: RequestId, next_even
         frame = sse.next().await;
     }
     assert!(
-        frame.data.contains(&format!(
-            "hx-target=\"#ev-{next_event}\" hx-swap=\"beforebegin\""
-        )),
+        frame
+            .data
+            .contains(&format!("data-before=\"ev-{next_event}\"")),
         "{}",
         frame.data
     );
@@ -588,19 +607,12 @@ async fn a_card_is_placed_by_time_among_the_items_when_the_stream_starts() {
         frame = sse.next().await;
     }
     assert!(
-        frame.data.contains(&format!(
-            "hx-target=\"#ev-{after}\" hx-swap=\"beforebegin\""
-        )),
+        frame.data.contains(&format!("data-before=\"ev-{after}\"")),
         "{}",
         frame.data
     );
     assert!(
         !frame.data.contains(&format!("ev-{before}")),
-        "{}",
-        frame.data
-    );
-    assert!(
-        !frame.data.contains("hx-swap=\"beforeend\""),
         "{}",
         frame.data
     );
@@ -641,9 +653,7 @@ async fn a_card_raised_inside_a_tool_call_streak_is_placed_after_its_group() {
 
     // Not before the second call, which is a member of the group above: before the message.
     assert!(
-        frame.data.contains(&format!(
-            "hx-target=\"#ev-{after}\" hx-swap=\"beforebegin\""
-        )),
+        frame.data.contains(&format!("data-before=\"ev-{after}\"")),
         "{}",
         frame.data
     );
@@ -658,11 +668,11 @@ async fn a_reconnect_shows_a_card_raised_and_decided_meanwhile_exactly_once() {
     let _regions = sse.next().await;
     let id = f.ask("Postgres?", &["16"]).await;
     let first = sse.next_within(LIVE).await;
-    assert!(first.data.contains("Your answer"), "{}", first.data);
+    assert!(first.data.contains("data-question="), "{}", first.data);
     drop(sse);
     f.post(
         &format!("/requests/{id}/answer"),
-        &form(&[("answer", "16")]),
+        &form(&[("selected", "o1")]),
     )
     .await;
     let mut sse = f.events(&url).await;
@@ -674,11 +684,11 @@ async fn a_reconnect_shows_a_card_raised_and_decided_meanwhile_exactly_once() {
         frame.data
     );
     assert!(frame.data.contains("Answered by"), "{}", frame.data);
-    assert!(!frame.data.contains("Your answer"), "{}", frame.data);
+    assert!(!frame.data.contains("data-question="), "{}", frame.data);
+    // An upsert, not delete plus insert: a draft in the card's form survives the reconnect.
     assert!(
-        frame
-            .data
-            .contains(&format!("hx-target=\"#request-{id}\" hx-swap=\"delete\"")),
+        frame.data.contains("<template data-request-card")
+            && !frame.data.contains("hx-swap=\"delete\""),
         "{}",
         frame.data
     );
@@ -691,20 +701,20 @@ async fn a_card_decided_after_the_page_was_rendered_is_sent_when_the_stream_star
     // The page shows the pending card.
     let page = f.page("/tasks/DF-1").await;
     let url = task_stream_url(&page);
-    assert!(page.contains("Your answer"));
+    assert!(page.contains("data-question="));
     f.post(
         &format!("/requests/{id}/answer"),
-        &form(&[("answer", "16")]),
+        &form(&[("selected", "o1")]),
     )
     .await;
     let mut sse = f.events(&url).await;
     let frame = sse.next().await;
     assert!(
-        frame.data.contains(&format!("#request-{id}")) && frame.data.contains("Answered by"),
+        frame.data.contains(&format!("request-{id}")) && frame.data.contains("Answered by"),
         "{}",
         frame.data
     );
-    assert!(!frame.data.contains("Your answer"), "{}", frame.data);
+    assert!(!frame.data.contains("data-question="), "{}", frame.data);
 }
 
 #[tokio::test]
@@ -863,4 +873,41 @@ fn markdown_in_a_card_sits_in_md_body_so_diagrams_and_code_get_their_styles() {
     let html = super::request_card(&card, None).into_string();
     let body = &html[html.find("md-body").expect("md-body")..];
     assert!(body.contains(r#"x-data="mermaidDiagram""#), "{html}");
+}
+
+fn card_ids(updates: &[maud::Markup]) -> Vec<String> {
+    updates
+        .iter()
+        .filter_map(|u| u.0.split(r#"<article id=""#).nth(1)?.split('"').next())
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn new_cards_are_sent_last_first_so_each_anchor_is_on_the_page() {
+    let [a, b, c] = [(); 3].map(|()| push_check_card(json!([])));
+    let mut sent = std::collections::BTreeMap::new();
+    super::list_updates(&mut sent, std::slice::from_ref(&c), true);
+
+    let updates = super::list_updates(&mut sent, &[a.clone(), b.clone(), c], false);
+
+    let ids = card_ids(&updates);
+    assert_eq!(
+        ids,
+        [super::card_id(b.row.id), super::card_id(a.row.id)],
+        "{updates:?}"
+    );
+}
+
+#[test]
+fn the_first_send_names_the_pending_cards_so_stale_ones_leave() {
+    let card = push_check_card(json!([]));
+    let mut sent = std::collections::BTreeMap::new();
+
+    let updates = super::list_updates(&mut sent, std::slice::from_ref(&card), true);
+    let again = super::list_updates(&mut sent, std::slice::from_ref(&card), false);
+
+    let keep = format!(r#"data-request-keep="{}""#, super::card_id(card.row.id));
+    assert!(updates[0].0.contains(&keep), "{updates:?}");
+    assert!(again.is_empty(), "{again:?}");
 }

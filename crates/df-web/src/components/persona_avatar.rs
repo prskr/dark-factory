@@ -80,7 +80,7 @@ fn avatar_span(id: Option<Uuid>, display_name: &str, size: AvatarSize, preview: 
         span role="img" aria-label=(display_name)
             "x-bind:aria-label"=[preview.then_some("name")]
             "x-text"=[preview.then_some("initials")]
-            class={"avatar persona-avatar inline-flex shrink-0 items-center justify-center rounded-full font-semibold " (size.class()) " " (color)} {
+            class={"avatar persona-avatar no-underline hover:no-underline inline-flex shrink-0 items-center justify-center rounded-full font-semibold " (size.class()) " " (color)} {
             (initials(display_name))
         }
     }
@@ -91,6 +91,13 @@ mod tests {
     use super::*;
 
     const ID: Uuid = Uuid::from_u128(0x0192_a000_0000_7000_8000_0000_0000_0001);
+
+    #[test]
+    fn an_avatar_inside_a_link_has_no_underline_in_any_state() {
+        let html = persona_avatar(Some(ID), "Code Reviewer", AvatarSize::Row).into_string();
+
+        assert!(html.contains("no-underline hover:no-underline"), "{html}");
+    }
 
     #[test]
     fn initials_come_from_up_to_two_words_and_the_label_is_the_display_name() {

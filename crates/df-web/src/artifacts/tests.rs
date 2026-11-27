@@ -97,6 +97,39 @@ async fn card_previews_stop_after_eight_lines() {
     );
 }
 
+#[test]
+fn the_selected_details_tab_has_the_accent_marker_and_medium_weight_and_counts_are_plain() {
+    for html in [
+        super::view::details_heading(2, 3, false).into_string(),
+        super::view::chat_details_heading(2, 3, false).into_string(),
+    ] {
+        let tablist = &html[html.find("role=\"tablist\"").unwrap()..];
+        let tablist_tag = &tablist[..tablist.find('>').unwrap()];
+        // Only the selected tab is medium weight: the tablist itself is not.
+        assert!(!tablist_tag.contains("font-medium"), "{tablist_tag}");
+        assert_eq!(html.matches("role=\"tab\"").count(), 3, "{html}");
+        for tab in html.split("<button").skip(1) {
+            let tab = &tab[..tab.find("</button>").unwrap()];
+            assert!(
+                tab.contains("aria-selected:font-medium") && tab.contains("aria-selected:text-ink"),
+                "{tab}"
+            );
+            // The 2 px accent line, shown only while the tab is selected (as the page tabs).
+            assert!(
+                tab.contains("h-0.5")
+                    && tab.contains("bg-accent-text")
+                    && tab.contains("group-aria-selected:block"),
+                "{tab}"
+            );
+        }
+        assert!(!html.contains("bg-sunk"), "no pill behind a count: {html}");
+        assert!(
+            html.contains("<span class=\"ml-1.5 text-[13px] font-normal text-muted\">3</span>"),
+            "{html}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn the_task_page_has_the_artifacts_tab_only_with_artifacts() {
     let (app, cookie) = app_with_task().await;
@@ -113,7 +146,9 @@ async fn the_task_page_has_the_artifacts_tab_only_with_artifacts() {
     let two = text(app.get("/tasks/DF-1", &cookie).await).await;
     assert!(two.contains("role=\"tablist\""), "{two}");
     assert!(
-        two.contains(">Artifacts <span class=\"rounded-full bg-sunk px-1.5 text-xs\">2</span>"),
+        two.contains(
+            "Artifacts <span class=\"ml-1.5 text-[13px] font-normal text-muted\">2</span>"
+        ),
         "{two}"
     );
     assert!(
@@ -185,6 +220,25 @@ async fn a_markdown_artifact_shows_a_table_in_the_preview() {
         html.contains("<table>") && html.contains("<th>a</th>"),
         "{html}"
     );
+}
+
+#[tokio::test]
+async fn inline_code_in_a_markdown_artifact_takes_the_page_surface_and_not_the_bubble_background() {
+    let (app, cookie) = app_with_task().await;
+    write(&app, "DF-1", "t.md", b"Use `cargo test` here.\n").await;
+
+    let html = text(app.get_htmx("/tasks/DF-1/artifacts/t.md", &cookie).await).await;
+
+    // `.md-body` alone gives inline code `code-on-agent`, the background of the inverted agent
+    // bubbles: light on light grey in the dark theme, dark on dark in the light one.
+    let body = crate::testkit::tag_around(&html, "md-body");
+    assert!(body.contains("md-page"), "{body}");
+    let css = include_str!("../../styles/input.css");
+    let rule = css
+        .find(".md-page :not(pre) > code")
+        .expect("a rule for the inline code of a page");
+    let block = &css[rule..rule + css[rule..].find('}').unwrap()];
+    assert!(block.contains("bg-sunk"), "{block}");
 }
 
 #[tokio::test]

@@ -40,6 +40,35 @@ async fn demo_counts(pool: &df_db::PgPool) -> Result<Vec<i64>> {
 }
 
 #[tokio::test]
+async fn demo_profile_has_a_pending_question_of_each_kind_and_an_answered_multiple_choice()
+-> Result<()> {
+    let pool = df_test_postgres::migrated_pool(&MIGRATOR).await;
+
+    demo::run(&pool).await?;
+
+    assert_eq!(
+        strings(
+            &pool,
+            "SELECT t.key || ' ' || (r.payload ->> 'kind')
+             FROM agent_requests r JOIN tasks t ON t.id = r.task_id WHERE r.state = 'pending'
+             ORDER BY r.payload ->> 'kind'"
+        )
+        .await?,
+        ["PAY-2 multi_choice", "PAY-2 single_choice", "PAY-2 text"]
+    );
+    assert_eq!(
+        strings(
+            &pool,
+            "SELECT (r.payload ->> 'kind') || ' ' || (r.decision -> 'answer' ->> 'other')
+             FROM agent_requests r WHERE r.state = 'answered'"
+        )
+        .await?,
+        ["multi_choice also the CLI"]
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn demo_profile_writes_projects_personas_and_tasks_in_every_state() -> Result<()> {
     let pool = df_test_postgres::migrated_pool(&MIGRATOR).await;
 
@@ -117,16 +146,6 @@ async fn demo_profile_writes_projects_personas_and_tasks_in_every_state() -> Res
         )
         .await?,
         ["WEB-4"]
-    );
-    // The blocked task asks a question with suggested answers.
-    assert_eq!(
-        strings(
-            &pool,
-            "SELECT t.key || ' ' || jsonb_array_length(r.payload -> 'suggested_answers')
-             FROM agent_requests r JOIN tasks t ON t.id = r.task_id WHERE r.state = 'pending'"
-        )
-        .await?,
-        ["PAY-2 3"]
     );
     // Every run is finished: nothing for the startup sweep of a control plane to end.
     assert_eq!(

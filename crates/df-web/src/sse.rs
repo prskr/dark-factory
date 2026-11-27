@@ -256,6 +256,11 @@ impl DetailStream {
         else {
             return Ok(Vec::new());
         };
+        // The cards show the title of the task: a rename sends them again (an upsert keeps drafts).
+        if task.title != self.task_title {
+            self.task_title.clone_from(&task.title);
+            self.check_requests = true;
+        }
         let mut data = load_detail(&self.state, task).await?;
         let artifacts = df_db::artifacts::list_artifacts(&self.state.pool, self.task_id)
             .await?
@@ -364,18 +369,17 @@ impl DetailStream {
         for card in &cards {
             let markup = crate::requests::request_card(card, None);
             let html = markup.0.clone();
-            let target = format!("#{}", crate::requests::card_id(card.row.id));
-            match self.requests.insert(card.row.id, html.clone()) {
-                Some(sent) if sent == html => {}
-                Some(_) => changed.push(partial(&target, "outerMorph", &markup)),
-                None => {
-                    changed.push(partial(&target, "delete", &Markup::default()));
-                    changed.push(match self.folder.card_anchor(card.row.created_at) {
-                        Some(next) => partial(&format!("#{next}"), "beforebegin", &markup),
-                        None => partial("#transcript", "beforeend", &markup),
-                    });
-                }
+            if self.requests.insert(card.row.id, html.clone()).as_ref() == Some(&html) {
+                continue;
             }
+            // An upsert for the first send too: the page may show the card already, and a draft
+            // in its form stays (`requestCards.ts`).
+            let anchor = self.folder.card_anchor(card.row.created_at);
+            changed.push(crate::requests::upsert_partial(
+                &markup,
+                anchor.as_deref(),
+                "#transcript",
+            ));
         }
         Ok(changed)
     }

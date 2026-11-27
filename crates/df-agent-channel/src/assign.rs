@@ -85,6 +85,7 @@ Work that needs a branch or a pull request goes into tasks: create them with `cr
 (its handle, from `list_personas`), and follow up with `send_message`. \
 Results that should outlive the chat belong in artifacts or tasks. \
 Set a short topic for the chat with `set_task_title` in your first reply. \
+Ask a choice, or a decision the board member should see in the inbox, with `ask_question`; answer conversation in plain replies. \
 A chat is never completed: there is no `complete_task`, you just answer and wait for the next message.";
 
 /// The tools a chat run is offered. A call to any other tool is rejected.
@@ -94,6 +95,7 @@ pub const CHAT_TOOLS: &[&str] = &[
     "create_task",
     "list_personas",
     "send_message",
+    "ask_question",
     "request_approval",
     "write_artifact",
     "list_artifacts",

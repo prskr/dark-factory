@@ -15,6 +15,26 @@
 sessions:
   new:
     - &turn
+      # `[chat-question]` (crates/df-e2e/tests/chat_questions.rs): a blocking choice, and what the
+      # chat says when the JSON block of the answer arrives in its next turn.
+      - when:
+          prompt_contains: "[chat-question]"
+          steps:
+            - mcp:
+                server: factory
+                tool: ask_question
+                args:
+                  text: "Which chart layout do you prefer?"
+                  kind: single_choice
+                  options:
+                    - { id: mono, label: "One chart" }
+                    - { id: split, label: "Split charts" }
+                  blocking: true
+            - say: "Asked about the layout."
+      - when:
+          prompt_contains: '"selected":[{"id":"split","label":"Split charts"}]'
+          steps:
+            - say: "The chat got the split layout."
       - when:
           prompt_contains: "[chat]"
           steps:

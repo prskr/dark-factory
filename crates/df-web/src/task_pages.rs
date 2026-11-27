@@ -229,7 +229,10 @@ fn selected_columns(s: &Selected) -> Markup {
 /// re-runs `x-init`, so opening another task lands at the bottom too.
 pub(crate) fn transcript_scroll(transcript: Markup) -> Markup {
     html! {
-        div id="transcript-scroll" class="min-h-0 flex-1 overflow-y-auto p-4"
+        // `relative`: the screen-reader-only text of a card (an absolutely positioned legend or
+        // "chosen") then lies in this container and is clipped with it. Without it a card far
+        // down the transcript made the page itself taller than the window.
+        div id="transcript-scroll" class="relative min-h-0 flex-1 overflow-y-auto p-4"
             x-data="{ pinned: true }"
             x-init="const down = () => { if (pinned) $el.scrollTop = $el.scrollHeight }; down(); new MutationObserver(down).observe($el, { childList: true, subtree: true, characterData: true }); new ResizeObserver(down).observe($el); new ResizeObserver(down).observe($el.querySelector('#transcript'))"
             "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {

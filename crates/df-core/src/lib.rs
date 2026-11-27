@@ -14,6 +14,7 @@ pub mod lifecycle;
 pub mod model_provider;
 pub mod persona;
 pub mod public_address;
+pub mod question;
 pub mod routing;
 pub mod run_transition;
 pub mod seams;
@@ -47,6 +48,10 @@ pub use ids::{
 pub use keys::{KeyError, ProjectKey, TaskKey, is_chat_key};
 pub use lifecycle::{EventType, InstanceSubscription, LifecycleEventsConfig};
 pub use persona::{CommitIdentity, IdentityError, PersonaIdentity};
+pub use question::{
+    AnswerError, AnswerField, QuestionAnswer, QuestionKind, QuestionOption, QuestionSpec,
+    RawOption, RawQuestion, SpecError,
+};
 pub use seams::{
     Author, AuthorRole, CiCheck, CiJobLog, CiState, CiStatus, Comment, CredentialRef, Feedback,
     ForgeClient, IntegrationError, Issue, IssueFilter, IssuePage, IssueRef, IssueState,

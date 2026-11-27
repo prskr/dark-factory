@@ -15,6 +15,7 @@ pub mod persona_avatar;
 pub mod project_host;
 pub mod shell;
 pub mod table;
+pub mod tabs;
 pub mod time;
 pub mod transcript;
 
@@ -47,6 +48,7 @@ pub use table::{
     Cell, actions_cell, data_table, entry_button, entry_link, entry_tr, faint_separator, name_cell,
     separator, td, th, tr, tr_with_id,
 };
+pub use tabs::{MarkerInset, TAB_CLASS, tab_marker};
 pub use time::short_time;
 pub use transcript::QueuedState;
 

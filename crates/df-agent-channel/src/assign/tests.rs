@@ -337,12 +337,8 @@ async fn assign_for_a_chat_run_is_read_only_without_branches_and_offers_the_chat
     assert!(tools.contains(&"create_task"), "{tools:?}");
     assert!(tools.contains(&"list_issues"), "{tools:?}");
     assert!(tools.contains(&"create_issue"), "{tools:?}");
-    for excluded in [
-        "complete_task",
-        "ask_question",
-        "update_pull_request",
-        "comment_on_issue",
-    ] {
+    assert!(tools.contains(&"ask_question"), "{tools:?}");
+    for excluded in ["complete_task", "update_pull_request", "comment_on_issue"] {
         assert!(!tools.contains(&excluded), "{excluded} in {tools:?}");
     }
     let prompt = prompt_file(&assign, &env);
@@ -402,10 +398,38 @@ fn the_chat_instructions_say_what_a_chat_agent_must_know() {
         "read-only",
         "create_task",
         "send_message",
+        "ask_question",
         "never completed",
     ] {
         assert!(CHAT_INSTRUCTIONS.contains(part), "{part}");
     }
+}
+
+#[test]
+fn the_ask_question_description_names_the_kinds_the_answer_block_and_blocking_by_default() {
+    let tools = tool_descriptors();
+    let ask = tools.iter().find(|t| t.name == "ask_question").unwrap();
+
+    for part in [
+        "single_choice",
+        "multi_choice",
+        "text",
+        "JSON block",
+        "Questions block by default",
+        "blocking=false",
+        "option ids",
+        "allow_other=false",
+    ] {
+        assert!(
+            ask.description.contains(part),
+            "{part}: {}",
+            ask.description
+        );
+    }
+    let schema: serde_json::Value = serde_json::from_str(&ask.input_schema_json).unwrap();
+    assert_eq!(schema["properties"]["blocking"]["default"], true);
+    assert_eq!(schema["required"], serde_json::json!(["text", "kind"]));
+    assert!(schema["properties"].get("suggested_answers").is_none());
 }
 
 #[test]

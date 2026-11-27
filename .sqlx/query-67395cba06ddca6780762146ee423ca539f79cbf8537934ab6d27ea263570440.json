@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,\n            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.id AS persona_id,\n            ps.handle AS persona_handle, ps.display_name AS persona_display_name,\n            ps.harness AS persona_harness, ps.model AS persona_model,\n            ps.description AS persona_description, t.issue_number, t.status,\n            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.archived_at,\n            EXISTS (SELECT 1 FROM agent_requests r WHERE r.task_id = t.id AND r.state = $2)\n                AS \"has_pending_request!\",\n            t.branch,\n            t.resume_at, t.auto_resumes, t.created_by, creator.key AS \"creator_task_key?\",\n            parent.key AS \"parent_key?\", parent.title AS \"parent_title?\",\n            parent_persona.display_name AS \"parent_persona_display_name?\",\n            base.key AS \"base_task_key?\", base.title AS \"base_task_title?\"\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas ps ON ps.id = t.persona_id\n        LEFT JOIN tasks creator ON creator.id =\n            CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END\n        LEFT JOIN tasks parent ON parent.id = t.parent_id\n        LEFT JOIN personas parent_persona ON parent_persona.id = parent.persona_id\n        LEFT JOIN tasks base ON base.id = t.base_task_id\n        WHERE t.id = $1\n        ",
+  "query": "\n        SELECT t.id, t.key, t.title, t.title_source, t.description, p.key AS project_key,\n            p.name AS project_name, p.repo_url, p.issue_tracker_url, ps.id AS persona_id,\n            ps.handle AS persona_handle, ps.display_name AS persona_display_name,\n            ps.harness AS persona_harness, ps.model AS persona_model,\n            ps.description AS persona_description, t.issue_number, t.status,\n            t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.archived_at,\n            EXISTS (SELECT 1 FROM agent_requests r\n                    WHERE r.task_id = t.id AND r.state = $2 AND r.kind = $3)\n                AS \"has_pending_approval!\",\n            t.branch,\n            t.resume_at, t.auto_resumes, t.created_by, creator.key AS \"creator_task_key?\",\n            parent.key AS \"parent_key?\", parent.title AS \"parent_title?\",\n            parent_persona.display_name AS \"parent_persona_display_name?\",\n            base.key AS \"base_task_key?\", base.title AS \"base_task_title?\"\n        FROM tasks t\n        JOIN projects p ON p.id = t.project_id\n        JOIN personas ps ON ps.id = t.persona_id\n        LEFT JOIN tasks creator ON creator.id =\n            CASE WHEN t.created_by->>'kind' = 'agent' THEN (t.created_by->>'task_id')::uuid END\n        LEFT JOIN tasks parent ON parent.id = t.parent_id\n        LEFT JOIN personas parent_persona ON parent_persona.id = parent.persona_id\n        LEFT JOIN tasks base ON base.id = t.base_task_id\n        WHERE t.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -258,7 +258,7 @@
       },
       {
         "ordinal": 23,
-        "name": "has_pending_request!",
+        "name": "has_pending_approval!",
         "type_info": "Bool",
         "origin": "Expression"
       },
@@ -376,6 +376,7 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "Text",
         "Text"
       ]
     },
@@ -416,5 +417,5 @@
       true
     ]
   },
-  "hash": "9693017b3a87345d4830e1e231b43f71eacf8ae078640f481917a4303f7426c1"
+  "hash": "67395cba06ddca6780762146ee423ca539f79cbf8537934ab6d27ea263570440"
 }

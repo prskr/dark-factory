@@ -94,6 +94,11 @@ async fn message_form_keeps_the_draft_outside_the_streamed_regions() {
     let html = text(app.get("/tasks/DF-1", &cookie).await).await;
     assert_eq!(html.matches("x-model=\"draft\"").count(), 1);
     // The transcript container follows new items while the reader is at the bottom.
+    let scroll = tag_around(&html, "id=\"transcript-scroll\"");
+    assert!(
+        scroll.contains("class=\"relative "),
+        "screen-reader-only text of a card must stay inside the scroller: {scroll}"
+    );
     for needle in [
         "id=\"transcript-scroll\"",
         "x-data=\"{ pinned: true }\"",

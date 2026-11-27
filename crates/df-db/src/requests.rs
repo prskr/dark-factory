@@ -11,7 +11,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use df_core::system_reason::REQUEST_DECIDED;
-use df_core::{Principal, RequestId, RunId, TaskId};
+use df_core::{
+    AnswerError, Principal, QuestionAnswer, QuestionKind, QuestionSpec, RequestId, RunId, TaskId,
+};
 use df_proto::transcript::v1::{ContentBlock, TextContent, content_block};
 use jiff::Timestamp;
 use serde_json::{Value, json};
@@ -26,12 +28,6 @@ use crate::tasks::{TaskRow, get_task, queue_message_tx};
 
 /// Pending requests one task may have at a time.
 pub const MAX_PENDING_PER_TASK: i64 = 20;
-/// Longest question text and answer, in characters.
-pub const MAX_TEXT_CHARS: usize = 4000;
-/// Most suggested answers of a question.
-pub const MAX_SUGGESTED_ANSWERS: usize = 5;
-/// Longest suggested answer, in characters.
-pub const MAX_SUGGESTED_ANSWER_CHARS: usize = 200;
 
 macro_rules! columns {
     () => {
@@ -60,6 +56,9 @@ pub enum RequestError {
     Refused(String),
     #[error("the approval type does not offer scope `{0}`")]
     ScopeNotOffered(Scope),
+    /// The answer does not fit the question; the message tells the human why.
+    #[error("{0}")]
+    InvalidAnswer(AnswerError),
     /// The approval type's action failed; the decision was not stored.
     #[error("the approved action failed: {0}")]
     ApplyFailed(String),
@@ -213,17 +212,15 @@ impl RequestRow {
             .unwrap_or_default()
     }
 
-    /// The suggested answers of a question.
-    pub fn suggested_answers(&self) -> Vec<&str> {
-        self.payload
-            .get("suggested_answers")
-            .and_then(Value::as_array)
-            .map_or_default(|a| a.iter().filter_map(Value::as_str).collect())
+    /// The question of a question request, read as stored (migrated rows may break the rules for
+    /// new questions).
+    pub fn question(&self) -> QuestionSpec {
+        QuestionSpec::read_stored(&self.payload)
     }
 
     /// The answer of an answered question.
-    pub fn answer(&self) -> Option<&str> {
-        self.decision.as_ref()?.get("answer")?.as_str()
+    pub fn answer(&self) -> Option<QuestionAnswer> {
+        serde_json::from_value(self.decision.as_ref()?.get("answer")?.clone()).ok()
     }
 
     /// The scope of an approved request.
@@ -312,7 +309,7 @@ impl ApprovalTypes {
 /// A human's decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
-    Answer(String),
+    Answer(QuestionAnswer),
     Approve(Scope),
     Deny(Option<String>),
 }
@@ -342,34 +339,11 @@ pub enum Raised {
 pub async fn raise_question(
     pool: &PgPool,
     from: Raise<'_>,
-    text: &str,
-    suggested_answers: &[String],
+    question: QuestionSpec,
 ) -> Result<(RequestRow, bool), RequestError> {
-    let text = text.trim();
-    if text.is_empty() || text.chars().count() > MAX_TEXT_CHARS {
-        return Err(RequestError::Invalid(format!(
-            "the question must have 1 to {MAX_TEXT_CHARS} characters"
-        )));
-    }
-    if suggested_answers.len() > MAX_SUGGESTED_ANSWERS {
-        return Err(RequestError::Invalid(format!(
-            "at most {MAX_SUGGESTED_ANSWERS} suggested answers"
-        )));
-    }
-    let suggested_answers: Vec<String> = suggested_answers
-        .iter()
-        .map(|answer| answer.trim().to_string())
-        .collect();
-    for answer in &suggested_answers {
-        let chars = answer.chars().count();
-        if chars == 0 || chars > MAX_SUGGESTED_ANSWER_CHARS {
-            return Err(RequestError::Invalid(format!(
-                "a suggested answer must have 1 to {MAX_SUGGESTED_ANSWER_CHARS} characters"
-            )));
-        }
-    }
-    let payload = json!({ "text": text, "suggested_answers": suggested_answers });
-    let normalized = text
+    let payload = question.to_payload();
+    let normalized = question
+        .text
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -644,16 +618,14 @@ async fn apply_decision(
     decider: Actor<'_>,
 ) -> Result<(RequestState, Value, &'static str), RequestError> {
     Ok(match (decision, request.kind) {
-        (Decision::Answer(text), RequestKind::Question) => {
-            let text = text.trim();
-            if text.is_empty() || text.chars().count() > MAX_TEXT_CHARS {
-                return Err(RequestError::Invalid(format!(
-                    "the answer must have 1 to {MAX_TEXT_CHARS} characters"
-                )));
-            }
+        (Decision::Answer(answer), RequestKind::Question) => {
+            let answer = request
+                .question()
+                .check(answer.clone())
+                .map_err(RequestError::InvalidAnswer)?;
             (
                 RequestState::Answered,
-                json!({ "answer": text }),
+                json!({ "answer": answer }),
                 "request.answer",
             )
         }
@@ -701,7 +673,7 @@ pub async fn close_pending_for_task(
     reason: &str,
     actor: &Principal,
 ) -> Result<Vec<RequestId>, DbError> {
-    close_pending(tx, task_id, None, reason, actor).await
+    close_pending(tx, task_id, PendingFilter::default(), reason, actor).await
 }
 
 /// [`close_pending_for_task`] for the pending approvals of type `approval_type` only.
@@ -712,26 +684,54 @@ pub(crate) async fn close_pending_of_type(
     reason: &str,
     actor: &Principal,
 ) -> Result<Vec<RequestId>, DbError> {
-    close_pending(tx, task_id, Some(approval_type), reason, actor).await
+    let only = PendingFilter {
+        approval_type: Some(approval_type),
+        kind: None,
+    };
+    close_pending(tx, task_id, only, reason, actor).await
 }
 
+/// [`close_pending_for_task`] for the pending questions only.
+pub(crate) async fn close_pending_questions(
+    tx: &mut Transaction<'_, Postgres>,
+    task_id: TaskId,
+    reason: &str,
+    actor: &Principal,
+) -> Result<Vec<RequestId>, DbError> {
+    let only = PendingFilter {
+        approval_type: None,
+        kind: Some(RequestKind::Question),
+    };
+    close_pending(tx, task_id, only, reason, actor).await
+}
+
+/// Which pending requests of a task [`close_pending`] closes; a `None` matches all.
+#[derive(Debug, Default, Clone, Copy)]
+struct PendingFilter<'a> {
+    approval_type: Option<&'a str>,
+    kind: Option<RequestKind>,
+}
+
+/// Closes the pending requests of `task_id` that match `only`.
 async fn close_pending(
     tx: &mut Transaction<'_, Postgres>,
     task_id: TaskId,
-    approval_type: Option<&str>,
+    only: PendingFilter<'_>,
     reason: &str,
     actor: &Principal,
 ) -> Result<Vec<RequestId>, DbError> {
     lock_task(tx, task_id).await?;
-    let ids: Vec<uuid::Uuid> = sqlx::query_scalar(
+    let ids = sqlx::query_scalar!(
         "UPDATE agent_requests SET state = 'closed', close_reason = $2
          WHERE task_id = $1 AND state = 'pending'
            AND ($3::text IS NULL OR approval_type = $3)
+           AND ($4::text IS NULL OR kind = $4)
          RETURNING id",
+        task_id.as_uuid(),
+        reason,
+        only.approval_type,
+        only.kind.map(|kind| kind.as_str())
     )
-    .bind(task_id.as_uuid())
-    .bind(reason)
-    .bind(approval_type)
     .fetch_all(&mut **tx)
     .await?;
     let mut closed = Vec::with_capacity(ids.len());
@@ -831,11 +831,7 @@ pub fn decision_message(approval_type: Option<&dyn ApprovalType>, request: &Requ
         _ => String::new(),
     };
     match request.state {
-        RequestState::Answered => format!(
-            "Request {} ({subject}) was answered{who}: {}",
-            request.id,
-            request.answer().unwrap_or_default()
-        ),
+        RequestState::Answered => answered_message(request, &subject, &who),
         RequestState::Approved => format!(
             "Request {} ({subject}) was approved{who} with scope {}.",
             request.id,
@@ -846,6 +842,54 @@ pub fn decision_message(approval_type: Option<&dyn ApprovalType>, request: &Requ
             None => format!("Request {} ({subject}) was denied{who}.", request.id),
         },
     }
+}
+
+/// The decision message of an answered question: the sentence, the structured answer as a JSON
+/// block (before the readable answer, as a text answer may hold fences of its own), the readable
+/// answer.
+fn answered_message(request: &RequestRow, subject: &str, who: &str) -> String {
+    let head = format!("Request {} ({subject}) was answered{who}.", request.id);
+    let Some(answer) = request.answer() else {
+        return head;
+    };
+    let question = request.question();
+    let (structured, readable) = match &answer {
+        QuestionAnswer::Text(text) => (
+            json!({ "request_id": request.id, "kind": QuestionKind::Text, "text": text }),
+            format!("Answer:\n{text}"),
+        ),
+        QuestionAnswer::Choice { selected, other } => {
+            // (id, label) once: the JSON and the readable list are both built from them.
+            let chosen: Vec<(&str, &str)> = selected
+                .iter()
+                .map(|id| {
+                    let label = question
+                        .option(id)
+                        .map_or(id.as_str(), |o| o.label.as_str());
+                    (id.as_str(), label)
+                })
+                .collect();
+            let mut parts: Vec<String> = chosen
+                .iter()
+                .map(|(_, label)| (*label).to_owned())
+                .collect();
+            parts.extend(other.iter().map(|text| format!("Other: {text}")));
+            let selected_json: Vec<Value> = chosen
+                .iter()
+                .map(|(id, label)| json!({ "id": id, "label": label }))
+                .collect();
+            (
+                json!({
+                    "request_id": request.id,
+                    "kind": question.kind,
+                    "selected": selected_json,
+                    "other": other,
+                }),
+                format!("Answer: {}", parts.join(", ")),
+            )
+        }
+    };
+    format!("{head} Structured answer:\n\n```json\n{structured}\n```\n\n{readable}")
 }
 
 pub(crate) struct NewRequest<'a> {
@@ -862,7 +906,10 @@ pub(crate) async fn raise_in(
     tx: &mut Transaction<'_, Postgres>,
     new: NewRequest<'_>,
 ) -> Result<(RequestRow, bool), RequestError> {
-    lock_task(tx, new.from.task_id).await?;
+    // The lock orders the raise after a concurrent archive, which closed the pending questions.
+    if crate::tasks::lock_task_archived(tx, new.from.task_id).await? {
+        return Err(RequestError::Refused("the chat is archived".to_owned()));
+    }
 
     let existing = sqlx::query_as::<_, RequestRecord>(concat!(
         "SELECT ",

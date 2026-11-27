@@ -3,6 +3,10 @@
 //
 // Without this script the field is a plain labelled textarea: the view switch is `x-cloak`.
 //
+// Plain tabs layout (`markdownField({"plain": true})`, `Preview::PlainTabs`): "Write" and "Preview"
+// are WAI-ARIA tabs (same keys as the switch), the view is `editor` or `preview`, and the
+// highlighting editor is never initialised, so its bundle is never requested.
+//
 // State: `view` (`editor`, `split` or `preview`; not stored), `status` of the preview (`ok`,
 // `failed`, `too-long`, `session`) and `rendered`, the text of the last good preview. The server
 // renders the first preview of the split layout, so its text counts as rendered.
@@ -83,7 +87,7 @@
   }
 
   document.addEventListener('alpine:init', () => {
-    Alpine.data('markdownField', (options: { split: boolean }) => ({
+    Alpine.data('markdownField', (options: { split?: boolean; plain?: boolean }) => ({
       // The view switch row shows once the component runs (`x-show="enhanced"`).
       enhanced: true,
       view: 'editor' as View,
@@ -109,9 +113,15 @@
         this.root = this.$el;
         this.textarea = this.root.querySelector('textarea');
         if (!this.textarea) return;
-        this.initEditor(this.textarea);
+        // The plain tabs layout has no highlighting editor and never loads its bundle.
+        if (!options.plain) this.initEditor(this.textarea);
         this.wide = window.matchMedia(WIDE);
         this.view = options.split && this.wide.matches ? 'split' : 'editor';
+        // A moved field (a card that is sent again keeps its form) opens on the tab it had.
+        if (options.plain && this.root.dataset.view === 'preview') {
+          this.view = 'preview';
+          void this.refresh();
+        }
         if (options.split) this.rendered = this.textarea.defaultValue;
         this.onWidthChange = () => {
           if (this.view === 'split' && !this.wide?.matches) this.select('editor');
@@ -188,6 +198,7 @@
       select(view: View): void {
         if (this.view === view) return;
         this.view = view;
+        if (this.root) this.root.dataset.view = view;
         window.clearTimeout(this.timer);
         if (view !== 'preview') void this.$nextTick(() => this.fit());
         if (view !== 'editor') void this.refresh();
@@ -196,7 +207,7 @@
       // Arrow keys, Home and End on the switch: the focused segment's neighbour is selected.
       move(event: KeyboardEvent): void {
         const group = event.currentTarget as HTMLElement;
-        const radios = [...group.querySelectorAll<HTMLElement>('[role="radio"]')].filter((r) => r.offsetParent !== null);
+        const radios = [...group.querySelectorAll<HTMLElement>('[role="radio"], [role="tab"]')].filter((r) => r.offsetParent !== null);
         const at = radios.indexOf(document.activeElement as HTMLElement);
         if (at < 0) return;
         const steps: Record<string, number | undefined> = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 };

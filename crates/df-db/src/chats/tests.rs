@@ -1,10 +1,10 @@
 //! Tests of the chat queries.
 
-use df_core::{PersonaId, ProjectId, ProjectKey, TaskKind, TaskStatus, UserId};
+use df_core::{PersonaId, ProjectId, ProjectKey, QuestionSpec, TaskKind, TaskStatus, UserId};
 use sqlx::PgPool;
 
 use super::*;
-use crate::requests::{Raise, raise_question};
+use crate::requests::{ApprovalTypes, Raise, RequestError, raise_approval, raise_question};
 use crate::task_events::set_status_for_test;
 use crate::tasks::tests::{audit_count, human, insert_run, new_task, seed_project_and_persona};
 use crate::tasks::{
@@ -315,7 +315,17 @@ async fn chat_archive_is_rejected_while_the_chat_runs_or_has_an_open_request() {
         actor: &agent,
         blocking: false,
     };
-    raise_question(&pool, from, "Which one?", &[])
+    raise_approval(
+        &pool,
+        &ApprovalTypes::builtin(),
+        from,
+        "network-access",
+        serde_json::json!({"host": "pypi.org", "port": 443}),
+        "needs the index",
+    )
+    .await
+    .unwrap();
+    raise_question(&pool, from, QuestionSpec::text_question("Which one?"))
         .await
         .unwrap();
     let error = archive_chat(&pool, chat.id, human()).await.unwrap_err();
@@ -324,6 +334,74 @@ async fn chat_archive_is_rejected_while_the_chat_runs_or_has_an_open_request() {
     let after = get_task(&pool, chat.id).await.unwrap().unwrap();
     assert_eq!(after.archived_at, None);
     assert_eq!(audit_count(&pool, "chat.archive").await, 0);
+    // The rejected archive closed nothing: its transaction was rolled back.
+    assert_eq!(crate::requests::pending_count(&pool).await.unwrap(), 2);
+}
+
+#[tokio::test]
+async fn an_archived_chat_refuses_new_questions() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let chat = waiting_chat(&pool).await;
+    archive_chat(&pool, chat.id, human()).await.unwrap();
+    let agent = Principal::system("test");
+    let from = Raise {
+        task_id: chat.id,
+        run_id: None,
+        actor: &agent,
+        blocking: false,
+    };
+
+    let error = raise_question(&pool, from, QuestionSpec::text_question("Which one?"))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, RequestError::Refused(_)), "{error:?}");
+    assert_eq!(crate::requests::pending_count(&pool).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn archiving_a_chat_closes_its_pending_questions_with_audit_and_a_notification() {
+    let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
+    let notifier = crate::Notifier::start(&pool).await.unwrap();
+    let mut changes = notifier.subscribe();
+    let chat = waiting_chat(&pool).await;
+    let agent = Principal::system("test");
+    let from = Raise {
+        task_id: chat.id,
+        run_id: None,
+        actor: &agent,
+        blocking: false,
+    };
+    let (question, _) = raise_question(&pool, from, QuestionSpec::text_question("Which one?"))
+        .await
+        .unwrap();
+
+    archive_chat(&pool, chat.id, human()).await.unwrap();
+
+    let closed = crate::requests::get_request(&pool, question.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(closed.state, crate::requests::RequestState::Closed);
+    assert_eq!(closed.close_reason.as_deref(), Some("chat-archived"));
+    assert_eq!(audit_count(&pool, "request.close").await, 1);
+    assert_eq!(audit_count(&pool, "chat.archive").await, 1);
+    assert_eq!(crate::requests::pending_count(&pool).await.unwrap(), 0);
+    let closed_notice = crate::Notification::RequestChanged {
+        task_id: chat.id,
+        request_id: question.id,
+    };
+    // The raise sent one notice; the close sends another.
+    let mut notices = 0;
+    while notices < 2 {
+        let notice = tokio::time::timeout(std::time::Duration::from_secs(5), changes.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        if notice == closed_notice {
+            notices += 1;
+        }
+    }
 }
 
 #[tokio::test]

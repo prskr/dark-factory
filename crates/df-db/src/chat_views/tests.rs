@@ -1,6 +1,6 @@
 //! Tests of the chat read models (container-backed).
 
-use df_core::{PersonaId, Principal, ProjectId, ProjectKey, TaskId, UserId};
+use df_core::{PersonaId, Principal, ProjectId, ProjectKey, QuestionSpec, TaskId, UserId};
 use serde_json::json;
 use sqlx::PgPool;
 
@@ -111,7 +111,7 @@ impl Fixture {
             actor: &agent,
             blocking: false,
         };
-        raise_question(&self.pool, from, "Which one?", &[])
+        raise_question(&self.pool, from, QuestionSpec::text_question("Which one?"))
             .await
             .unwrap();
     }

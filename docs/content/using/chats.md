@@ -61,10 +61,16 @@ A chat run differs from a task run:
   this: it talks to a board member, the checkout is read-only, work that needs a branch goes into
   tasks, and the chat is never completed.
 - **Tools.** A chat run is offered `set_task_title`, `report_progress`, `create_task`,
-  `list_personas`, `send_message`, `request_approval`, `list_issues`, `create_issue` and the
+  `list_personas`, `send_message`, `ask_question`, `request_approval`, `list_issues`, `create_issue` and the
   [artifact](artifacts.md) tools ([issue tools](#file-and-list-issues) are offered in chats only).
-  It is not offered `complete_task`, `ask_question`, `update_pull_request`, `comment_on_issue` and
-  the pull request tools; a call to one is answered with an error and changes nothing.
+  It is not offered `complete_task`, `update_pull_request`, `comment_on_issue` and the pull request
+  tools; a call to one is answered with an error and changes nothing.
+- **Questions.** The persona asks with `ask_question` when you should choose or decide
+  (see [question kinds](requests.md#question-kinds)). The question card appears on the chat
+  timeline and in the Requests inbox, and the chat needs you until it is answered. A message you
+  write in the chat is delivered but does not answer or close the question. Archiving a chat closes
+  its pending questions with the reason `chat-archived`; only a pending approval request still
+  blocks archiving.
 - **Context.** When a run cannot resume the harness session of the run before and starts a new one
   with the summary of the transcript, the transcript shows a **context_compacted** notice (a bot
   icon, one line). Expand it to read the summary the session started with. Tasks show the same
