@@ -10,12 +10,13 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{delete, get};
 use axum::{Extension, Router, middleware};
 use df_core::CredentialRef;
-use df_core::mcp::{self, McpCredentialScheme, McpError};
+use df_core::mcp::{self, McpCredentialScheme, McpError, url_without_query};
 use df_db::DbError;
 use df_db::catalog::Actor;
-use df_db::mcp_servers::{McpServerInput, McpServerRecord};
+use df_db::mcp_servers::{McpServerConflict, McpServerInput, McpServerRecord};
 use maud::{Markup, html};
 use serde::Deserialize;
+use std::fmt;
 use uuid::Uuid;
 
 use super::{
@@ -59,7 +60,7 @@ pub(super) fn routes() -> Router<WebState> {
         .route_layer(middleware::from_fn(require_admin))
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Default, Clone, Deserialize)]
 #[serde(default)]
 struct ServerForm {
     name: String,
@@ -72,6 +73,22 @@ struct ServerForm {
     credential_query_param: String,
     /// A checked box posts `on`.
     private_network: String,
+}
+
+/// Without the URL's query, where a credential may sit.
+impl fmt::Debug for ServerForm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ServerForm")
+            .field("name", &self.name)
+            .field("url", &url_without_query(&self.url))
+            .field("credential_ref_id", &self.credential_ref_id)
+            .field("scheme", &self.scheme)
+            .field("credential_header", &self.credential_header)
+            .field("credential_prefix", &self.credential_prefix)
+            .field("credential_query_param", &self.credential_query_param)
+            .field("private_network", &self.private_network)
+            .finish()
+    }
 }
 
 impl ServerForm {
@@ -120,8 +137,8 @@ fn error_field(error: &McpError) -> &'static str {
     }
 }
 
-/// Checks the form. `known` are the ids of the credential references; `rename_check` is false
-/// when editing, where the stored name stays.
+/// Checks the form. `known` are the ids of the credential references; with `editing` the name is
+/// not checked, the stored one stays.
 fn validate(
     form: &ServerForm,
     known: &[Uuid],
@@ -275,7 +292,7 @@ fn server_form(
             (form_grid(html! {
                 @if editing {
                     (readonly_field("Name", "name", &values.name, errors,
-                        Some("The name can't be changed: it is part of every tool name agents see (<name>__<tool>).")))
+                        Some(&format!("The name can't be changed: it is part of every tool name agents see ({}__<tool>).", values.name))))
                 } @else {
                     (text_field("Name", "name", &values.name, errors, Some(NAME_HINT)))
                 }
@@ -512,14 +529,13 @@ async fn save(
                     };
                 }
                 Err(DbError::NotFound(_)) => return not_found("The MCP server"),
-                Err(DbError::Conflict(message)) => {
-                    let mut errors = FormErrors::default();
-                    let field = if message.starts_with("credential") {
-                        "credential_ref_id"
-                    } else {
-                        "name"
+                Err(DbError::McpServer(conflict)) => {
+                    let field = match &conflict {
+                        McpServerConflict::Name(_) => "name",
+                        McpServerConflict::Credential(_) => "credential_ref_id",
                     };
-                    errors.add(field, message);
+                    let mut errors = FormErrors::default();
+                    errors.add(field, conflict.message());
                     errors
                 }
                 Err(e) => return internal_error(&e),

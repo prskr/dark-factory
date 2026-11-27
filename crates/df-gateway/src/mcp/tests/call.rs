@@ -135,6 +135,10 @@ async fn a_name_without_a_server_prefix_is_rejected() {
 
     assert_eq!(text(&answer), "tool plain is not available in this run");
     assert!(fake.requests().is_empty());
+    assert_eq!(
+        env.records.summary(),
+        vec![(String::new(), "plain".to_owned(), McpCallOutcome::Rejected)]
+    );
 }
 
 #[tokio::test]

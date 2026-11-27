@@ -28,6 +28,9 @@ pub enum DbError {
     /// The change violates a uniqueness or immutability rule.
     #[error("conflict: {0}")]
     Conflict(String),
+    /// An MCP server cannot be saved; says which field is the problem.
+    #[error("conflict: {}", .0.message())]
+    McpServer(crate::mcp_servers::McpServerConflict),
     /// A model or wire API of a model provider is in use, or a persona's model does not fit its
     /// provider or harness.
     #[error("conflict: {0}")]

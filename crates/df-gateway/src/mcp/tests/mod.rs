@@ -22,7 +22,7 @@ use hyper_util::rt::TokioIo;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 
 use super::report::CallSink;
 use super::testing::StaticResolver;
@@ -166,9 +166,17 @@ impl Env {
         let addr = listener.local_addr().unwrap();
         let (mcp_in, policy_in) = (mcp.clone(), policy.clone());
         let task = tokio::spawn(async move {
-            while let Ok((stream, _peer)) = listener.accept().await {
-                let (mcp, policy) = (mcp_in.clone(), policy_in.clone());
-                tokio::spawn(serve_front_connection(stream, mcp, policy));
+            // The connections belong to this task: aborting it ends them too.
+            let mut connections = JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => {
+                        let Ok((stream, _peer)) = accepted else { break };
+                        let (mcp, policy) = (mcp_in.clone(), policy_in.clone());
+                        connections.spawn(serve_front_connection(stream, mcp, policy));
+                    }
+                    Some(_finished) = connections.join_next() => {}
+                }
             }
         });
         Self {
@@ -196,7 +204,6 @@ impl Env {
             hyper::client::conn::http1::handshake::<_, Full<Bytes>>(TokioIo::new(stream))
                 .await
                 .unwrap();
-        tokio::spawn(connection);
         let mut request = Request::builder()
             .method(method)
             .uri("/mcp")
@@ -204,21 +211,28 @@ impl Env {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let response = sender
-            .send_request(
-                request
-                    .body(Full::new(Bytes::from(body.to_owned())))
-                    .unwrap(),
+        let exchange = async {
+            let response = sender
+                .send_request(
+                    request
+                        .body(Full::new(Bytes::from(body.to_owned())))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let (parts, body) = response.into_parts();
+            let body = body.collect().await.unwrap().to_bytes();
+            (
+                parts.status,
+                parts.headers,
+                String::from_utf8_lossy(&body).into_owned(),
             )
-            .await
-            .unwrap();
-        let (parts, body) = response.into_parts();
-        let body = body.collect().await.unwrap().to_bytes();
-        (
-            parts.status,
-            parts.headers,
-            String::from_utf8_lossy(&body).into_owned(),
-        )
+        };
+        // The connection is driven by this call, so nothing outlives it.
+        tokio::select! {
+            answer = exchange => answer,
+            _ = connection => panic!("the connection ended before the answer"),
+        }
     }
 
     /// `initialize` and the session id of the answer.

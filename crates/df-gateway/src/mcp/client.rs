@@ -632,16 +632,10 @@ impl Client {
         target: &Target,
         body: &Value,
     ) -> Result<(), ClientError> {
-        let bytes = Bytes::from(serde_json::to_vec(body).map_err(|_error| ClientError::NotMcp)?);
-        let (_parts, incoming, _task) = self
-            .exchange(session, target, Method::POST, Some(bytes))
-            .await?;
-        let limited = LimitedBody::new(
-            incoming.map_err(BoxError::from).boxed_unsync(),
-            MAX_RESPONSE_BYTES,
-            BODY_IDLE,
-        );
-        drain(limited).await.map(|_size| ())
+        // Boxed: `post` reads an SSE stream, which answers server requests through here.
+        Box::pin(self.post(session, target, body, None))
+            .await
+            .map(drop)
     }
 
     /// Reads the SSE stream until the response to request `id`; server requests are answered

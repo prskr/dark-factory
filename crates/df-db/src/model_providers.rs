@@ -130,6 +130,19 @@ pub async fn personas_using(pool: &PgPool, id: Uuid) -> Result<Vec<String>, DbEr
     .await?)
 }
 
+/// Names of the model providers that use credential reference `credential_ref_id`, sorted.
+pub(crate) async fn names_using_credential(
+    conn: &mut sqlx::PgConnection,
+    credential_ref_id: Uuid,
+) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT name FROM model_providers WHERE credential_ref_id = $1 ORDER BY name",
+        credential_ref_id
+    )
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
 /// Creates (`id` is `None`) or updates a provider with its APIs and audits the change.
 pub async fn save_model_provider(
     pool: &PgPool,

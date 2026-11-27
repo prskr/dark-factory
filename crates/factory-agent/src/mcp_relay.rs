@@ -187,9 +187,9 @@ impl Relay {
         let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
             .await
             .map_err(|error| format!("gateway unreachable: {error}"))?;
-        let driver = tokio::spawn(async move {
+        let _driver = AbortOnDrop(tokio::spawn(async move {
             connection.await.ok();
-        });
+        }));
         let mut request = Request::builder()
             .method("POST")
             .uri(&self.target)
@@ -221,7 +221,6 @@ impl Relay {
             .await
             .map_err(|error| format!("gateway answer interrupted: {error}"))?
             .to_bytes();
-        driver.abort();
         if !parts.status.is_success() {
             return Err(format!("gateway answered HTTP {}", parts.status.as_u16()));
         }
@@ -270,6 +269,16 @@ fn log(message: &str) {
     eprintln!("mcp-relay: {message}");
 }
 
+/// Owns a spawned task: dropping the guard aborts it, on every path out of the function that
+/// holds it, including a cancelled future.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Runs the relay on stdin and stdout.
 pub async fn run(url: &str, ca_path: &Path) -> anyhow::Result<()> {
     let relay = Arc::new(Relay::new(url, ca_path)?);
@@ -279,4 +288,20 @@ pub async fn run(url: &str, ca_path: &Path) -> anyhow::Result<()> {
             tokio::io::stdout(),
         )
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn dropping_the_guard_aborts_the_task() {
+        let task = tokio::spawn(std::future::pending::<()>());
+        let watcher = task.abort_handle();
+
+        drop(AbortOnDrop(task));
+        tokio::task::yield_now().await;
+
+        assert!(watcher.is_finished());
+    }
 }

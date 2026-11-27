@@ -78,6 +78,16 @@ pub(super) async fn credentials(
         .filter_map(|sandbox| sandbox.inference.as_ref())
         .map(|route| route.credential_ref.as_str())
         .collect();
+    credentials_for(secrets, &wanted, references).await
+}
+
+/// The credentials of the references whose ids are in `wanted`, read once per reference. One
+/// that cannot be read is left out with a warning (never its value).
+pub(super) async fn credentials_for(
+    secrets: &dyn SecretStore,
+    wanted: &HashSet<&str>,
+    references: &[CredentialRef],
+) -> HashMap<String, pb::ProviderCredential> {
     let mut found = HashMap::new();
     for reference in references {
         let key = reference.id.to_string();
@@ -94,7 +104,7 @@ pub(super) async fn credentials(
                 );
             }
             Err(error) => {
-                tracing::warn!(%error, credential = %reference.name, "provider credential unavailable; inference route without credential");
+                tracing::warn!(%error, credential = %reference.name, "credential unavailable; its inference routes or MCP servers stay without credential");
             }
         }
     }

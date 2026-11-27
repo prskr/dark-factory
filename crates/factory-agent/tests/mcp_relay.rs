@@ -29,6 +29,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Notify;
+use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 
 /// Cargo sets `CARGO_BIN_EXE_*` at compile time; Bazel passes the path in `DF_TEST_BIN`.
@@ -118,10 +119,18 @@ impl Gateway {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let seen_in = seen.clone();
         let task = tokio::spawn(async move {
-            while let Ok((stream, _peer)) = listener.accept().await {
-                let (acceptor, handler, seen) =
-                    (acceptor.clone(), handler.clone(), seen_in.clone());
-                tokio::spawn(serve_connection(stream, acceptor, handler, seen));
+            // The connections belong to this task: aborting it ends them too.
+            let mut connections = JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => {
+                        let Ok((stream, _peer)) = accepted else { break };
+                        let (acceptor, handler, seen) =
+                            (acceptor.clone(), handler.clone(), seen_in.clone());
+                        connections.spawn(serve_connection(stream, acceptor, handler, seen));
+                    }
+                    Some(_finished) = connections.join_next() => {}
+                }
             }
         });
         Self { addr, seen, task }

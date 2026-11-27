@@ -1017,10 +1017,13 @@ fn mcp_calls(calls: &[McpCallRecord]) -> Markup {
     }
 }
 
-/// `<server>__<tool>`; a server left out of a tool list shows as `<server> · tools/list`.
+/// `<server>__<tool>`; a server left out of a tool list shows as `<server> · tools/list`. A call
+/// the gateway rejected for a name without a server shows the name the agent sent.
 fn mcp_tool_label(call: &McpCallRecord) -> String {
-    if call.tool == "tools/list" {
-        format!("{} · tools/list", call.server_name)
+    if call.tool == df_core::mcp::LIST_TOOL {
+        format!("{} · {}", call.server_name, call.tool)
+    } else if call.server_name.is_empty() {
+        call.tool.clone()
     } else {
         df_core::mcp::prefixed_tool_name(&call.server_name, &call.tool)
     }

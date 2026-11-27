@@ -1787,7 +1787,6 @@ dependencies = [
  "ipnet",
  "opentelemetry",
  "opentelemetry_sdk",
- "percent-encoding",
  "rcgen",
  "regex",
  "rustls",

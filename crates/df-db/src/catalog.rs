@@ -433,60 +433,54 @@ pub async fn save_credential_ref(
     Ok(row.into())
 }
 
-/// Deletes a credential reference nothing uses and audits it. One a project (as forge
-/// credential), a model provider or an MCP server uses is a [`DbError::Conflict`] naming the user.
-pub async fn delete_credential_ref(
-    pool: &PgPool,
-    actor: Actor<'_>,
+/// What uses a credential reference, as the guards of the MCP servers need it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CredentialUsers {
+    /// The name of the credential reference.
+    pub(crate) name: String,
+    /// Keys of the projects that use it as their forge credential, sorted.
+    pub(crate) projects: Vec<String>,
+    /// Names of the model providers that use it, sorted.
+    pub(crate) model_providers: Vec<String>,
+    /// Names of the MCP servers that use it, sorted.
+    pub(crate) mcp_servers: Vec<String>,
+}
+
+/// The users of credential reference `id`; the reference not existing is a
+/// [`DbError::NotFound`].
+pub(crate) async fn credential_users(
+    conn: &mut sqlx::PgConnection,
     id: Uuid,
-) -> Result<(), DbError> {
-    let mut tx = pool.begin().await?;
-    let name = sqlx::query_scalar!(
-        "SELECT name FROM credential_refs WHERE id = $1 FOR UPDATE",
-        id
-    )
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| DbError::NotFound(format!("credential reference `{id}`")))?;
-    let servers = crate::mcp_servers::servers_using_credential(&mut *tx, id).await?;
+) -> Result<CredentialUsers, DbError> {
+    let name = sqlx::query_scalar!("SELECT name FROM credential_refs WHERE id = $1", id)
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("credential reference `{id}`")))?;
     let projects = sqlx::query_scalar!(
         "SELECT key FROM projects WHERE forge_credential_id = $1 ORDER BY key",
         id
     )
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut *conn)
     .await?;
-    let providers = sqlx::query_scalar!(
-        "SELECT name FROM model_providers WHERE credential_ref_id = $1 ORDER BY name",
-        id
+    Ok(CredentialUsers {
+        name,
+        projects,
+        model_providers: crate::model_providers::names_using_credential(&mut *conn, id).await?,
+        mcp_servers: crate::mcp_servers::servers_using_credential(&mut *conn, id).await?,
+    })
+}
+
+/// The key of project `id`, locking its row for the transaction; `None` if there is no such
+/// project.
+pub(crate) async fn lock_project_key(
+    conn: &mut sqlx::PgConnection,
+    id: Uuid,
+) -> Result<Option<String>, DbError> {
+    Ok(
+        sqlx::query_scalar!("SELECT key FROM projects WHERE id = $1 FOR UPDATE", id)
+            .fetch_optional(&mut *conn)
+            .await?,
     )
-    .fetch_all(&mut *tx)
-    .await?;
-    for (what, users) in [
-        ("MCP server", servers),
-        ("project", projects),
-        ("model provider", providers),
-    ] {
-        if !users.is_empty() {
-            return Err(DbError::Conflict(format!(
-                "credential `{name}` is used by {what} {}",
-                users.join(", ")
-            )));
-        }
-    }
-    sqlx::query!("DELETE FROM credential_refs WHERE id = $1", id)
-        .execute(&mut *tx)
-        .await?;
-    let entry = NewAuditEntry::new(
-        actor.principal.clone(),
-        actor.roles.to_vec(),
-        "credential_ref.delete",
-        "credential_ref",
-        &name,
-    )
-    .with_details(&serde_json::json!({ "id": id }))?;
-    write_audit_entry(&mut *tx, &entry).await?;
-    tx.commit().await?;
-    Ok(())
 }
 
 /// Creates or updates a project and audits the change. Changing the key of an existing project

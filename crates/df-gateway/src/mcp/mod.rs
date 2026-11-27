@@ -47,7 +47,7 @@ use crate::resolve::{BlockedRanges, Resolver};
 use crate::upstream::{Body, BodyLimit, BoxError, LimitedBody, UpstreamConnector, text};
 
 /// The path of the endpoint.
-pub const PATH: &str = "/mcp";
+pub const PATH: &str = df_core::mcp::MCP_PATH;
 
 /// Largest request body.
 const MAX_REQUEST_BYTES: u64 = 1024 * 1024;
@@ -76,7 +76,7 @@ pub fn start(
         settings.control_plane.clone(),
         settings.pod.clone(),
         settings.metrics.clone(),
-        crate::inference::report::Timing::default(),
+        crate::batch::Timing::default(),
     ));
     let blocked = BlockedRanges::new(settings.blocked_cidrs.iter().map(String::as_str))?;
     let mcp = Arc::new(Mcp::new(

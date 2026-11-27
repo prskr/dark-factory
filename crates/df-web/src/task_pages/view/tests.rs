@@ -916,3 +916,15 @@ fn a_run_without_calls_has_no_tool_call_section() {
 
     assert!(!html.contains("Tool calls (MCP)"), "{html}");
 }
+
+#[test]
+fn a_rejected_name_without_a_server_shows_as_the_agent_sent_it() {
+    let mut with_calls = run(8);
+    with_calls.mcp_calls = vec![call("", "plain", McpCallOutcome::Rejected, 1, 0, (10, 0))];
+
+    let html = runs_region("DF-1", &[with_calls], None).into_string();
+
+    let section = &html[html.find("Tool calls (MCP)").unwrap()..];
+    assert!(section.contains("plain"), "{section}");
+    assert!(!section.contains("__plain"), "{section}");
+}

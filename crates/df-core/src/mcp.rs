@@ -22,6 +22,10 @@ pub const MAX_HARNESS_TOOL_NAME_CHARS: usize = 64;
 pub const TOOL_SEPARATOR: &str = "__";
 /// What a harness puts in front of `<server>__<tool>` for the relay `ext`.
 pub const HARNESS_TOOL_PREFIX: &str = "mcp__ext__";
+/// Path of the MCP endpoint on the gateway's Git port.
+pub const MCP_PATH: &str = "/mcp";
+/// The `tool` of the call record of a server left out of a `tools/list`.
+pub const LIST_TOOL: &str = "tools/list";
 
 /// Headers the gateway sets itself on every MCP request, besides the connection headers.
 const GATEWAY_HEADERS: [&str; 4] = [

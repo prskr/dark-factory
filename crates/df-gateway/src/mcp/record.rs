@@ -10,9 +10,6 @@ use df_proto::pbjson_types::Timestamp;
 use super::report::CallSink;
 use crate::convert::mcp_outcome_to_proto;
 
-/// The `tool` of the record of a server left out of a `tools/list`.
-pub(super) const LIST_TOOL: &str = "tools/list";
-
 /// A call in progress. If it is dropped before [`Pending::finish`], the client went away and the
 /// call is recorded as cancelled.
 pub(super) struct Pending {

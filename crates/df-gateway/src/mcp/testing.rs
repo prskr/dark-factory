@@ -6,7 +6,6 @@ use std::fmt::Write as _;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -19,7 +18,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 
 use crate::resolve::Resolver;
 
@@ -72,8 +71,6 @@ pub(crate) enum Answer {
     Raw(&'static str, String),
     /// No answer at all.
     Stall,
-    /// The answer after a delay.
-    After(Duration, Box<Answer>),
     /// The answer once the test calls `notify_one` on the gate.
     Gated(Arc<tokio::sync::Notify>, Box<Answer>),
 }
@@ -99,8 +96,16 @@ impl FakeMcp {
         let handler = Arc::new(Mutex::new(handler));
         let (seen_in, handler_in) = (seen.clone(), handler.clone());
         let task = tokio::spawn(async move {
-            while let Ok((stream, _peer)) = listener.accept().await {
-                tokio::spawn(serve(stream, seen_in.clone(), handler_in.clone()));
+            // The connections belong to this task: aborting it ends them too.
+            let mut connections = JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => {
+                        let Ok((stream, _peer)) = accepted else { break };
+                        connections.spawn(serve(stream, seen_in.clone(), handler_in.clone()));
+                    }
+                    Some(_finished) = connections.join_next() => {}
+                }
             }
         });
         Self { addr, seen, task }
@@ -197,10 +202,6 @@ async fn render(answer: Answer) -> Reply {
         Answer::Stall => std::future::pending().await,
         Answer::Gated(gate, inner) => {
             gate.notified().await;
-            Box::pin(render(*inner)).await
-        }
-        Answer::After(delay, inner) => {
-            tokio::time::sleep(delay).await;
             Box::pin(render(*inner)).await
         }
     }

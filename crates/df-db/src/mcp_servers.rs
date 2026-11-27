@@ -22,6 +22,24 @@ mod calls;
 
 pub use calls::{McpCallRecord, insert_mcp_call, list_mcp_calls_of_runs};
 
+/// Why saving an MCP server was refused, and which field it concerns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpServerConflict {
+    /// The name is taken, or cannot change after creation.
+    Name(String),
+    /// The credential reference is used by a project or a model provider.
+    Credential(String),
+}
+
+impl McpServerConflict {
+    /// The message naming what is in the way.
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Name(message) | Self::Credential(message) => message,
+        }
+    }
+}
+
 /// Fields of an MCP server.
 #[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct McpServerInput {
@@ -162,8 +180,9 @@ pub async fn get_mcp_server(
 }
 
 /// Creates (`id` is `None`) or updates a server and audits the change. An update increases
-/// `config_version`. The name cannot change, the credential reference cannot be one a project
-/// uses as its forge credential or a model provider uses (all [`DbError::Conflict`]).
+/// `config_version`. The name cannot change ([`McpServerConflict::Name`]), and the credential
+/// reference cannot be one a project uses as its forge credential or a model provider uses
+/// ([`McpServerConflict::Credential`]).
 pub async fn save_mcp_server(
     pool: &PgPool,
     actor: Actor<'_>,
@@ -185,9 +204,9 @@ pub async fn save_mcp_server(
     if let Some(before) = &before
         && before.input.name != input.name
     {
-        return Err(DbError::Conflict(
+        return Err(DbError::McpServer(McpServerConflict::Name(
             "the name cannot change after creation".into(),
-        ));
+        )));
     }
     let saved_id = id.unwrap_or_else(Uuid::now_v7);
     if before.is_some() {
@@ -270,9 +289,9 @@ async fn update_server(
 
 fn name_conflict(error: sqlx::Error) -> DbError {
     match &error {
-        sqlx::Error::Database(db) if db.is_unique_violation() => {
-            DbError::Conflict("an MCP server with this name already exists".into())
-        }
+        sqlx::Error::Database(db) if db.is_unique_violation() => DbError::McpServer(
+            McpServerConflict::Name("an MCP server with this name already exists".into()),
+        ),
         _ => DbError::Sqlx(error),
     }
 }
@@ -336,13 +355,9 @@ pub async fn set_project_mcp_servers(
     server_ids: &[Uuid],
 ) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    let key = sqlx::query_scalar!(
-        "SELECT key FROM projects WHERE id = $1 FOR UPDATE",
-        project_id
-    )
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| DbError::NotFound(format!("project `{project_id}`")))?;
+    let key = crate::catalog::lock_project_key(&mut tx, project_id)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("project `{project_id}`")))?;
     let before = enabled_names(&mut tx, project_id).await?;
     let known = sqlx::query_scalar!(
         r#"SELECT count(*) AS "count!" FROM mcp_servers WHERE id = ANY($1)"#,
@@ -449,57 +464,38 @@ pub(crate) async fn check_credential_not_used_by_a_server(
     conn: &mut sqlx::PgConnection,
     credential_ref_id: Uuid,
 ) -> Result<(), DbError> {
-    let users = servers_using_credential(&mut *conn, credential_ref_id).await?;
-    if users.is_empty() {
+    let users = crate::catalog::credential_users(conn, credential_ref_id).await?;
+    if users.mcp_servers.is_empty() {
         return Ok(());
     }
-    let credential = sqlx::query_scalar!(
-        "SELECT name FROM credential_refs WHERE id = $1",
-        credential_ref_id
-    )
-    .fetch_one(&mut *conn)
-    .await?;
     Err(DbError::Conflict(format!(
-        "credential `{credential}` is used by MCP server {}",
-        users.join(", ")
+        "credential `{}` is used by MCP server {}",
+        users.name,
+        users.mcp_servers.join(", ")
     )))
 }
 
 /// Refuses a credential reference that a project uses as its forge credential or that a model
 /// provider uses, naming the first user found.
 async fn check_credential_free_of_factory_use(
-    executor: &mut sqlx::PgConnection,
+    conn: &mut sqlx::PgConnection,
     credential_ref_id: Uuid,
 ) -> Result<(), DbError> {
-    let project = sqlx::query!(
-        "SELECT c.name AS credential, p.key FROM projects p
-         JOIN credential_refs c ON c.id = p.forge_credential_id
-         WHERE c.id = $1 ORDER BY p.key LIMIT 1",
-        credential_ref_id
-    )
-    .fetch_optional(&mut *executor)
-    .await?;
-    if let Some(project) = project {
-        return Err(DbError::Conflict(format!(
-            "credential `{}` is the forge credential of project {}",
-            project.credential, project.key
-        )));
-    }
-    let provider = sqlx::query!(
-        "SELECT c.name AS credential, m.name FROM model_providers m
-         JOIN credential_refs c ON c.id = m.credential_ref_id
-         WHERE c.id = $1 ORDER BY m.name LIMIT 1",
-        credential_ref_id
-    )
-    .fetch_optional(&mut *executor)
-    .await?;
-    if let Some(provider) = provider {
-        return Err(DbError::Conflict(format!(
-            "credential `{}` is the credential of model provider {}",
-            provider.credential, provider.name
-        )));
-    }
-    Ok(())
+    let users = crate::catalog::credential_users(conn, credential_ref_id).await?;
+    let message = if let Some(key) = users.projects.first() {
+        format!(
+            "credential `{}` is the forge credential of project {key}",
+            users.name
+        )
+    } else if let Some(name) = users.model_providers.first() {
+        format!(
+            "credential `{}` is the credential of model provider {name}",
+            users.name
+        )
+    } else {
+        return Ok(());
+    };
+    Err(DbError::McpServer(McpServerConflict::Credential(message)))
 }
 
 fn scheme_columns(scheme: &McpCredentialScheme) -> (Option<&str>, Option<&str>, Option<&str>) {

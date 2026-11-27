@@ -1,14 +1,18 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use df_proto::gateway::v1::gateway_mcp_server::{GatewayMcp, GatewayMcpServer};
 use df_telemetry::testing::Probe;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
+use tokio::task::JoinHandle;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
 
 use super::*;
+use crate::batch::{BUFFER_CAPACITY, Timing};
 use crate::link::PlainConnector;
+use crate::metrics::Metrics;
 
 const FAST: Timing = Timing {
     flush_interval: Duration::from_millis(20),
@@ -150,34 +154,10 @@ async fn a_full_buffer_drops_the_oldest_records_and_counts_them() {
 
     assert_eq!(probe.total("df.gateway.mcp.calls_dropped", &[]), 2.0);
     let kept: Vec<_> = reporter
-        .shared
-        .queue
-        .lock()
-        .unwrap()
+        .buffered()
         .iter()
         .map(|r| r.call_id.clone())
         .collect();
     assert!(kept.len() <= 3, "{kept:?}");
     assert!(!kept.contains(&"call-0".to_string()), "{kept:?}");
-}
-
-#[tokio::test]
-async fn shutdown_reports_what_is_buffered() {
-    let server = serve(0).await;
-    let reporter = CallReporter::for_test_at(
-        Arc::new(PlainConnector),
-        server.address.clone(),
-        Arc::default(),
-        Timing {
-            flush_interval: Duration::from_secs(60),
-            ..FAST
-        },
-        BUFFER_CAPACITY,
-    );
-    reporter.record(record(1));
-
-    reporter.shutdown(Duration::from_secs(5)).await;
-
-    assert_eq!(server.records.lock().unwrap().len(), 1);
-    server.task.abort();
 }

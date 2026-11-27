@@ -4,9 +4,7 @@ use df_core::{Principal, UserId};
 use df_core::{RewritePolicy, SubtaskMerge};
 
 use super::*;
-use crate::catalog::{
-    CredentialRefInput, ProjectInput, delete_credential_ref, save_credential_ref, save_project,
-};
+use crate::catalog::{CredentialRefInput, ProjectInput, save_credential_ref, save_project};
 use crate::model_providers::{ModelProviderInput, save_model_provider};
 use crate::model_usage::Inserted;
 
@@ -179,10 +177,16 @@ async fn the_name_of_a_server_cannot_change_and_stays_unique() {
         .unwrap();
 
     let renamed = save_mcp_server(&pool, actor, Some(first.id), &input("docs", key)).await;
-    assert!(matches!(renamed, Err(DbError::Conflict(_))), "{renamed:?}");
+    assert!(
+        matches!(renamed, Err(DbError::McpServer(McpServerConflict::Name(_)))),
+        "{renamed:?}"
+    );
     let duplicate = save_mcp_server(&pool, actor, None, &input("context7", key)).await;
     assert!(
-        matches!(duplicate, Err(DbError::Conflict(_))),
+        matches!(
+            duplicate,
+            Err(DbError::McpServer(McpServerConflict::Name(_)))
+        ),
         "{duplicate:?}"
     );
 }
@@ -242,7 +246,7 @@ async fn a_server_enabled_for_a_project_cannot_be_deleted_and_the_error_names_th
 }
 
 #[tokio::test]
-async fn a_credential_reference_a_server_uses_cannot_be_deleted() {
+async fn the_database_refuses_to_delete_a_credential_reference_a_server_uses() {
     let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
     let (principal, roles) = actor();
     let actor = Actor {
@@ -254,14 +258,18 @@ async fn a_credential_reference_a_server_uses_cannot_be_deleted() {
         .await
         .unwrap();
 
-    let refused = delete_credential_ref(&pool, actor, key).await.unwrap_err();
-    assert_eq!(
-        refused.to_string(),
-        "conflict: credential `context7-key` is used by MCP server context7"
+    // Deleting credential references is not offered; the foreign key refuses it anyway.
+    let refused = sqlx::query("DELETE FROM credential_refs WHERE id = $1")
+        .bind(key)
+        .execute(&pool)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&refused, sqlx::Error::Database(db) if db.is_foreign_key_violation()),
+        "{refused:?}"
     );
-
-    delete_mcp_server(&pool, actor, server.id).await.unwrap();
-    delete_credential_ref(&pool, actor, key).await.unwrap();
+    let kept = get_mcp_server(&pool, server.id).await.unwrap().unwrap();
+    assert_eq!(kept.input.credential_ref_id, key);
 }
 
 #[tokio::test]

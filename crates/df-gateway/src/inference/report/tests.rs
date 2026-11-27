@@ -1,15 +1,20 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use df_proto::gateway::v1::gateway_usage_server::{GatewayUsage, GatewayUsageServer};
 use df_telemetry::testing::Probe;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
+use tokio::task::JoinHandle;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Channel;
 use tonic::{Request, Response, Status};
 
 use super::*;
+use crate::batch::{BUFFER_CAPACITY, Timing};
+use crate::link::GrpcConnector;
 use crate::link::{LinkError, PlainConnector};
+use crate::metrics::Metrics;
 
 const FAST: Timing = Timing {
     flush_interval: Duration::from_millis(20),
@@ -201,10 +206,7 @@ async fn a_full_buffer_drops_the_oldest_records_and_counts_them() {
 
     assert_eq!(probe.total("df.gateway.inference.usage_dropped", &[]), 2.0);
     let kept: Vec<_> = reporter
-        .shared
-        .queue
-        .lock()
-        .unwrap()
+        .buffered()
         .iter()
         .map(|r| r.request_id.clone())
         .collect();

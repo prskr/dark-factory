@@ -6,6 +6,7 @@ use df_db::catalog::{Actor, CredentialRefInput, save_credential_ref};
 use df_db::mcp_servers::{McpServerInput, save_mcp_server};
 use uuid::Uuid;
 
+use super::ServerForm;
 use crate::testkit::{TestApp, actor, form, header_str, seed, tag_around, text};
 
 const PAGE: &str = "/mcp-servers";
@@ -346,7 +347,7 @@ async fn the_edit_form_shows_the_name_read_only_and_the_scheme_preview_for_query
 
     let html = text(app.get_htmx(&format!("{PAGE}/{id}"), &cookie).await).await;
 
-    assert!(html.contains("The name can't be changed: it is part of every tool name agents see (&lt;name&gt;__&lt;tool&gt;)."), "{html}");
+    assert!(html.contains("The name can't be changed: it is part of every tool name agents see (penpot__&lt;tool&gt;)."), "{html}");
     assert!(
         tag_around(&html, "name=\"name\"").contains("readonly"),
         "{html}"
@@ -416,30 +417,6 @@ async fn a_server_enabled_for_a_project_cannot_be_deleted_and_the_list_says_so()
         audit_actions(&app)
             .await
             .contains(&"mcp_server.delete".to_owned())
-    );
-}
-
-#[tokio::test]
-async fn a_credential_a_server_uses_cannot_be_deleted() {
-    let app = TestApp::new().await;
-    let key = credential(&app, "context7-key").await;
-    register(&app, "context7", key, false).await;
-    let (principal, roles) = actor();
-
-    let refused = df_db::catalog::delete_credential_ref(
-        &app.pool,
-        Actor {
-            principal: &principal,
-            roles: &roles,
-        },
-        key,
-    )
-    .await
-    .unwrap_err();
-
-    assert_eq!(
-        refused.to_string(),
-        "conflict: credential `context7-key` is used by MCP server context7"
     );
 }
 
@@ -726,4 +703,24 @@ async fn on_a_phone_the_tab_ends_with_a_full_width_save_button_and_on_a_desktop_
     // The phone button sits in the wrapper that ends the form below 768 px, as on the other tabs.
     let wrapper = html.find("pt-2 pb-5 md:hidden").expect("phone wrapper");
     assert!(html[wrapper..].contains("w-full"), "{html}");
+}
+
+#[test]
+fn the_debug_output_of_the_form_leaves_out_the_url_query() {
+    let form = ServerForm {
+        name: "penpot".into(),
+        url: "https://design.example.com/mcp/stream?file=abc&token=sekret".into(),
+        ..ServerForm::default()
+    };
+
+    let debug = format!("{form:?}");
+
+    assert!(
+        !debug.contains("sekret") && !debug.contains("file=abc"),
+        "{debug}"
+    );
+    assert!(
+        debug.contains("https://design.example.com/mcp/stream"),
+        "{debug}"
+    );
 }

@@ -8,7 +8,6 @@ use df_core::{CredentialRef, SecretStore};
 use df_db::mcp_servers::{McpServerRecord, enabled_servers_of_projects};
 use df_db::{ActiveRun, DbError, PgPool};
 use df_proto::gateway::v1 as pb;
-use secrecy::ExposeSecret;
 use uuid::Uuid;
 
 /// The servers enabled for each project that has an active run.
@@ -86,25 +85,5 @@ pub(super) async fn credentials(
         .values()
         .map(|server| server.credential_ref.as_str())
         .collect();
-    let mut found = HashMap::new();
-    for reference in references {
-        let key = reference.id.to_string();
-        if !wanted.contains(key.as_str()) {
-            continue;
-        }
-        match secrets.get(&reference.secret).await {
-            Ok(value) => {
-                found.insert(
-                    key,
-                    pb::ProviderCredential {
-                        value: value.expose_secret().to_string(),
-                    },
-                );
-            }
-            Err(error) => {
-                tracing::warn!(%error, credential = %reference.name, "MCP server credential unavailable; server without credential");
-            }
-        }
-    }
-    found
+    super::inference_routes::credentials_for(secrets, &wanted, references).await
 }

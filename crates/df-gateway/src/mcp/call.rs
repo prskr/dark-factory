@@ -51,18 +51,17 @@ impl Mcp {
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let (server_name, tool) = split_tool_name(name).unwrap_or((name, ""));
+        let (server_name, tool) = split_tool_name(name)
+            .filter(|(_, tool)| !tool.is_empty())
+            .unwrap_or(("", name));
         let pending = Pending::start(
             &self.sink,
             &sandbox.run_id,
             server_name,
-            if tool.is_empty() { name } else { tool },
+            tool,
             request_bytes,
         );
-        let Some(server) = policy
-            .mcp_server(source, server_name)
-            .filter(|_| !tool.is_empty())
-        else {
+        let Some(server) = policy.mcp_server(source, server_name) else {
             return answer(
                 id,
                 pending,

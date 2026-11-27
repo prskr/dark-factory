@@ -53,7 +53,7 @@ pub const LANDLOCK_PROJECT_KEY: &str = "LL";
 pub const LANDLOCK_PROJECT_NAME: &str = "Landlock";
 
 /// Project whose fake agent calls tools of MCP servers through the `ext` relay (`mcp.yaml`); tasks
-/// are `MC-<n>`. The test registers the servers `e2e-docs` and `e2e-other` itself.
+/// are `MC-<n>`. The test registers its servers under unique names itself.
 pub const MCP_PROJECT_KEY: &str = "MC";
 pub const MCP_PROJECT_NAME: &str = "MCP tools";
 /// The credential reference of the MCP servers the test registers: Secret `fake-mcp-key` of the

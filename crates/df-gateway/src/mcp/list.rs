@@ -17,10 +17,11 @@ use tokio::time::Instant;
 
 use super::client::{ClientError, SessionKey};
 use super::jsonrpc::{json_response, rpc_result};
-use super::record::{LIST_TOOL, Pending};
+use super::record::Pending;
 use super::target::Target;
 use super::{CachedList, Mcp, Response};
 use crate::policy::{Policy, Sandbox};
+use df_core::mcp::LIST_TOOL;
 
 /// Time one `tools/list` answer may take, so the harness's own list timeout is not hit first.
 const LIST_DEADLINE: Duration = Duration::from_secs(20);

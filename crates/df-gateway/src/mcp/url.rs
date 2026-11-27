@@ -13,18 +13,9 @@ pub(crate) struct McpUrl(Url);
 
 impl McpUrl {
     pub(crate) fn parse(value: &str, allow_plain_http: bool) -> Option<Self> {
-        let url = Url::parse(value).ok()?;
-        let scheme_allowed = match url.scheme() {
-            "https" => true,
-            "http" => allow_plain_http,
-            _ => false,
-        };
-        let usable = scheme_allowed
-            && url.host_str().is_some()
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.fragment().is_none();
-        usable.then_some(Self(url))
+        df_core::mcp::validate_url(value, allow_plain_http)
+            .ok()
+            .map(Self)
     }
 
     /// The URL with `name=value` (URL-encoded) after its own parameters.

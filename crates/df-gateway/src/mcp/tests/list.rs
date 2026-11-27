@@ -234,7 +234,7 @@ async fn the_cache_is_dropped_when_a_server_is_disabled_or_edited() {
 }
 
 #[tokio::test]
-async fn a_server_enabled_during_the_run_appears_in_the_next_list() {
+async fn a_server_enabled_during_the_run_appears_in_the_next_list_and_its_tools_are_forwarded() {
     let fake = FakeMcp::start(vec![tool("a")]).await;
     let servers = [server("s1", "wiki", &fake.url(), 1)];
     let env = Env::start(Some(policy(&servers, &[]))).await;
@@ -244,36 +244,51 @@ async fn a_server_enabled_during_the_run_appears_in_the_next_list() {
     env.set_policy(policy(&servers, &["s1"]));
 
     assert_eq!(env.tool_names(&session).await, ["wiki__a"]);
+    let call = json!({"name": "wiki__a", "arguments": {}});
+    let answer = env.rpc(&session, "tools/call", call).await;
+    assert_ne!(answer["result"]["isError"], true, "{answer}");
+    assert!(fake.methods().contains(&"tools/call".to_owned()));
 }
 
 #[tokio::test]
 async fn servers_are_asked_in_parallel() {
-    let slow = |tools| async move {
+    // Each server holds its `tools/list` until both have received one: a client that asks the
+    // servers one after the other never gets an answer.
+    let gate = |tools| async move {
+        let gate = Arc::new(Notify::new());
         let standard = Arc::new(Standard::new(tools));
         let inner = standard.handler();
-        FakeMcp::start_with(Arc::new(move |seen: &Seen| {
+        let held = gate.clone();
+        let fake = FakeMcp::start_with(Arc::new(move |seen: &Seen| {
             if seen.rpc_method().as_deref() == Some("tools/list") {
-                Answer::After(Duration::from_millis(400), Box::new(inner(seen)))
+                Answer::Gated(held.clone(), Box::new(inner(seen)))
             } else {
                 inner(seen)
             }
         }))
-        .await
+        .await;
+        (fake, gate)
     };
-    let (a, b) = (slow(vec![tool("a")]).await, slow(vec![tool("b")]).await);
+    let ((a, gate_a), (b, gate_b)) = (gate(vec![tool("a")]).await, gate(vec![tool("b")]).await);
     let servers = [
         server("s1", "one", &a.url(), 1),
         server("s2", "two", &b.url(), 1),
     ];
     let env = Env::start(Some(policy(&servers, &["s1", "s2"]))).await;
     let session = env.session().await;
+    let release = async {
+        while lists(&a) == 0 || lists(&b) == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        gate_a.notify_one();
+        gate_b.notify_one();
+    };
 
-    let started = std::time::Instant::now();
-    assert_eq!(env.tool_names(&session).await, ["one__a", "two__b"]);
+    let (names, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(env.tool_names(&session), release)
+    })
+    .await
+    .expect("the servers were not asked at the same time");
 
-    assert!(
-        started.elapsed() < Duration::from_millis(750),
-        "{:?}",
-        started.elapsed()
-    );
+    assert_eq!(names, ["one__a", "two__b"]);
 }

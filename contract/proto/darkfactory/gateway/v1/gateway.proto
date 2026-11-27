@@ -16,7 +16,9 @@
 //   * GatewayUsage (served by the control plane): the inference endpoint reports the token usage
 //     of every model request with Report (iter3-inference-gateway design D4).
 //   * GatewayMcp (served by the control plane): the MCP endpoint reports one record per tool call
-//     with Report (iter4-mcp-gateway design D9). of PolicyUpdate increase monotonically (a database sequence). A gateway that sees a
+//     with Report (iter4-mcp-gateway design D9).
+//
+// Versions of PolicyUpdate increase monotonically (a database sequence). A gateway that sees a
 // gap or reconnects replaces its policy with the next snapshot it receives and enforces its last
 // snapshot while it has none.
 
