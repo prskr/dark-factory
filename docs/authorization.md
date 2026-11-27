@@ -55,7 +55,7 @@ Where `admin` is required today:
 | Project webhook secret | `require_admin` route layer | `df-web/src/project_webhook.rs` |
 | Project lifecycle event subscriptions | `require_admin` route layer | `df-web/src/project_subscriptions.rs` |
 | "Integrations" tab of the project settings | shown only for admins (`Editing::AsAdmin`, rendering only); its contents load and save through the two routes above | `df-web/src/config_pages.rs` |
-| MCP servers page and the project tab "MCP servers" | planned: `require_admin` route layers; the tab has its own route `/projects/{key}/mcp-servers`, `Editing::AsAdmin` only for showing it | `openspec/changes/iter4-mcp-gateway` (D10) |
+| MCP servers page and the project tab "MCP servers" | `require_admin` route layer on `/mcp-servers…` and on `/projects/{key}/mcp-servers` (the tab loads and saves only through that route; `Editing::AsAdmin` only decides whether the tab is shown, and the project form never carries its fields) | `df-web/src/config_pages/mcp_servers.rs` and `mcp_servers/project_tab.rs` |
 
 Everything else (projects, personas, model providers, credential references, egress rules, requests) needs `board-member` only.
 

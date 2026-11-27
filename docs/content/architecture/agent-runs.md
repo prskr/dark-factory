@@ -152,6 +152,14 @@ The control plane gives every run the factory tools of `contract/mcp/factory-too
 harness sees them as the MCP server `factory`. Calls are executed by the control plane, scoped to
 the run's task, and at most once per `call_id`.
 
+When the run's project has an [MCP server](../using/mcp-servers.md) enabled, the runtime registers a
+second stdio server `ext` next to `factory`: `factory-agent mcp-relay`, a transport bridge to the
+gateway's [MCP endpoint](../security/mcp-endpoint.md). Calls to third-party tools never pass through
+the control plane; the transcript marks `mcp__factory__*` calls as factory calls and all others as
+harness calls. `ext` is registered in `session/new` and `session/load` for every harness, and
+only for runs whose `Assign` carries the endpoint (a server enabled during a run reaches the next
+run's `Assign`).
+
 | Tool | Purpose |
 | --- | --- |
 | `update_pull_request`, `comment_on_issue`, `report_progress`, `set_task_title` | Shape the pull request, comment on the linked issue, set the status line and the title |
