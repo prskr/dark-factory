@@ -23,6 +23,7 @@ mod build_assets;
 pub mod components;
 mod config_pages;
 pub mod egress;
+mod htmx;
 pub mod layout;
 mod lifecycle_events;
 pub mod markdown;
@@ -164,6 +165,8 @@ pub fn router(state: WebState) -> Router {
         .merge(pages)
         .layer(middleware::from_fn(auth::csrf_guard))
         .layer(sessions)
+        // Outermost: it covers the login routes and the guards, and sees the response last.
+        .layer(middleware::from_fn(htmx::error_answers))
         .with_state(state.clone());
     base_routes(state.pool, state.lifecycle_public_key)
         .merge(state.code_theme.routes())

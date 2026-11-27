@@ -10,7 +10,7 @@ pub use oidc::{Identity, OidcClient, OidcError, PendingLogin};
 pub use store::PgSessionStore;
 
 use axum::extract::{Query, Request, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
+use axum::http::{HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 use df_core::{Principal, UserId};
@@ -20,6 +20,7 @@ use tower_sessions::Session;
 
 use crate::WebState;
 use crate::components::{ButtonKind, action_class, link_button};
+use crate::htmx::{ErrorAnswer, is_htmx};
 use crate::layout::{Nav, Shell, layout};
 use crate::responses::htmx_redirect;
 
@@ -175,7 +176,9 @@ fn lacks_role(role: &str) -> Response {
     )
 }
 
-/// A full page for errors outside the normal flow.
+/// A full page for errors outside the normal flow. To an htmx request, `htmx::error_answers`
+/// answers with a toast of the same title and message instead (the response carries them as an
+/// [`ErrorAnswer`]), so every error answer goes through this function.
 pub fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
     let body: Markup = html! {
         section class="mx-auto max-w-md py-10 text-center" {
@@ -187,7 +190,12 @@ pub fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
             }
         }
     };
-    (status, layout(title, Nav::None, &Shell::default(), body)).into_response()
+    let mut response = (status, layout(title, Nav::None, &Shell::default(), body)).into_response();
+    response.extensions_mut().insert(ErrorAnswer {
+        title: title.to_owned(),
+        message: message.to_owned(),
+    });
+    response
 }
 
 #[derive(Debug, Deserialize)]
@@ -396,12 +404,6 @@ fn login_redirect(request: &Request) -> Response {
     }
     let target = request.uri().path_and_query().map_or("/", |pq| pq.as_str());
     Redirect::to(&format!("/login?next={}", urlencode(target))).into_response()
-}
-
-pub(crate) fn is_htmx(headers: &HeaderMap) -> bool {
-    headers
-        .get("hx-request")
-        .is_some_and(|v| v.as_bytes() == b"true")
 }
 
 fn urlencode(value: &str) -> String {

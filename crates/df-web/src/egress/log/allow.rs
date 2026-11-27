@@ -16,10 +16,12 @@ use maud::{Markup, html};
 use serde::{Deserialize, Deserializer};
 
 use super::filter::is_blocked;
-use super::toast::{self, highlight_href, into_toast};
+use super::toast::{self, highlight_href};
 use crate::WebState;
 use crate::auth::CurrentUser;
-use crate::components::{FormErrors, field_error, form_error, readonly_field_compact};
+use crate::components::{
+    FormErrors, field_error, form_error, readonly_field_compact, toast_answer,
+};
 use crate::config_pages::{form_footer, modal, open_modal};
 use crate::egress::allowlist::{ScopeName, validate_required_port};
 use crate::responses::{internal_error, invalid};
@@ -140,7 +142,7 @@ pub(in crate::egress) async fn dialog(
     headers: HeaderMap,
     Query(form): Query<AllowForm>,
 ) -> Response {
-    if !crate::auth::is_htmx(&headers) {
+    if !crate::htmx::is_htmx(&headers) {
         return Redirect::to("/egress/log").into_response();
     }
     modal("Allow egress", allow_form(&form, &FormErrors::default()))
@@ -295,7 +297,7 @@ async fn store(
     Ok(record)
 }
 
-/// The answer to a created entry: the dialog closes and the page's `#allow-toast` says so.
+/// The answer to a created entry: the dialog closes and a toast says so.
 fn created(host: &str, port: u16, record: &EntryRecord) -> Response {
     let scope = ScopeName::of(record.project_key.as_deref(), record.task_key.as_deref()).phrase();
     let toast = toast::created(
@@ -303,7 +305,7 @@ fn created(host: &str, port: u16, record: &EntryRecord) -> Response {
         html! { span class="font-mono" { (host) ":" (port) } " is allowed " (scope) "." },
         &highlight_href(&format!("{host}:{port}")),
     );
-    let mut response = into_toast(StatusCode::OK, toast);
+    let mut response = toast_answer(StatusCode::OK, toast);
     response
         .headers_mut()
         .insert("HX-Trigger", HeaderValue::from_static("modal-close"));

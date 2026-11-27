@@ -29,6 +29,7 @@ use crate::components::{
     page_header_with_subtitle, phone_profile_menu, project_forge_kind, readonly_field, role_icon,
     select_field, submit_button, tab_marker, td, text_field, th,
 };
+use crate::htmx::Region;
 use crate::layout::{Nav, Shell, layout};
 use crate::responses::{htmx_location, internal_error, invalid, not_found};
 use crate::{project_subscriptions, project_webhook};
@@ -312,7 +313,7 @@ pub(crate) fn wider_modal(title: &str, form: Markup) -> Response {
 
 /// Answer of a successful save: the updated list replaces the old one and the modal closes.
 pub(crate) fn saved(list: Markup) -> Response {
-    saved_into("#config-list", list)
+    saved_into(Region::ConfigList.selector(), list)
 }
 
 /// [`saved`] for a region other than `#config-list`: `target` is the selector of the region.
@@ -328,7 +329,7 @@ pub(crate) fn saved_into(target: &'static str, region: Markup) -> Response {
 /// A button that opens a form fragment as modal.
 pub(crate) fn open_modal(href: &str, label: &str, class: &str, content: Markup) -> Markup {
     html! {
-        button type="button" hx-get=(href) hx-target="#composer-slot" hx-swap="innerHTML" aria-label=(label) title=[(!label.is_empty()).then_some(label)] class=(class) { (content) }
+        button type="button" hx-get=(href) hx-target=(Region::ComposerSlot.selector()) hx-swap="innerHTML" aria-label=(label) title=[(!label.is_empty()).then_some(label)] class=(class) { (content) }
     }
 }
 
@@ -526,7 +527,7 @@ pub(crate) fn tabbed_form(
         html! { span aria-hidden="true" class="absolute inset-y-2 left-0 hidden w-[3px] rounded-sm bg-accent-text group-aria-selected:block" {} }
     };
     html! {
-        form id="form" class=(form_class) hx-post=(action) hx-target="#form" hx-swap="outerHTML"
+        form id=(Region::Form.id()) class=(form_class) hx-post=(action) hx-target=(Region::Form.selector()) hx-swap="outerHTML"
             x-data={"tabs(" (serde_json::Value::from(open).to_string()) ", " (page) ")"} {
             @if page { input type="hidden" name="tab" value=(open) ":value"="tab"; }
             div class=(if page { "flex flex-col" } else { "flex flex-col md:flex-row" }) {
@@ -581,7 +582,7 @@ fn credential_form(
     submit: &str,
 ) -> Markup {
     html! {
-        form id="form" class="space-y-4" hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
+        form id=(Region::Form.id()) class="space-y-4" hx-post=(action) hx-target=(Region::Form.selector()) hx-swap="outerHTML" {
             (form_error(errors))
             (text_field("Name", "name", &values.name, errors, None))
             (text_field("Secret name", "secret_name", &values.secret_name, errors,
@@ -594,7 +595,7 @@ fn credential_form(
 
 fn credentials_region(refs: &[CredentialRef]) -> Markup {
     html! {
-        div id="config-list" {
+        div id=(Region::ConfigList.id()) {
             (list_header_with_subtitle(
                 "Credentials",
                 refs.len(),
@@ -642,7 +643,7 @@ async fn credentials_list(State(state): State<WebState>, shell: Shell) -> Respon
 }
 
 async fn credential_new(headers: HeaderMap) -> Response {
-    if !crate::auth::is_htmx(&headers) {
+    if !crate::htmx::is_htmx(&headers) {
         return Redirect::to("/credentials").into_response();
     }
     modal(
@@ -661,7 +662,7 @@ async fn credential_edit(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Response {
-    if !crate::auth::is_htmx(&headers) {
+    if !crate::htmx::is_htmx(&headers) {
         return Redirect::to("/credentials").into_response();
     }
     match df_db::catalog::get_credential_ref(&state.pool, id).await {
@@ -961,7 +962,7 @@ fn project_form(
     let general = general_groups(values, errors, credentials, state, editing);
     if editing == Editing::No {
         return html! {
-            form id="form" class="space-y-4" hx-post=(action) hx-target="#form" hx-swap="outerHTML" {
+            form id=(Region::Form.id()) class="space-y-4" hx-post=(action) hx-target=(Region::Form.selector()) hx-swap="outerHTML" {
                 (form_error(errors))
                 div class="space-y-6" { (general) }
                 (form_footer("Create project"))
@@ -1184,7 +1185,7 @@ fn projects_region(
     shell: &Shell,
 ) -> Markup {
     html! {
-        div id="config-list" {
+        div id=(Region::ConfigList.id()) {
             (list_header("Projects", projects.len(), create_button("/projects/new", "New project"), Some(shell)))
             @if projects.is_empty() {
                 (empty_panel(
@@ -1291,7 +1292,7 @@ async fn projects_list(
 }
 
 async fn project_new(State(state): State<WebState>, headers: HeaderMap) -> Response {
-    if !crate::auth::is_htmx(&headers) {
+    if !crate::htmx::is_htmx(&headers) {
         return Redirect::to("/projects").into_response();
     }
     let credentials = match df_db::catalog::list_credential_refs(&state.pool).await {

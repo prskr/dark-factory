@@ -9,6 +9,7 @@ use super::actions::ICON_BUTTON_CLASS;
 use super::icons::{Icon, icon};
 use super::persona_avatar::{AvatarSize, PersonaLabel, persona_avatar};
 use super::shell::{avatar, initials};
+use crate::htmx::Region;
 use crate::markdown;
 
 /// Time shown under a bubble.
@@ -201,7 +202,7 @@ pub fn queued_message(
                     "x-on:click"={"if (!editing) saved = draft; editing = '" (id) "'; draft = $el.dataset.text; $nextTick(() => $refs.message.focus())"}
                     class=(ICON_BUTTON_CLASS) { (icon(Icon::Pencil)) }
                 button type="button" aria-label="Remove queued message"
-                    hx-delete={(crate::layout::item_path(key)) "/messages/" (id)} hx-target="#pending" hx-swap="outerMorph"
+                    hx-delete={(crate::layout::item_path(key)) "/messages/" (id)} hx-target=(Region::Pending.selector()) hx-swap="outerMorph"
                     "x-on:click"={"if (editing === '" (id) "') { editing = null; draft = saved }"}
                     class=(ICON_BUTTON_CLASS) { (icon(Icon::Close)) }
             }

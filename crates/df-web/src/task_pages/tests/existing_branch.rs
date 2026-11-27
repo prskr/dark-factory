@@ -110,7 +110,7 @@ async fn an_entered_branch_shows_as_a_chip_with_the_git_icon_and_a_remove_button
     .await;
 
     assert!(
-        html.contains("branch: &quot;renovate/serde-1.x&quot;")
+        html.contains("&quot;branch&quot;:&quot;renovate/serde-1.x&quot;")
             && html.contains("x-text=\"branch\""),
         "{html}"
     );
@@ -153,7 +153,7 @@ async fn a_branch_with_quotes_cannot_break_out_of_the_composer_state() {
 
     // A JSON string literal: the quote stays escaped inside the attribute.
     assert!(
-        html.contains("branch: &quot;a\\&quot;});alert(1);//&quot;"),
+        html.contains("&quot;branch&quot;:&quot;a\\&quot;});alert(1);//&quot;"),
         "{html}"
     );
 }
@@ -241,9 +241,9 @@ async fn a_held_branch_keeps_the_composer_open_with_an_error_naming_the_holder()
     );
     // Values are kept.
     assert!(html.contains(">Rebase it</textarea>"), "{html}");
-    assert!(html.contains("issue: '7'"), "{html}");
+    assert!(html.contains("&quot;issue&quot;:&quot;7&quot;"), "{html}");
     assert!(
-        html.contains("branch: &quot;renovate/serde-1.x&quot;"),
+        html.contains("&quot;branch&quot;:&quot;renovate/serde-1.x&quot;"),
         "{html}"
     );
     assert!(html.contains(&format!("<option value=\"{}\" selected>", seed.project)));

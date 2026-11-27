@@ -6,6 +6,7 @@
 
 pub mod actions;
 pub mod badges;
+pub mod detail_head;
 pub mod forms;
 pub mod host_icon;
 pub mod icons;
@@ -17,6 +18,7 @@ pub mod shell;
 pub mod table;
 pub mod tabs;
 pub mod time;
+pub mod toast;
 pub mod transcript;
 
 pub use actions::{
@@ -26,6 +28,7 @@ pub use actions::{
 pub use badges::{
     Tone, attached_badge, chip, filter_chip, harness_label, status_badge, tone_badge,
 };
+pub(crate) use detail_head::detail_head;
 pub use forms::{
     FormErrors, MarkdownField, MenuItem, Preview, field, field_error, form_error, form_group,
     icon_menu, markdown_field, mono_text_field_of_form, readonly_field, readonly_field_compact,
@@ -50,6 +53,7 @@ pub use table::{
 };
 pub use tabs::{MarkerInset, TAB_CLASS, tab_marker};
 pub use time::short_time;
+pub use toast::{ToastTone, error_toast, toast, toast_answer};
 pub use transcript::QueuedState;
 
 #[cfg(test)]

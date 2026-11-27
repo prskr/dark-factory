@@ -85,6 +85,24 @@ async fn blank_messages_are_refused() {
     assert!(text(response).await.contains("Write a message first."));
 }
 
+#[test]
+fn the_transcript_scroller_follows_the_transcript_and_lets_go_of_its_observers() {
+    let js = crate::assets::script_source("transcriptScroll.ts");
+
+    assert!(js.contains("Alpine.data('transcriptScroll'"), "{js}");
+    assert!(
+        js.contains("new MutationObserver") && js.contains("new ResizeObserver"),
+        "{js}"
+    );
+    assert!(
+        js.contains("destroy()") && js.contains(".disconnect()"),
+        "{js}"
+    );
+    assert!(!js.contains('#'), "no element ID in the script: {js}");
+    assert!(crate::layout::COMPONENT_SCRIPTS.contains(&"transcriptScroll.js"));
+    assert!(crate::layout::COMPONENT_SCRIPTS.contains(&"pageView.js"));
+}
+
 #[tokio::test]
 async fn message_form_keeps_the_draft_outside_the_streamed_regions() {
     let app = TestApp::new().await;
@@ -101,17 +119,15 @@ async fn message_form_keeps_the_draft_outside_the_streamed_regions() {
     );
     for needle in [
         "id=\"transcript-scroll\"",
-        "x-data=\"{ pinned: true }\"",
-        "x-init=",
-        // Content growth without a DOM mutation (images) and a shrinking viewport (queued
-        // messages) also keep the last item in view.
-        "new ResizeObserver(down).observe($el)",
-        "new ResizeObserver(down).observe($el.querySelector(",
-        "x-on:scroll=",
-        "&lt; 48",
+        "x-data=\"transcriptScroll\"",
+        "x-on:scroll=\"onScroll()\"",
     ] {
         assert!(html.contains(needle), "{needle}");
     }
+    assert!(
+        !scroll.contains("x-init"),
+        "the component starts itself: {scroll}"
+    );
 
     // The regions the stream replaces never contain the draft state.
     let detail = df_db::task_views::get_task_detail_by_key(&app.pool, "DF-1")

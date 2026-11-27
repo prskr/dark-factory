@@ -26,6 +26,7 @@ use crate::components::{
 };
 use crate::config_pages::{form_footer, form_grid, full_row, modal, saved_into};
 use crate::egress::project_tab;
+use crate::htmx::Region;
 use crate::responses::{internal_error, invalid, not_found};
 
 /// The id of the form of a dialog and its selector. It is not `form`: on the project settings page
@@ -68,7 +69,7 @@ pub(in crate::egress) async fn edit(
     Path(id): Path<Uuid>,
     Query(origin): Query<Origin>,
 ) -> Response {
-    if !crate::auth::is_htmx(&headers) {
+    if !crate::htmx::is_htmx(&headers) {
         return plain_redirect(&origin);
     }
     let entry = match df_db::get_entry(&state.pool, id).await {
@@ -221,10 +222,13 @@ pub(in crate::egress) async fn respond(
     answer: Answer,
 ) -> Response {
     let (region, target) = match back {
-        ReturnTo::Allowlist(view) => (region_markup(state, &view).await, "#config-list"),
+        ReturnTo::Allowlist(view) => (
+            region_markup(state, &view).await,
+            Region::ConfigList.selector(),
+        ),
         ReturnTo::Project(key) => (
             project_tab::region_markup(state, &key).await,
-            "#project-egress",
+            Region::ProjectEgress.selector(),
         ),
     };
     match region {
@@ -501,7 +505,7 @@ async fn new_dialog(
     origin: Origin,
     kind: NewKind,
 ) -> Response {
-    if !crate::auth::is_htmx(headers) {
+    if !crate::htmx::is_htmx(headers) {
         return plain_redirect(&origin);
     }
     let values = RuleForm {

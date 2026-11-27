@@ -444,10 +444,9 @@ impl Session {
             )
             .await
             .context("open the task list")?;
-        // `.first()`: the list has a composer button per layout (desktop and phone), without an
-        // accessible name of its own.
-        self.page
-            .locator("button[hx-get^='/tasks/compose']:visible")
+        // `.first()`: the rail and the empty detail panel each have a visible "New task" button
+        // on a desktop; both open the same composer.
+        button(&self.page, "New task")
             .first()
             .click(None)
             .await

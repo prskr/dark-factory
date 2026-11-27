@@ -16,6 +16,7 @@ use crate::components::{
     page_header_with_subtitle,
 };
 use crate::config_pages::{create_button, list_page, open_modal};
+use crate::htmx::Region;
 use crate::layout::{Nav, Shell};
 use crate::responses::internal_error;
 
@@ -201,7 +202,7 @@ fn header(count: usize) -> Markup {
 fn region(entries: &[EntryRecord], view: &View, projects: &ProjectHosts) -> Markup {
     let page = view.page(entries, |entry| is_highlighted(entry, view.highlight()));
     html! {
-        div id="config-list" {
+        div id=(Region::ConfigList.id()) {
             (header(entries.len()))
             @if entries.is_empty() {
                 (empty_panel(
@@ -231,7 +232,7 @@ fn results(view: &View, page: &paging::Page<'_>, total: usize, projects: &Projec
     let env = RowEnv {
         projects,
         query: &query,
-        region: "#config-list",
+        region: Region::ConfigList.selector(),
     };
     html! {
         div id="rules-results" {

@@ -17,6 +17,7 @@ use maud::{Markup, html};
 
 use crate::components::transcript::ToolStatus;
 use crate::components::{Icon, PersonaLabel, transcript as c};
+use crate::htmx::Region;
 use crate::markdown;
 
 mod tool;
@@ -713,7 +714,9 @@ pub(crate) fn card_goes_before(card_at: Timestamp, item_at: Timestamp) -> bool {
 pub fn render_transcript(items: &[Item], cards: &[(Timestamp, Markup)]) -> Markup {
     let mut cards = cards.iter().peekable();
     html! {
-        div id="transcript" class="flex min-w-0 flex-col gap-3" {
+        // A log live region: the live update appends items, and screen readers announce them
+        // after the current output, without moving focus.
+        div id=(Region::Transcript.id()) role="log" aria-live="polite" class="flex min-w-0 flex-col gap-3" {
             (crate::requests::updates_sink())
             @for chunk in chunks(items) {
                 @if let Some(first) = chunk.first() {

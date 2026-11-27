@@ -72,6 +72,7 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Tasks - Artifacts | Artifacts of a task: details tab with cards, task list collapsed (full screen); split view Preview, Source, image (partial boards: transcript and collapsed details); bookmarkable artifact page; phone details sheet (sheet only) and artifact page |
 | Tasks - Subtasks | Task tree: Subtasks tab with progress and per-subtask chips, done/total chip on task rows |
 | Tasks - Filter and new task | New task (full screen); project filter, sort tooltip and menu (partial boards: task list and menu); new task options and branch held (dialog only) |
+| Tasks - Toasts and focus | Error toast (full screen); toast tones (toasts only); task head focused after selection (head only); phone error toast |
 | Request Inbox | Request inbox, deny always, create-issue request states; phone |
 | Config - Projects | Projects: two-line list rows, project settings general (full screen); saved, security (partial boards: main column only); new-project modal (modal only); phone |
 | Config - Project integrations | Integrations tab (full screen) and its subscription states (partial boards: main column only) |
@@ -326,6 +327,10 @@ The rows with the route `/personas/<id>/edit` are the boards of the persona edit
 | Tasks - Transcript / Desktop · transcript, tool groups | `/tasks/<key>` | manual seed (not built): task DF-12 `running`; a thought before a streak of 12 tool calls (2 failed); an agent message; an open streak of Read, a thought, Edited and a running `cargo test`; a delivered review webhook (alice, changes requested, PR #41); a queued comment webhook. Group of the running streak opened | 1440 |
 | Tasks - Transcript / Desktop · transcript, tool details | `/tasks/<key>` | as above after the turn ended: an open thought with a `rust` fence; an open streak of Read, Edited (diff opened) and a failed `cargo test` (input with `command`, `console` output, opened); delivered webhooks review, comment, CI failure `test`, PR closed without merge. Board shows the transcript column only | 1440 |
 | Tasks - Phone, run control / Phone · transcript, tool groups | `/tasks/<key>` | as Tasks - Transcript / Desktop · transcript, tool groups | 390 |
+| Tasks - Toasts and focus / Desktop · error toast | `/tasks/<id>` | as Tasks / Desktop · light; removing a queued message of DF-404 answers 404: toast "404 Not found", "The task does not exist."; queued stack unchanged | 1440 |
+| Tasks - Toasts and focus / Toasts · tones | `/egress/log`, `/tasks/<id>` | success toast "Rule created" with "View rule"; error toast "404 Not found"; network toast "Could not reach the server" / "Check your connection and try again."; deny error toast "Rule not created" / "The host is not valid.". Partial board: toasts only | 1440 |
+| Tasks - Toasts and focus / Desktop · head focused | `/tasks/<id>` | as Tasks / Desktop · light; DF-12 selected from the list with the keyboard, focus on the task head. Partial board: task head only | 1440 |
+| Tasks - Toasts and focus / Phone · error toast | `/tasks` | as Tasks - Phone / Phone · task list; an action answered 404 | 390 |
 
 The remaining boards follow the same pattern.
 

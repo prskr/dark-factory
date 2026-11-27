@@ -108,7 +108,7 @@ async fn page(
         Ok(task) => task,
         Err(response) => return *response,
     };
-    let place = if crate::auth::is_htmx(&headers) {
+    let place = if crate::htmx::is_htmx(&headers) {
         Place::Split
     } else {
         Place::Page

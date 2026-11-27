@@ -40,7 +40,9 @@ by last activity, newest first. Answer the request on the chat's timeline or in
 From 768 px the left column collapses to a strip with one avatar per persona that has a chat in the
 project. An avatar opens the persona's chat that needs you, otherwise its most recently active chat.
 The details column on the right collapses to a strip as on the task page. Both choices are
-remembered in this browser.
+remembered in this browser. When you open a chat from the list with the keyboard, focus moves to
+the chat's header, which a screen reader reads as the key and the topic. A failed action shows a
+toast; see [When something fails](tasks.md#when-something-fails).
 
 ## Talk to the persona
 

@@ -20,7 +20,8 @@ use crate::components::{
     dialog_with, field_error, filter_chip, form_error, icon, icon_menu, persona_avatar,
     phone_profile_menu, search_menu, section, status_badge, tone_badge,
 };
-use crate::components::{DIALOG_CLASS, ROUND_ACTION_CLASS, ROUND_PILL_CLASS};
+use crate::components::{DIALOG_CLASS, ROUND_ACTION_CLASS, ROUND_PILL_CLASS, detail_head};
+use crate::htmx::Region;
 use crate::layout::{Shell, item_path};
 use crate::transcript::block_parts;
 use crate::transcript::webhook::summary;
@@ -32,7 +33,12 @@ const PERSONA_SELECT: &str =
     "min-h-11 rounded-full bg-transparent px-3 text-sm text-ink lg:min-h-8";
 /// Ctrl/Cmd+Enter in the message box: Save while editing a queued message, otherwise the Send
 /// button that `#composer-action` holds at that moment.
-const SEND_SHORTCUT: &str = "(editing ? $refs.save : document.querySelector('#composer-action [aria-label=Send]'))?.click()";
+fn send_shortcut() -> String {
+    format!(
+        "(editing ? $refs.save : document.querySelector('{} [aria-label=Send]'))?.click()",
+        Region::ComposerAction.selector()
+    )
+}
 
 /// The status filter of the task list.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -187,15 +193,16 @@ pub(crate) fn task_rows(
 ) -> Markup {
     let query = filters.query();
     html! {
-        ul id="task-rows" {
+        ul id=(Region::TaskRows.id()) data-rows {
             @for t in items {
                 @let href = format!("/tasks/{}{}", t.key, query);
                 @let status = status_of(&t.status);
                 @let resume_at = shown_resume_time(status, t.resume_at);
                 li id={"row-" (t.key)} {
-                    a href=(href) hx-get=(href) hx-target="#ws-detail" hx-select="#ws-detail" hx-swap="outerHTML" hx-push-url="true"
+                    a href=(href) hx-get=(href) hx-target=(Region::WsDetail.selector()) hx-select=(Region::WsDetail.selector()) hx-swap="outerHTML" hx-push-url="true"
+                        data-focus-after-swap=(Region::TaskHead.selector())
                         aria-current=[(current == Some(t.key.as_str())).then_some("page")]
-                        "x-on:click"="document.body.dataset.view = 'task'; details = false; $root.querySelectorAll('#task-rows [aria-current]').forEach(e => e.removeAttribute('aria-current')); $el.setAttribute('aria-current', 'page')"
+                        "x-on:click"="select($el)"
                         class="block min-h-11 border-b border-line border-l-[3px] border-l-transparent py-3.5 pr-5 pl-[17px] hover:bg-sunk aria-[current=page]:border-l-accent aria-[current=page]:bg-accent-soft" {
                         div class="flex items-center gap-2" {
                             span class="font-mono text-xs text-faint" { (t.key) }
@@ -340,7 +347,7 @@ pub(crate) fn list_column(
 pub(crate) fn head_region(task: &TaskDetail, error: Option<&str>) -> Markup {
     let action = format!("/tasks/{}/title", task.key);
     html! {
-        header id="task-head" class="border-b border-line bg-panel px-2 py-2 lg:px-4" {
+        (detail_head(Region::TaskHead, &task.key, &task.title, html! {
             div class="flex items-center gap-1" {
                 a href="/tasks" aria-label="Back to tasks" class={(ICON_BUTTON_CLASS) " md:hidden"} { (icon(Icon::ChevronLeft)) }
                 div class="min-w-0 flex-1" x-data="{ editing: false }" {
@@ -351,7 +358,7 @@ pub(crate) fn head_region(task: &TaskDetail, error: Option<&str>) -> Markup {
                             span class="truncate" { (title_text(&task.title, task.title_source)) }
                             span class="text-faint" { (icon(Icon::Pencil)) }
                         }
-                        form x-show="editing" x-cloak hx-post=(action) hx-target="#task-head" hx-swap="outerMorph"
+                        form x-show="editing" x-cloak hx-post=(action) hx-target=(Region::TaskHead.selector()) hx-swap="outerMorph"
                             "x-on:keydown.escape"="editing = false; $refs.title.value = $refs.title.defaultValue"
                             "x-on:title-saved.window"="editing = false"
                             class="flex min-w-0 flex-1 flex-wrap items-center gap-2" {
@@ -368,7 +375,7 @@ pub(crate) fn head_region(task: &TaskDetail, error: Option<&str>) -> Markup {
                 (status_badge(task.status))
                 button type="button" aria-label="Details" "x-on:click"="details = true; sheet = 'half'" class={(ICON_BUTTON_CLASS) " xl:hidden"} { (icon(Icon::PanelRight)) }
             }
-        }
+        }))
     }
 }
 
@@ -423,7 +430,7 @@ pub(crate) fn pending_region(
         format!("{persona} reads them at the next turn")
     };
     html! {
-        div id="pending" class={"flex flex-col gap-2" (padding)} {
+        div id=(Region::Pending.id()) class={"flex flex-col gap-2" (padding)} {
             (field_error(error))
             @if !queued.is_empty() {
                 p class="text-xs text-muted" { (queued.len()) " queued · " (reader) }
@@ -478,13 +485,13 @@ pub(crate) fn message_area(
                     // The stream replaces `#composer-action`, which drops an `x-ref` inside it:
                     // the shortcut looks up the Send button when the key is pressed.
                     textarea id="message" name="message" rows="2" placeholder="Message the agent" x-model="draft" x-ref="message"
-                        "x-on:keydown.ctrl.enter.prevent"=(SEND_SHORTCUT)
-                        "x-on:keydown.meta.enter.prevent"=(SEND_SHORTCUT)
+                        "x-on:keydown.ctrl.enter.prevent"=(send_shortcut())
+                        "x-on:keydown.meta.enter.prevent"=(send_shortcut())
                         class="min-h-11 w-full min-w-0 flex-1 resize-none bg-transparent py-2 text-base text-ink placeholder:text-faint focus-visible:outline-none" {}
                     (composer_action(key, interruptible(runs)))
                     button type="button" x-ref="save" x-show="editing" x-cloak aria-label="Save"
                         hx-patch={(messages) "/_"} ":hx-patch"={"'" (messages) "/' + editing"}
-                        hx-include="#message" hx-target="#pending" hx-swap="outerMorph"
+                        hx-include="#message" hx-target=(Region::Pending.selector()) hx-swap="outerMorph"
                         class=(ROUND_PILL_CLASS) { (icon(Icon::Check)) "Save" }
                 }
             }
@@ -512,9 +519,9 @@ pub(crate) fn composer_action(key: &str, interruptible: bool) -> Markup {
         ROUND_ACTION_CLASS.to_string()
     };
     html! {
-        span id="composer-action" class="contents" {
+        span id=(Region::ComposerAction.id()) class="contents" {
             @if interruptible {
-                button type="button" aria-label="Interrupt" hx-post=(interrupt) hx-target="#pending" hx-swap="outerMorph"
+                button type="button" aria-label="Interrupt" hx-post=(interrupt) hx-target=(Region::Pending.selector()) hx-swap="outerMorph"
                     class="hidden size-11 shrink-0 items-center justify-center rounded-full bg-ink text-panel hover:brightness-95 group-has-[textarea:placeholder-shown]:inline-flex"
                     x-show="!editing" { (icon(Icon::Stop)) }
             }
@@ -522,7 +529,7 @@ pub(crate) fn composer_action(key: &str, interruptible: bool) -> Markup {
             // the first response clears. The queue lives on `#message` because the stream
             // replaces this button while the request is in flight (sending requeues the task).
             button type="button" x-show="!editing" aria-label="Send"
-                hx-post=(messages) hx-include="#message" hx-target="#pending" hx-swap="outerMorph"
+                hx-post=(messages) hx-include="#message" hx-target=(Region::Pending.selector()) hx-swap="outerMorph"
                 hx-sync="#message:drop"
                 class=(send_class) { (icon(Icon::Send)) }
         }
@@ -644,7 +651,7 @@ pub(crate) fn details_region(
         ));
     }
     html! {
-        div id="task-details" class="md:shrink-0" {
+        div id=(Region::TaskDetails.id()) class="md:shrink-0" {
             div class="ws-strip flex-col items-center gap-3 p-2" {
                 button type="button" class=(ICON_BUTTON_CLASS) aria-label="Show details" title="Show details" "x-on:click"="setCollapsed(false)" { (icon(Icon::PanelRight)) }
                 span class={"size-3 rounded-full " (Tone::of_status(task.status).dot_class())}
@@ -753,7 +760,7 @@ fn status_select(task: &TaskDetail, cancel: &CancelNote) -> Markup {
                     @if !closed {
                         li {
                             @if task.status.can_mark_done() {
-                                button type="button" hx-post=(done) hx-target="#task-details" hx-swap="outerMorph"
+                                button type="button" hx-post=(done) hx-target=(Region::TaskDetails.selector()) hx-swap="outerMorph"
                                     class={(item) " text-ink hover:bg-sunk"} { "Mark done" }
                             } @else {
                                 button type="button" disabled class={(item) " cursor-not-allowed text-faint"} { "Mark done" }
@@ -809,7 +816,7 @@ fn reset_dialog(task: &TaskDetail) -> Markup {
                 }
                 div class="mt-5 flex flex-col-reverse gap-2 md:flex-row md:justify-end" {
                     button type="button" "x-on:click"="$refs.resetDialog.close()" class=(action_class(ButtonKind::Secondary)) { "Keep workspace" }
-                    button type="button" hx-post=(action) hx-target="#task-details" hx-swap="outerMorph"
+                    button type="button" hx-post=(action) hx-target=(Region::TaskDetails.selector()) hx-swap="outerMorph"
                         "x-on:click"="$refs.resetDialog.close()" class=(action_class(ButtonKind::Danger)) { "Reset workspace" }
                 }
             }
@@ -843,7 +850,7 @@ fn cancel_dialog(task: &TaskDetail, cancel: &CancelNote) -> Markup {
                 p class="mt-3 text-sm text-muted" { "A new message reopens the task." }
                 div class="mt-5 flex flex-col-reverse gap-2 md:flex-row md:justify-end" {
                     button type="button" "x-on:click"="$refs.cancelDialog.close()" class=(action_class(ButtonKind::Secondary)) { "Keep task" }
-                    button type="button" hx-post=(action) hx-target="#task-details" hx-swap="outerMorph"
+                    button type="button" hx-post=(action) hx-target=(Region::TaskDetails.selector()) hx-swap="outerMorph"
                         "x-on:click"="$refs.cancelDialog.close()" class=(action_class(ButtonKind::Danger)) { "Cancel task" }
                 }
             }
@@ -867,7 +874,7 @@ fn strip_link(url: &str, label: &str, glyph: Icon) -> Markup {
 /// table per model); updated live.
 pub(crate) fn runs_region(task_key: &str, runs: &[RunView], persona_model: Option<&str>) -> Markup {
     html! {
-        div id="runs" class="ws-details-full ws-runs" {
+        div id=(Region::Runs.id()) class="ws-details-full ws-runs" {
             @if !runs.is_empty() {
                 // Closed by default; `open` is in `morphIgnore`, so live updates keep the reader's choice.
                 details class="group space-y-2.5 px-5 py-4 md:flex md:min-h-0 md:flex-1 md:flex-col" {
@@ -1017,7 +1024,7 @@ pub(crate) struct Choices {
 }
 
 /// The composer form. The first project/persona of the lists apply unless the values or the
-/// browser's last choice say otherwise (`x-init`).
+/// browser's last choice say otherwise (`scripts/composer.ts`).
 pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Choices) -> Markup {
     let project = if values.project.is_empty() {
         choices
@@ -1037,9 +1044,8 @@ pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Ch
     };
     html! {
         form id="composer-form" class="space-y-2" hx-post="/tasks" hx-target="this" hx-swap="outerHTML"
-            x-data={"{ issue: '" (values.issue_number.trim().chars().filter(char::is_ascii_digit).collect::<String>()) "', branch: " (json_string(values.branch.trim())) ", linking: false }"}
-            x-init="(() => { try { const d = JSON.parse(localStorage.getItem('df.composer') ?? '{}'); const pick = (el, v) => { if (!el.dataset.explicit && v && [...el.options].some(o => o.value === v)) el.value = v }; pick($refs.project, d.project); pick($refs.persona, d.persona) } catch (e) {} })()"
-            "x-on:submit"="(() => { try { localStorage.setItem('df.composer', JSON.stringify({ project: $refs.project.value, persona: $refs.persona.value })) } catch (e) {} })()"
+            x-data={"composer(" (composer_args(values)) ")"}
+            "x-on:submit"="remember()"
             "x-on:keydown.ctrl.enter.prevent"="$el.requestSubmit()" "x-on:keydown.meta.enter.prevent"="$el.requestSubmit()" {
             (form_error(errors))
             div class="flex flex-wrap items-center gap-2 px-1" {
@@ -1101,10 +1107,16 @@ pub(super) fn composer_form(values: &TaskForm, errors: &FormErrors, choices: &Ch
     }
 }
 
-/// `value` as a JSON (and so JavaScript) string literal, for an Alpine expression.
-fn json_string(value: &str) -> String {
-    // A string always serializes.
-    serde_json::to_string(value).unwrap_or_else(|_unreachable| "\"\"".to_owned())
+/// The argument of `composer(...)` in `x-data`: the linked issue (digits only) and the existing
+/// branch of the form.
+fn composer_args(values: &TaskForm) -> String {
+    let issue: String = values
+        .issue_number
+        .trim()
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect();
+    serde_json::json!({ "issue": issue, "branch": values.branch.trim() }).to_string()
 }
 
 /// The composer as a dialog without frame (bottom sheet on phones), or a hint when nothing can

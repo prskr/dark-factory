@@ -620,6 +620,14 @@ pub(crate) async fn text(response: Response<Body>) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+/// Asserts that `body` is a toast answer: one `<hx-partial>` for the toast region.
+#[track_caller]
+pub(crate) fn assert_toast(body: &str) {
+    const TOAST_PARTIAL: &str = "<hx-partial hx-target=\"#toasts\" hx-swap=\"innerHTML\">";
+    assert!(body.starts_with(TOAST_PARTIAL), "{body}");
+    assert_eq!(body.matches("<hx-partial").count(), 1, "{body}");
+}
+
 pub(crate) fn header_str<'a>(response: &'a Response<Body>, name: &str) -> &'a str {
     response
         .headers()

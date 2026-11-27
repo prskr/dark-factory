@@ -1,4 +1,10 @@
 //! Responses shared by the handlers: htmx redirects, invalid forms, error pages.
+//!
+//! Error answers go through [`crate::auth::error_page`], directly or through [`not_found`] and
+//! [`internal_error`]: for an htmx request, `htmx::error_answers` turns that page into a toast
+//! and leaves the targeted region unchanged. An error answer built any other way swaps text or
+//! nothing into its target. Toasts of successful actions go through
+//! [`crate::components::toast_answer`].
 
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};

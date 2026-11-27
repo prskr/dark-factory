@@ -33,6 +33,7 @@ use crate::components::forms::INPUT_CLASS;
 use crate::components::short_time;
 use crate::components::{ButtonKind, EmptyPanel, EmptySize, action_class, page_header, tone_badge};
 use crate::components::{Tone, chip};
+use crate::htmx::partial;
 use crate::layout::{Nav, Shell, layout};
 use crate::markdown;
 use crate::responses::{internal_error, not_found};
@@ -599,7 +600,11 @@ async fn events(
             if s.last_count != Some(count) {
                 s.last_count = Some(count);
                 for id in ["request-count-rail", "request-count-bar"] {
-                    partials.push(partial(&format!("#{id}"), &count_badge(id, count)));
+                    partials.push(partial(
+                        &format!("#{id}"),
+                        "outerMorph",
+                        count_badge(id, count),
+                    ));
                 }
             }
             if s.list {
@@ -628,10 +633,6 @@ async fn load(state: &WebState, list: bool) -> Result<(Vec<CardData>, i64), df_d
             df_db::requests::pending_count(&state.pool).await?,
         ))
     }
-}
-
-fn partial(target: &str, inner: &Markup) -> Markup {
-    html! { hx-partial hx-target=(target) hx-swap="outerMorph" { (inner) } }
 }
 
 /// The hidden sink the live card updates are appended to; `requestCards.ts` applies them.
@@ -686,7 +687,7 @@ fn list_updates(
         let had_cards = !sent.is_empty();
         sent.clear();
         return if had_cards || first {
-            vec![partial("#request-list", &request_list(cards))]
+            vec![partial("#request-list", "outerMorph", request_list(cards))]
         } else {
             Vec::new()
         };

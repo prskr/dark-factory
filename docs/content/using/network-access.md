@@ -121,3 +121,8 @@ verdict (*All*, *Blocked*, *Allowed*) and under *Advanced* by persona, sandbox, 
 **Pause** stops the stream. A row's details show what the gateway records: method, status,
 duration, bytes, SNI, source, gateway pod, the reason and the matching rule. Request contents inside
 TLS are not inspected. Events live in memory only; a restarted gateway pod starts empty.
+
+Creating a rule from the page (**Allow**, **Deny always**) answers with a toast in the corner of
+the page: **Rule created** (or **Deny rule created**) with a **View rule** link, or, for a host
+that is not valid, **Rule not created** with the reason. Each toast has a **Dismiss** button, and a
+new toast replaces the one shown.

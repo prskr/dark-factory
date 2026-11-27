@@ -116,6 +116,7 @@ Status: *idea* (direction only), *decided* (decision recorded, no design), *desi
 | Item | Status | Reference |
 |---|---|---|
 | Further question kinds (number, date, ranking, file) | idea | `openspec/changes/question-kinds` (Non-Goals) |
+| Toasts for axum extractor rejections (plain-text 400/422 from `Form`/`Path`/`Query` parsing) on htmx requests | idea | `openspec/changes/web-htmx-robustness` (Out of Scope) |
 | Full-harness mode as a separate ACP binary (`df-native`); uses the inference endpoint of iteration 3 | decided | ADR-0045, context §4.1, `openspec/changes/full-harness-mode` |
 | Factory minion: optional model call in the control plane, no tools, single text output, sanitized, through the gateway (ADR-0064). `factory-minion`: generated task titles, generated persona descriptions, the `continuation-summary` job. Remaining: the continuation strategy that uses the summary job (change `better-continuation-summary`); for a task a human marked done, a summary posted to the PR in place of the agent's completion summary (`iter2-cancel` D5, needs its own output rules for the forge); a minion model per project | designed | `openspec/changes/factory-minion`, ADR-0064, `openspec/changes/archive/2026-10-23-ui-redesign/design.md` (D7), [`design/egress.md`](../../design/egress.md) §9 |
 | OAuth-based upstream MCP servers (token storage and refresh per server) | idea | [`iteration-4.md`](iteration-4.md) decision 7 |

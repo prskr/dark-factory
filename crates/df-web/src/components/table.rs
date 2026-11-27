@@ -6,6 +6,8 @@
 
 use maud::{Markup, html};
 
+use crate::htmx::Region;
+
 /// The entry control that covers the row; its cover draws the focus ring.
 const ENTRY_CLASS: &str = "block truncate text-left font-medium outline-none group-hover:underline after:absolute after:inset-0 focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-ink";
 
@@ -98,7 +100,7 @@ pub fn entry_link(href: &str, name: &str) -> Markup {
 /// The entry control of a modal: a button that loads the form from `href` into the composer slot.
 pub fn entry_button(href: &str, label: &str, name: &str) -> Markup {
     html! {
-        button type="button" hx-get=(href) hx-target="#composer-slot" hx-swap="innerHTML" aria-label=(label) class={"w-full " (ENTRY_CLASS)} { (name) }
+        button type="button" hx-get=(href) hx-target=(Region::ComposerSlot.selector()) hx-swap="innerHTML" aria-label=(label) class={"w-full " (ENTRY_CLASS)} { (name) }
     }
 }
 

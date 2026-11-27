@@ -7,6 +7,7 @@ use maud::{Markup, html};
 
 use super::view::status_name;
 use crate::components::Tone;
+use crate::htmx::Region;
 
 /// The `done/total` chip of a task with subtasks (done: `in_review` or `completed`; total: not
 /// `cancelled`); nothing without any.
@@ -51,7 +52,7 @@ pub(crate) fn tab_panel(subtasks: &[SubtaskItem]) -> Markup {
     let tabbed = !subtasks.is_empty();
     let progress = SubtaskProgress::of(subtasks.iter().map(|s| s.status));
     html! {
-        div id="panel-subtasks" role=[tabbed.then_some("tabpanel")] aria-labelledby=[tabbed.then_some("tab-subtasks")]
+        div id=(Region::PanelSubtasks.id()) role=[tabbed.then_some("tabpanel")] aria-labelledby=[tabbed.then_some("tab-subtasks")]
             class="ws-details-full ws-subtasks min-h-0 flex-1 overflow-y-auto" {
             @if tabbed {
                 div class="space-y-2 border-b border-line px-5 py-4" {

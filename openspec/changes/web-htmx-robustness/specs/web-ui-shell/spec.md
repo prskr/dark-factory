@@ -9,7 +9,7 @@ Every page SHALL have one toast region in a fixed corner of the viewport that do
 
 #### Scenario: Deny rule rejected on the traffic page
 - **WHEN** a board member denies a host that is not valid from the traffic page
-- **THEN** an error toast with the reason appears in the toast region and has a "Dismiss" button
+- **THEN** an error toast "Rule not created" with the reason appears in the toast region and has a "Dismiss" button
 
 #### Scenario: Toast replaced
 - **WHEN** a second toast arrives while one is shown
@@ -20,7 +20,7 @@ When an action or a partial load of the UI fails with an error answer, the UI SH
 
 #### Scenario: Action on an unknown task
 - **WHEN** the UI asks to remove a queued message of `DF-404`, a task that does not exist
-- **THEN** a toast "404 Not found" says that the task does not exist, and the queued stack shows what it showed before
+- **THEN** a toast "404 Not found" says "The task does not exist.", and the queued stack shows what it showed before
 
 #### Scenario: Server error during an action
 - **WHEN** an action fails because the database is unreachable
@@ -46,7 +46,7 @@ When a UI action or partial load gets no answer because the network fails, the U
 
 #### Scenario: Network down during an action
 - **WHEN** a board member sends a message while the browser is offline
-- **THEN** a toast says that the server could not be reached and the message input keeps its text
+- **THEN** a toast "Could not reach the server" says "Check your connection and try again." and the message input keeps its text
 
 #### Scenario: Live updates reconnect
 - **WHEN** the live update stream of a task page drops and reconnects

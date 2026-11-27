@@ -412,6 +412,33 @@ async fn a_rule_that_an_instance_rule_covers_shows_already_allowed_everywhere_wi
 }
 
 #[tokio::test]
+async fn make_global_with_an_invalid_port_answers_an_error_toast() {
+    let app = app_with_egress(vec![]).await;
+    let (_seed, cookie) = two_projects(&app).await;
+
+    let response = app
+        .post(
+            "/egress/allowlist/make-global",
+            &form(&[
+                ("host", "registry.npmjs.org"),
+                ("port", "not-a-port"),
+                ("return", "project:DF"),
+            ]),
+            &cookie,
+        )
+        .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(header_str(&response, "hx-reswap"), "none");
+    let body = text(response).await;
+    crate::testkit::assert_toast(&body);
+    assert!(
+        body.contains("400 Bad request") && body.contains("The port is not valid."),
+        "{body}"
+    );
+}
+
+#[tokio::test]
 async fn make_global_replaces_the_project_rules_by_one_instance_rule() {
     let app = app_with_egress(vec![]).await;
     let (_seed, cookie) = two_projects(&app).await;
