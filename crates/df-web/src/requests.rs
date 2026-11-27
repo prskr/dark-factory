@@ -131,18 +131,24 @@ pub(crate) fn count_badge(id: &str, count: i64) -> Markup {
 pub(crate) fn request_list(cards: &[CardData]) -> Markup {
     html! {
         div id="request-list" class="mx-auto max-w-3xl space-y-3" {
-            @if cards.is_empty() {
-                div data-empty-state { (EmptyPanel {
-                    size: EmptySize::Page,
-                    icon: None,
-                    title: "Nothing waits for you",
-                    text: "Questions and approval requests of the agents show up here.",
-                    phone_hint: None,
-                    action: html! {},
-                }.render()) }
-            }
+            @if cards.is_empty() { (empty_state()) }
             @for card in cards { (request_card(card, None)) }
         }
+    }
+}
+
+/// What the inbox list shows while nothing is pending; `requestCards.ts` removes it when a card
+/// arrives.
+fn empty_state() -> Markup {
+    html! {
+        div data-empty-state { (EmptyPanel {
+            size: EmptySize::Page,
+            icon: None,
+            title: "Nothing waits for you",
+            text: "Questions and approval requests of the agents show up here.",
+            phone_hint: None,
+            action: html! {},
+        }.render()) }
     }
 }
 
@@ -674,23 +680,19 @@ fn keep_partial(cards: &[CardData]) -> Markup {
 }
 
 /// What the inbox list needs to match `cards` after `sent` (the cards this connection sent): a
-/// delete for each card that left, an upsert for each new or changed card, and the whole list
-/// when the last card left or the first send finds none (the empty state). The first send also
-/// names the pending cards, so cards decided while the page was offline leave. Unchanged cards
-/// send nothing, so a draft in the form of a card is never touched.
+/// delete for each card that left, an upsert for each new or changed card, and the empty state
+/// after the last card left. A first send that finds none sends the whole (empty) list. The first
+/// send also names the pending cards, so cards decided while the page was offline leave.
+/// Unchanged cards send nothing, so a draft in the form of a card is never touched. A card
+/// decided on this page ignores its delete and keeps its answer, also beside the empty state.
 fn list_updates(
     sent: &mut BTreeMap<RequestId, String>,
     cards: &[CardData],
     first: bool,
 ) -> Vec<Markup> {
-    if cards.is_empty() {
-        let had_cards = !sent.is_empty();
+    if cards.is_empty() && first {
         sent.clear();
-        return if had_cards || first {
-            vec![partial("#request-list", "outerMorph", request_list(cards))]
-        } else {
-            Vec::new()
-        };
+        return vec![partial("#request-list", "outerMorph", request_list(cards))];
     }
     let mut updates: Vec<Markup> = sent
         .keys()
@@ -700,6 +702,9 @@ fn list_updates(
     if first {
         // A reconnect: the page may still show cards decided while it was offline.
         updates.push(keep_partial(cards));
+    }
+    if cards.is_empty() && !sent.is_empty() {
+        updates.push(partial("#request-list", "beforeend", empty_state()));
     }
     sent.retain(|id, _| cards.iter().any(|c| c.row.id == *id));
     // Last first: each card's anchor is then on the page or sent before it.

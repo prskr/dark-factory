@@ -900,6 +900,30 @@ fn new_cards_are_sent_last_first_so_each_anchor_is_on_the_page() {
 }
 
 #[test]
+fn the_last_card_leaving_sends_a_delete_so_a_card_decided_on_the_page_keeps_its_answer() {
+    let card = push_check_card(json!([]));
+    let mut sent = std::collections::BTreeMap::new();
+    super::list_updates(&mut sent, std::slice::from_ref(&card), true);
+
+    let updates = super::list_updates(&mut sent, &[], false);
+
+    let html = updates.iter().map(|u| u.0.as_str()).collect::<String>();
+    let delete = format!(r#"data-request-delete="{}""#, super::card_id(card.row.id));
+    assert!(html.contains(&delete), "{html}");
+    assert!(
+        !html.contains("outerMorph"),
+        "the list is not replaced: {html}"
+    );
+    assert!(
+        html.contains(r##"hx-target="#request-list" hx-swap="beforeend""##)
+            && html.contains("data-empty-state"),
+        "the empty state goes beside the kept card: {html}"
+    );
+    assert!(sent.is_empty());
+    assert!(super::list_updates(&mut sent, &[], false).is_empty());
+}
+
+#[test]
 fn the_first_send_names_the_pending_cards_so_stale_ones_leave() {
     let card = push_check_card(json!([]));
     let mut sent = std::collections::BTreeMap::new();

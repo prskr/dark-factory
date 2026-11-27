@@ -185,7 +185,7 @@ When an action or a partial load of the UI fails with an error answer, the UI SH
 
 #### Scenario: Selecting a task fails
 - **WHEN** loading the detail of a task selected in the list fails with a server error
-- **THEN** a "500 Error" toast appears, the open task stays shown and the URL stays the same
+- **THEN** a "500 Error" toast appears, the open task stays shown and marked in the list, and the URL stays the same
 
 #### Scenario: Invalid form unchanged
 - **WHEN** the composer is submitted with an empty description

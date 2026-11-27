@@ -16,7 +16,7 @@
 // released sheet closes, `fullAbove` the share over which it becomes full height (otherwise half),
 // `dragSlop` the pixels a press has to move before it counts as a drag.
 //
-// Methods: `setCollapsed(value)`, `setListCollapsed(value)`, `select(row)`, `sheetToggle()` (tap or keyboard on the handle), and the
+// Methods: `setCollapsed(value)`, `setListCollapsed(value)`, `selected(row, event)`, `sheetToggle()` (tap or keyboard on the handle), and the
 // pointer sequence `sheetDragStart(e)`, `sheetDragMove(e)`, `sheetDragEnd(e)` (pointerup) and
 // `sheetDragCancel(e)` (pointercancel: no click follows, so `dragged` is reset).
 interface SheetDrag {
@@ -50,8 +50,12 @@ document.addEventListener('alpine:init', () => {
       this.listCollapsed = value
       try { localStorage.setItem('df.list.collapsed', value ? '1' : '0') } catch (e) {}
     },
-    // A task row was clicked: show the task pane (phone), close the details and mark the row.
-    select(row: HTMLElement): void {
+    // A swap ended (`htmx:after:swap` on the document, bound by each task row). When it is the
+    // successful load of `row`'s task: show the task pane (phone), close the details and mark the
+    // row. A failed load keeps the open task, so its row and pane stay as they are.
+    selected(row: HTMLElement, event: Event): void {
+      const { ctx } = (event as CustomEvent<{ ctx?: { sourceElement?: Element; response?: { status: number } } }>).detail
+      if (ctx?.sourceElement !== row || !ctx.response || !(ctx.response.status < 400)) return
       document.body.dataset.view = 'task'
       this.details = false
       row.closest('[data-rows]')?.querySelectorAll('[aria-current]').forEach((e) => e.removeAttribute('aria-current'))

@@ -946,6 +946,15 @@ async fn a_failed_selection_shows_a_toast_and_keeps_the_open_task_the_url_and_th
                 .to_contain_text(&first)
                 .await
                 .context("the open task stays shown")?;
+            expect(session.page.locator(format!("#row-{first} a")))
+                .to_have_attribute("aria-current", "page")
+                .await
+                .context("the open task's row stays marked")?;
+            expect(next.clone())
+                .not()
+                .to_have_attribute("aria-current", "page")
+                .await
+                .context("the failed row is not marked")?;
             expect(next)
                 .to_be_focused()
                 .await
