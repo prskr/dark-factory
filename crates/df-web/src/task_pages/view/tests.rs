@@ -2,6 +2,8 @@
 
 use super::*;
 use df_core::Principal;
+use df_core::mcp::McpCallOutcome;
+use df_db::mcp_servers::McpCallRecord;
 use df_db::task_views::TaskListItem;
 
 fn list_item(key: &str) -> TaskListItem {
@@ -414,6 +416,7 @@ fn run(number: i64) -> RunView {
         ended_at: None,
         usage: vec![],
         unknown_usage_requests: 0,
+        mcp_calls: vec![],
     }
 }
 
@@ -829,4 +832,87 @@ fn a_task_row_selects_itself_and_hands_focus_to_the_head_after_loading() {
         html.contains("data-focus-after-swap=\"#task-head\""),
         "{html}"
     );
+}
+
+fn call(
+    server: &str,
+    tool: &str,
+    outcome: McpCallOutcome,
+    minute: i64,
+    millis: i64,
+    sizes: (i64, i64),
+) -> McpCallRecord {
+    McpCallRecord {
+        call_id: uuid::Uuid::now_v7(),
+        run_id: uuid::Uuid::now_v7(),
+        server_name: server.into(),
+        tool: tool.into(),
+        outcome,
+        started_at: Timestamp::from_second(1_800_000_000 + minute * 60).unwrap(),
+        duration_ms: millis,
+        request_bytes: sizes.0,
+        response_bytes: sizes.1,
+    }
+}
+
+#[test]
+fn a_run_with_calls_lists_them_oldest_first_with_outcome_badges_and_sizes() {
+    let mut with_calls = run(8);
+    with_calls.mcp_calls = vec![
+        call(
+            "wiki",
+            "tools/list",
+            McpCallOutcome::Timeout,
+            0,
+            15_000,
+            (0, 0),
+        ),
+        call(
+            "context7",
+            "resolve-library-id",
+            McpCallOutcome::Ok,
+            1,
+            1_200,
+            (400, 3_100),
+        ),
+        call("wiki", "search", McpCallOutcome::Rejected, 4, 0, (200, 0)),
+    ];
+
+    let html = runs_region("DF-1", &[with_calls], None).into_string();
+
+    assert!(html.contains("Tool calls (MCP)"), "{html}");
+    let section = &html[html.find("Tool calls (MCP)").unwrap()..];
+    assert!(section.contains(">3</span>"), "the count: {section}");
+    let order: Vec<usize> = [
+        "wiki · tools/list",
+        "context7__resolve-library-id",
+        "wiki__search",
+    ]
+    .iter()
+    .map(|label| section.find(label).expect(label))
+    .collect();
+    assert!(order.is_sorted(), "{section}");
+    assert!(
+        section.contains("15.0 s · –  → –") || section.contains("15.0 s · – → –"),
+        "{section}"
+    );
+    assert!(section.contains("1.2 s · 0.4 KB → 3.1 KB"), "{section}");
+    assert!(section.contains("0 ms · 0.2 KB → –"), "{section}");
+    for (badge, tone) in [
+        ("timeout", "status-limited"),
+        ("ok", "status-completed"),
+        ("rejected", "status-failed"),
+    ] {
+        assert!(
+            section.contains(&format!("{tone}-bg text-{tone}-fg\">{badge}</span>")),
+            "{badge}: {section}"
+        );
+    }
+}
+
+#[test]
+fn a_run_without_calls_has_no_tool_call_section() {
+    let html = runs_region("DF-1", &[run(1)], None).into_string();
+
+    assert!(!html.contains("Tool calls (MCP)"), "{html}");
 }

@@ -71,7 +71,10 @@ pub(super) async fn page(
             // the fields of the project form around them.
             (crate::egress::project_tab::form_anchor())
             // The subscription editor's form cannot sit inside the project form.
-            @if editing == Editing::AsAdmin { (project_subscriptions::form_anchor()) }
+            @if editing == Editing::AsAdmin {
+                (project_subscriptions::form_anchor())
+                (super::mcp_servers::project_tab::form_anchor(&project.key))
+            }
         },
     );
     layout(
