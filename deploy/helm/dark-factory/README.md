@@ -30,7 +30,7 @@ Every key in `values.yaml` is documented below:
 | `image.runtime.tag` | `string` | `""` | Tag used for the runtime image when `digest` is empty; empty falls back to the chart `appVersion`. |
 | `image.runtime.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.runtime.tag`. |
 | `image.harness.claudeCode.repository` | `string` | `"ghcr.io/prskr/dark-factory/claude-harness"` | OCI repository of the Claude Code harness image (adapter, Node.js, CLI) that sandboxes mount at `/opt/harness/claude-code`. Rendered as `harness.claudeCode.image`. |
-| `image.harness.claudeCode.tag` | `string` | `"0.110.0"` | Tag of the harness image when `digest` is empty (the adapter version). Required when `digest` is empty; the render fails otherwise. |
+| `image.harness.claudeCode.tag` | `string` | `"0.110.1"` | Tag of the harness image when `digest` is empty (the adapter version). Required when `digest` is empty; the render fails otherwise. |
 | `image.harness.claudeCode.digest` | `string` | `""` | Immutable SHA-256 digest (`sha256:...`) overriding `image.harness.claudeCode.tag`. |
 | `image.harness.opencode.repository` | `string` | `"ghcr.io/prskr/dark-factory/opencode-harness"` | OCI repository of the OpenCode harness image (release binary and the musl runtime it needs) that sandboxes mount at `/opt/harness/opencode`. Rendered as `harness.opencode.image`. |
 | `image.harness.opencode.tag` | `string` | `"2.4.2"` | Tag of the OpenCode harness image when `digest` is empty (the OpenCode version). Required when `digest` is empty; the render fails otherwise. |
