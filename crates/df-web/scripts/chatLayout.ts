@@ -12,7 +12,7 @@
 // - `sheet`: height of the phone details sheet, `'half'` or `'full'`.
 // - `dragging`, `drag`, `dragged`: the running drag of the sheet handle (see `workspace.ts`).
 //
-// Methods: `setCollapsed(value)`, `setListCollapsed(value)`, `selected(row, event)`, `sheetToggle()` and the pointer sequence
+// Methods: `setCollapsed(value)`, `setListCollapsed(value)`, `showPane()`, `selected(row, event)`, `sheetToggle()` and the pointer sequence
 // `sheetDragStart(e)`, `sheetDragMove(e)`, `sheetDragEnd(e)` and `sheetDragCancel(e)`.
 //
 // shortcut: the sheet handling repeats `workspace.ts`; merge both once a third workspace needs it.
@@ -47,14 +47,18 @@ document.addEventListener('alpine:init', () => {
       this.listCollapsed = value
       try { localStorage.setItem('df.chat.list.collapsed', value ? '1' : '0') } catch (e) {}
     },
+    // A chat row was clicked: show the chat pane (phone) and close the details. On the click, so
+    // the pane is visible when `focusAfterSwap.ts` focuses its head after the load.
+    showPane(): void {
+      document.body.dataset.view = 'task'
+      this.details = false
+    },
     // A swap ended (`htmx:after:swap` on the document, bound by each chat row). When it is the
-    // successful load of `row`'s chat: show the chat pane (phone), close the details and mark the
-    // row. A failed load keeps the open chat, so its row and pane stay as they are.
+    // successful load of `row`'s chat, mark the row. A failed load keeps the open chat, so its
+    // row stays marked.
     selected(row: HTMLElement, event: Event): void {
       const { ctx } = (event as CustomEvent<{ ctx?: { sourceElement?: Element; response?: { status: number } } }>).detail
       if (ctx?.sourceElement !== row || !ctx.response || !(ctx.response.status < 400)) return
-      document.body.dataset.view = 'task'
-      this.details = false
       row.closest('[data-rows]')?.querySelectorAll('[aria-current]').forEach((e) => e.removeAttribute('aria-current'))
       row.setAttribute('aria-current', 'page')
     },
