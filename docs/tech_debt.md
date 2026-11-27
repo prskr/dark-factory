@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-133.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-134.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -118,7 +118,8 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-129 | low   | design file (PenPot) | Project settings boards keep a white panel in the Dark theme preview |
 | TD-130 | low   | `plugins/forgejo`, `plugins/github` | Both plugins carry the same issue-list page cursor code |
 | TD-131 | low   | `df-web` persona signing key | `verify-key` error statuses for an unknown persona and an unreadable Secret are untested |
-| TD-132 | low   | `df-web` scripts | `select(row)` is duplicated in the task and chat list components |
+| TD-132 | low   | `df-web` scripts | `selected(row, event)` is duplicated in the task and chat list components |
+| TD-133 | low   | `df-web` toasts | An error toast is covered by an open modal dialog |
 
 ## Entries
 
@@ -855,17 +856,30 @@ The README row of `POST /personas/{id}/verify-key` promises two error answers th
 
 Origin of TD-132: code review of `web-htmx-robustness` (`df-web`, 2026-11-27). The `TD-n (ID)` heading gives the ID used in that review.
 
-### TD-132 (S5). `select(row)` is duplicated in the task and chat list components
+### TD-132 (S5). `selected(row, event)` is duplicated in the task and chat list components
 
 `crates/df-web/scripts/workspace.ts`, `crates/df-web/scripts/chatLayout.ts`
 
-Both components carry the same `select(row)`: set `body.dataset.view = 'task'`, close the details, clear the marked row of `row.closest('[data-rows]')` and mark the new one. The test `both_workspaces_clear_the_marked_row_of_their_own_list_only` has to check both copies.
+Both components carry the same `selected(row, event)`: once the row's own load succeeded, set `body.dataset.view = 'task'`, close the details, clear the marked row of `row.closest('[data-rows]')` and mark the new one. The tests `both_workspaces_clear_the_marked_row_of_their_own_list_only` and `both_workspaces_mark_a_row_only_after_its_own_request_succeeded` have to check both copies.
 
 **Matters when:** a third list view needs row selection, or the selection behaviour changes; both copies must change in step.
 
-**Fix:** move `select(row)` into one shared function that both components call, and test it once.
+**Fix:** move `selected(row, event)` into one shared function that both components call, and test it once.
+
+Origin of TD-133: CodeRabbit review of `web-htmx-robustness` ([#404], 2026-11-27).
+
+### TD-133. An error toast is covered by an open modal dialog
+
+`crates/df-web/src/layout.rs` (`Region::Toasts`), `crates/df-web/src/components/overlay.rs` (`dialog()`)
+
+Dialogs open with `showModal()` and sit in the top layer; the toast region (`z-40`) stays below it. An htmx action inside an open dialog that fails with a toast answer (404, 500; not 422, which renders in the dialog) inserts the toast under the dialog, and `HX-Reswap: none` keeps the dialog open: no visible feedback. A modal dialog also makes the region inert, so the toast is not announced either.
+
+**Matters when:** a dialog action can fail with a status other than 422 in practice (a deleted entity, a server error).
+
+**Fix:** keep `#toasts` the single live region, but move it into the topmost `dialog:modal` while one is open (and back on `close`), or open the region as a `popover` above the dialog. Cover it with an e2e test that fails a dialog action.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122
 [#125]: https://github.com/prskr/dark-factory/issues/125
 [#141]: https://github.com/prskr/dark-factory/pull/141
+[#404]: https://github.com/prskr/dark-factory/pull/404

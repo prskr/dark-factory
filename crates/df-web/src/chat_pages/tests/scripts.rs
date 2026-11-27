@@ -19,7 +19,7 @@ fn chat_layout_collapses_both_columns_and_remembers_them_in_this_browser_only() 
     for method in [
         "setCollapsed(value",
         "setListCollapsed(value",
-        "select(row",
+        "selected(row",
         "sheetToggle()",
         "sheetDragStart(",
         "sheetDragEnd(",
@@ -82,7 +82,12 @@ async fn chat_rows_select_themselves_and_hand_focus_to_the_head_after_loading() 
 
     assert!(html.contains("<div id=\"chat-rows\" data-rows>"), "{html}");
     let row = super::row(&html, "DF-1-CHAT");
-    assert!(row.contains("x-on:click=\"select($el)\""), "{row}");
+    // Marked once its chat loaded: a failed load leaves the open chat's row marked.
+    assert!(
+        row.contains("x-on:htmx:after:swap.document=\"selected($el, $event)\""),
+        "{row}"
+    );
+    assert!(!row.contains("x-on:click"), "{row}");
     assert!(!row.contains("querySelectorAll"), "{row}");
     assert!(
         row.contains("data-focus-after-swap=\"#chat-head\""),
@@ -91,10 +96,22 @@ async fn chat_rows_select_themselves_and_hand_focus_to_the_head_after_loading() 
 }
 
 #[test]
+fn both_workspaces_mark_a_row_only_after_its_own_request_succeeded() {
+    for source in ["workspace.ts", "chatLayout.ts"] {
+        let js = script_source(source);
+        assert!(
+            js.contains("selected(row: HTMLElement, event: Event)"),
+            "{source}"
+        );
+        assert!(js.contains("ctx?.sourceElement !== row"), "{source}");
+        assert!(js.contains("status < 400"), "{source}");
+    }
+}
+
+#[test]
 fn both_workspaces_clear_the_marked_row_of_their_own_list_only() {
     for source in ["workspace.ts", "chatLayout.ts"] {
         let js = script_source(source);
-        assert!(js.contains("select(row"), "{source}");
         assert!(js.contains("closest('[data-rows]')"), "{source}");
         assert!(!js.contains("document.querySelectorAll"), "{source}");
     }
