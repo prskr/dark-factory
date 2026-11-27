@@ -173,6 +173,18 @@ impl TaskStatus {
     /// `completed`. For SQL like [`Self::DONE`].
     pub const SUBTASK_DONE: &'static [Self] = &[Self::InReview, Self::Completed];
 
+    /// The statuses in which a task can need a board member (`task-ui`, "Needs you"). `in_review`
+    /// needs you only if the task is no subtask, or has a pull request or a pending pull-request
+    /// job, and its parent agent does not merge it (`subtask_merge: parent-agent`, base task =
+    /// parent, parent not final); the list query decides that, see `task-list-tree` design D3.
+    /// For SQL like [`Self::DONE`].
+    pub const MAY_NEED_YOU: &'static [Self] = &[
+        Self::Waiting,
+        Self::Blocked,
+        Self::LimitReached,
+        Self::InReview,
+    ];
+
     pub const fn group(&self) -> StatusGroup {
         // Every variant is named, so a new one fails to compile until it is grouped; a test pins
         // `DONE` to the `Done` arm.
@@ -828,6 +840,19 @@ mod tests {
             .collect();
         assert_eq!(done, TaskStatus::DONE.iter().collect::<Vec<_>>());
         assert_eq!(TaskStatus::DONE, StatusSet::Done.statuses());
+    }
+
+    #[test]
+    fn the_statuses_that_may_need_you_are_pinned() {
+        assert_eq!(
+            TaskStatus::MAY_NEED_YOU,
+            [
+                TaskStatus::Waiting,
+                TaskStatus::Blocked,
+                TaskStatus::LimitReached,
+                TaskStatus::InReview
+            ]
+        );
     }
 
     #[test]

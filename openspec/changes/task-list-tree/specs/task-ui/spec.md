@@ -37,7 +37,7 @@ With a status chip selected (Active, Done or All), the task list SHALL list only
 
 #### Scenario: Done parent with a waiting subtask
 - **WHEN** a board member marked `DF-30` done while its subtask `DF-31` is still open, and `DF-31` becomes `waiting`
-- **THEN** Active lists `DF-30` with the needs-you dot until `DF-31` no longer needs you
+- **THEN** Active lists `DF-30` with the needs-you dot, its struck-through title and the status line "1 subtask needs you" until `DF-31` no longer needs you
 
 #### Scenario: Project counter link
 - **WHEN** `/tasks?status=waiting` is opened and subtask `DF-31` is `waiting`
@@ -63,7 +63,7 @@ A row listed below an open task or in a scoped list, whose task has subtasks, SH
 
 #### Scenario: Second level
 - **WHEN** `DF-12` is open and a board member activates the control of its subtask `DF-17`, whose subtasks are `DF-21` and `DF-22`
-- **THEN** the list shows `DF-17` with `DF-21` and `DF-22` below it and the breadcrumb "Tasks › DF-12 › DF-17"
+- **THEN** the list shows `DF-17` with `DF-21` and `DF-22` below it and the breadcrumb "Tasks › DF-12 › DF-17", and the row of `DF-17` has no disclosure control
 
 #### Scenario: Back up one level
 - **WHEN** the list is scoped to `DF-22`, a subtask of `DF-17`, and a board member activates "DF-17" in the breadcrumb
@@ -123,7 +123,7 @@ A row SHALL show the needs-you dot when its task or any task below it needs you,
 
 #### Scenario: Running parent
 - **WHEN** `DF-12` is `running` and one task below it needs you
-- **THEN** `DF-12` shows the dot and the status line "1 subtask needs you"
+- **THEN** `DF-12` shows the dot before its key, no badge, and the status line "1 subtask needs you"
 
 #### Scenario: Failed parent
 - **WHEN** `DF-8` is `failed` and two tasks below it need you

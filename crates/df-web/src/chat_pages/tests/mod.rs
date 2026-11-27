@@ -78,7 +78,4 @@ fn between<'a>(html: &'a str, marker: &str, end: &str) -> &'a str {
     &rest[..rest.find(end).map_or(rest.len(), |at| at + end.len())]
 }
 
-/// The row of the chat in the list.
-fn row<'a>(html: &'a str, key: &str) -> &'a str {
-    between(html, &format!("<li id=\"row-{key}\""), "</li>")
-}
+pub(super) use crate::testkit::row;

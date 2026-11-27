@@ -100,6 +100,13 @@ pub fn build_connect_options(cfg: &DatabaseConfig) -> Result<PgConnectOptions, D
         .password(password.expose_secret()))
 }
 
+/// A stored key that does not parse is invalid database data.
+impl From<df_core::KeyError> for DbError {
+    fn from(error: df_core::KeyError) -> Self {
+        Self::InvalidData(error.to_string())
+    }
+}
+
 /// Creates a [`PgPool`] from [`DatabaseConfig`] that sets `search_path` to `cfg.schema` on every connection.
 pub async fn connect_pool(cfg: &DatabaseConfig) -> Result<PgPool, DbError> {
     let schema = validate_sql_identifier(&cfg.schema)?.to_string();
@@ -135,6 +142,13 @@ mod tests {
     use df_core::config::MigrateRoleConfig;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn a_malformed_stored_task_key_is_invalid_database_data() {
+        let error: DbError = "not a key".parse::<df_core::TaskKey>().unwrap_err().into();
+
+        assert!(matches!(error, DbError::InvalidData(_)), "{error}");
+    }
 
     #[test]
     fn validates_sql_identifiers() {

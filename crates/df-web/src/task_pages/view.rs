@@ -2,13 +2,14 @@
 //! the composer. Handlers live in the parent module; the live-update regions (`#task-head`,
 //! `#task-details`, `#runs`, `#pending`, `#task-rows`) are re-rendered by `crate::sse`.
 
-use df_core::{RunState, StatusSet, TITLE_MAX_CHARS, TaskSort, TaskStatus, TitleSource};
+use df_core::{RunState, StatusSet, TITLE_MAX_CHARS, TaskKey, TaskSort, TaskStatus, TitleSource};
 use df_db::TaskMessageRow;
-use df_db::task_views::{ProjectFilterItem, RunView, TaskDetail, TaskListItem};
+use df_db::task_views::{ProjectFilterItem, RunView, TaskDetail};
 use jiff::Timestamp;
 use maud::{Markup, html};
 
 use super::resume::{ResumeNote, clock_label};
+use super::tree::{TaskList, breadcrumb, task_rows};
 use crate::components::AvatarSize;
 use crate::components::QueuedState;
 use crate::components::forms::{INPUT_CLASS, MenuItem};
@@ -97,6 +98,12 @@ impl StatusFilter {
         }
     }
 
+    /// Whether the list shows the task tree (top-level rows that open): the filters with a chip.
+    /// The link-only filters list every matching task, subtasks included, as flat rows.
+    pub(crate) const fn lists_tree(self) -> bool {
+        matches!(self, Self::Active | Self::Done | Self::All)
+    }
+
     pub(crate) const fn group(self) -> Option<StatusSet> {
         match self {
             Self::Active => Some(StatusSet::Active),
@@ -115,6 +122,10 @@ pub(crate) struct Filters {
     pub status: StatusFilter,
     pub project: Option<String>,
     pub sort: TaskSort,
+    /// Keys of the top-level rows that show their subtasks (`open=DF-12,DF-14`).
+    pub open: Vec<TaskKey>,
+    /// Key of the task the list is scoped to (`parent=DF-17`).
+    pub parent: Option<TaskKey>,
 }
 
 impl Filters {
@@ -123,6 +134,28 @@ impl Filters {
             status: StatusFilter::parse(status),
             project: project.filter(|p| !p.is_empty()).map(str::to_string),
             sort: sort.map_or_default(TaskSort::from_query),
+            open: Vec::new(),
+            parent: None,
+        }
+    }
+
+    /// These filters with the `open` (comma-separated keys) and `parent` query values. Malformed
+    /// keys are dropped like an unknown `status`, and a key is kept once.
+    pub(crate) fn with_tree(self, open: Option<&str>, parent: Option<&str>) -> Self {
+        let mut keys: Vec<TaskKey> = Vec::new();
+        for key in open
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|key| key.parse().ok())
+        {
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+        Self {
+            open: keys,
+            parent: parent.and_then(|key| key.parse().ok()),
+            ..self
         }
     }
 
@@ -130,6 +163,10 @@ impl Filters {
         df_db::task_views::TaskFilter {
             group: self.status.group(),
             project_key: self.project.clone(),
+            scope: self
+                .status
+                .lists_tree()
+                .then_some(df_db::task_views::ListScope::TopLevel),
             sort: self.sort,
         }
     }
@@ -145,6 +182,13 @@ impl Filters {
         }
         if self.sort != TaskSort::default() {
             parts.push(format!("sort={}", self.sort.as_query()));
+        }
+        if !self.open.is_empty() {
+            let keys: Vec<String> = self.open.iter().map(ToString::to_string).collect();
+            parts.push(format!("open={}", keys.join(",")));
+        }
+        if let Some(parent) = &self.parent {
+            parts.push(format!("parent={parent}"));
         }
         if parts.is_empty() {
             String::new()
@@ -168,6 +212,39 @@ impl Filters {
         }
     }
 
+    /// These filters with `key` opened, or closed when it is open.
+    pub(super) fn toggled(&self, key: &TaskKey) -> Self {
+        let mut open = self.open.clone();
+        match open.iter().position(|k| k == key) {
+            Some(at) => {
+                open.remove(at);
+            }
+            None => open.push(key.clone()),
+        }
+        Self {
+            open,
+            ..self.clone()
+        }
+    }
+
+    /// These filters scoped to `key`; the open rows of the full list don't carry over.
+    pub(super) fn scoped_to(&self, key: &TaskKey) -> Self {
+        Self {
+            open: Vec::new(),
+            parent: Some(key.clone()),
+            ..self.clone()
+        }
+    }
+
+    /// The list of top-level tasks with only `open` open: the target of the breadcrumb.
+    pub(super) fn unscoped_with_open(&self, open: Option<&TaskKey>) -> Self {
+        Self {
+            open: open.cloned().into_iter().collect(),
+            parent: None,
+            ..self.clone()
+        }
+    }
+
     fn with_project(&self, project: Option<&str>) -> Self {
         Self {
             project: project.map(str::to_string),
@@ -183,52 +260,8 @@ impl Filters {
     }
 }
 
-/// The rows of the task list; replaced as a whole when a task changes. `current` is the open
-/// task. Clicking a row swaps the transcript and details of that task in without touching the
-/// list; once that load succeeded the phone shows the task pane and `aria-current` moves, which
-/// the live morph ignores (see `layout`).
-pub(crate) fn task_rows(
-    items: &[TaskListItem],
-    current: Option<&str>,
-    filters: &Filters,
-) -> Markup {
-    let query = filters.query();
-    html! {
-        ul id=(Region::TaskRows.id()) data-rows {
-            @for t in items {
-                @let href = format!("/tasks/{}{}", t.key, query);
-                @let status = status_of(&t.status);
-                @let resume_at = shown_resume_time(status, t.resume_at);
-                li id={"row-" (t.key)} {
-                    a href=(href) hx-get=(href) hx-target=(Region::WsDetail.selector()) hx-select=(Region::WsDetail.selector()) hx-swap="outerHTML" hx-push-url="true"
-                        data-focus-after-swap=(Region::TaskHead.selector())
-                        aria-current=[(current == Some(t.key.as_str())).then_some("page")]
-                        "x-on:htmx:after:swap.document"="selected($el, $event)"
-                        class="block min-h-11 border-b border-line border-l-[3px] border-l-transparent py-3.5 pr-5 pl-[17px] hover:bg-sunk aria-[current=page]:border-l-accent aria-[current=page]:bg-accent-soft" {
-                        div class="flex items-center gap-2" {
-                            span class="font-mono text-xs text-faint" { (t.key) }
-                            @if let Some(status) = status { (status_badge(status)) } @else { (tone_badge(Tone::Queued, &t.status)) }
-                            (super::subtasks::chip(t.subtasks))
-                            div class="ml-auto flex items-center gap-1.5" {
-                                (persona_avatar(Some(t.persona_id), &t.persona_display_name, AvatarSize::Row))
-                                time datetime=(t.updated_at.to_string()) class="font-mono text-xs text-faint" { (short_time(t.updated_at)) }
-                            }
-                        }
-                        div title=(t.title) class={"mt-0.5 truncate text-[15px] font-medium" @if t.title_source == TitleSource::Placeholder { " italic text-muted" }} { (t.title) }
-                        @if let Some(at) = resume_at {
-                            div class="mt-0.5 truncate text-xs text-muted" { "Resumes at " (clock_label(at, Timestamp::now())) }
-                        } @else if !t.status_line.is_empty() { div class="mt-0.5 truncate text-xs text-muted" { (t.status_line) } }
-                        div class="mt-1 text-xs text-faint" { (t.project_name) " · " (t.persona_display_name) }
-                    }
-                }
-            }
-            @if items.is_empty() { li { (empty_list(filters)) } }
-        }
-    }
-}
-
 /// The resume time a task row shows: only for a status that waits for it.
-fn shown_resume_time(
+pub(super) fn shown_resume_time(
     status: Option<TaskStatus>,
     resume_at: Option<Timestamp>,
 ) -> Option<Timestamp> {
@@ -236,7 +269,7 @@ fn shown_resume_time(
 }
 
 /// What the task list says when no task matches the filters.
-fn empty_list(filters: &Filters) -> Markup {
+pub(super) fn empty_list(filters: &Filters) -> Markup {
     // The way out is every task: no status and no project filter.
     let filtered = filters.status != StatusFilter::All || filters.project.is_some();
     let title = match (filters.status, &filters.project) {
@@ -270,7 +303,7 @@ fn empty_list(filters: &Filters) -> Markup {
 /// The list column: title row with the project menu, status chips, the live list and its stream.
 /// `shell` is the signed-in board member and version, shown as the profile menu on phones.
 pub(crate) fn list_column(
-    items: &[TaskListItem],
+    list: &TaskList,
     projects: &[ProjectFilterItem],
     filters: &Filters,
     current: Option<&str>,
@@ -306,21 +339,26 @@ pub(crate) fn list_column(
         .collect();
     let events = format!("/tasks/events{}", filters.query());
     html! {
-        section class="ws-list" aria-label="Tasks" {
+        section id=(Region::TaskList.id()) class="ws-list" aria-label="Tasks" {
             // From 768 px the list collapses to this strip (`listCollapsed` of the workspace).
             div class="ws-list-strip flex-col items-center py-3" {
                 button type="button" aria-label="Expand task list" "x-on:click"="setListCollapsed(false)" class=(ICON_BUTTON_CLASS) { (icon(Icon::PanelLeft)) }
             }
             div class="ws-list-full space-y-3 border-b border-line p-4" {
                 div class="flex items-center justify-between gap-2" {
-                    h1 class="text-lg font-semibold" { "Tasks" }
-                    div class="ml-auto flex items-center gap-1" {
-                        (icon_menu(Icon::ArrowDownUp, filters.sort.label(), &sorts))
-                        div class="hidden md:block" { (search_menu(menu_label, &menu)) }
+                    @if list.scoped {
+                        (breadcrumb(list, filters, &base))
+                    } @else {
+                        h1 class="text-lg font-semibold" { "Tasks" }
+                        div class="ml-auto flex items-center gap-1" {
+                            (icon_menu(Icon::ArrowDownUp, filters.sort.label(), &sorts))
+                            div class="hidden md:block" { (search_menu(menu_label, &menu)) }
+                        }
                     }
                     button type="button" aria-label="Collapse task list" "x-on:click"="setListCollapsed(true)" class={(ICON_BUTTON_CLASS) " max-md:hidden"} { (icon(Icon::PanelLeft)) }
                     (phone_profile_menu(shell))
                 }
+                @if !list.scoped {
                 div class="flex flex-wrap items-center gap-2" {
                     @for status in StatusFilter::CHIPS {
                         (filter_chip(status.label(), &href(&filters.with_status(status)), filters.status == status))
@@ -335,10 +373,11 @@ pub(crate) fn list_column(
                         }
                     }
                 }
+                }
             }
             div class="ws-list-full min-h-0 flex-1 overflow-y-auto pb-22 md:pb-0" {
                 div hx-sse:connect=(events) hx-swap="none" {}
-                (task_rows(items, current, filters))
+                (task_rows(list, current, filters))
             }
         }
     }
@@ -1149,7 +1188,7 @@ pub(crate) fn status_name(status: TaskStatus) -> String {
     status.as_str().replace('_', " ")
 }
 
-fn status_of(item: &str) -> Option<TaskStatus> {
+pub(super) fn status_of(item: &str) -> Option<TaskStatus> {
     item.parse().ok()
 }
 

@@ -90,12 +90,8 @@ pub async fn open_subtasks(
     .await?;
     rows.into_iter()
         .map(|row| {
-            let key = row
-                .key
-                .parse()
-                .map_err(|e: df_core::KeyError| DbError::InvalidData(e.to_string()))?;
             Ok(OpenSubtask {
-                key,
+                key: row.key.parse()?,
                 pr_url: row.pr_url,
             })
         })

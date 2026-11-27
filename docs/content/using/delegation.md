@@ -202,8 +202,8 @@ for a task in no dependency.
 
 A task with subtasks has a **Subtasks** tab: how many of its direct subtasks are done, a progress
 bar and a row per subtask (status ring, title, key and status, and the done/total chip of a subtask
-with subtasks of its own). In the task list a task with subtasks shows `done/total` next to its
-status: done counts the subtasks that are in review or done, total those that are not cancelled.
+with subtasks of its own). In the task list a top-level task with subtasks shows `done/total` next
+to its key and opens to its subtasks ([Tasks](tasks.md#subtasks-in-the-list)): done counts the subtasks that are in review or done, total those that are not cancelled.
 Both update when a subtask changes status or is created. Cancelling a task also cancels its open
 descendants ([Tasks](tasks.md#interrupt-stop-mark-done-cancel)).
 

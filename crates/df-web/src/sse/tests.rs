@@ -5,7 +5,9 @@ use axum::http::{Request, header};
 use df_core::{TaskId, TaskStatus};
 use serde_json::json;
 
-use crate::testkit::{SseReader, TestApp, add_event, chunk, insert_run, new_task, seed};
+use crate::testkit::{
+    Seed, SseReader, TestApp, add_event, chunk, insert_run, new_subtask, new_task, row, seed,
+};
 
 /// Deadline for updates that a notification triggers; it must stay well below the poll, which
 /// would otherwise mask a missing notification arm.
@@ -15,6 +17,7 @@ const _: () = assert!(LIVE.as_millis() * 2 <= super::POLL.as_millis());
 struct Fixture {
     app: TestApp,
     cookie: String,
+    seed: Seed,
     task: TaskId,
     run: uuid::Uuid,
 }
@@ -31,6 +34,7 @@ async fn fixture_with(app: TestApp) -> Fixture {
     Fixture {
         app,
         cookie,
+        seed,
         task,
         run,
     }
@@ -752,11 +756,9 @@ async fn task_list_stream_shows_status_changes_within_two_seconds() {
 
     crate::testkit::set_task_status(&f.app.pool, f.task, TaskStatus::Running).await;
     let frame = sse.next_within(Duration::from_secs(2)).await;
-    assert!(
-        frame.data.contains(">running<") && !frame.data.contains(">queued<"),
-        "{}",
-        frame.data
-    );
+    // `running` has no badge: the row is still listed and lost the `queued` one.
+    let row = row(&frame.data, "DF-1");
+    assert!(!row.contains(">queued<"), "{row}");
 }
 
 /// Adds tasks DF-2, DF-3, … to the project of the fixture's task, in this order.
@@ -813,7 +815,6 @@ async fn a_status_change_of_an_older_task_keeps_its_place_in_a_list_sorted_by_cr
     crate::testkit::set_task_status(&f.app.pool, f.task, TaskStatus::Running).await;
 
     let frame = sse.next_within(Duration::from_secs(2)).await;
-    assert!(frame.data.contains(">running<"), "{}", frame.data);
     assert_eq!(
         order(&frame.data),
         ["DF-3", "DF-2", "DF-1"],
@@ -1068,4 +1069,80 @@ async fn a_released_task_leaves_the_waiting_list_without_a_reload() {
 
     let left = waiting.next_within(LIVE).await;
     assert!(!left.data.contains("row-DF-2"), "{}", left.data);
+}
+
+#[tokio::test]
+async fn a_subtask_of_an_open_row_changes_live_and_stays_below_its_parent() {
+    let f = fixture().await;
+    let subtask = new_subtask(&f.app.pool, &f.seed, "subtask", f.task)
+        .await
+        .id;
+    let mut sse = f.events("/tasks/events?open=DF-1").await;
+    let first = sse.next().await;
+    assert!(row_position(&first.data, "DF-1") < row_position(&first.data, "DF-2"));
+    assert!(row(&first.data, "DF-2").contains(">queued<"));
+
+    crate::testkit::set_task_status(&f.app.pool, subtask, TaskStatus::Running).await;
+
+    let frame = sse.next_within(Duration::from_secs(2)).await;
+    assert!(
+        row_position(&frame.data, "DF-1") < row_position(&frame.data, "DF-2"),
+        "{}",
+        frame.data
+    );
+    assert!(
+        !row(&frame.data, "DF-2").contains(">queued<"),
+        "{}",
+        frame.data
+    );
+}
+
+#[tokio::test]
+async fn a_subtask_two_levels_down_that_becomes_blocked_adds_the_dot_to_every_row_above_it() {
+    let f = fixture().await;
+    let middle = new_subtask(&f.app.pool, &f.seed, "middle", f.task).await.id;
+    let nested = new_subtask(&f.app.pool, &f.seed, "nested", middle).await.id;
+    let mut sse = f.events("/tasks/events?open=DF-1").await;
+    let first = sse.next().await;
+    assert!(
+        !row(&first.data, "DF-1").contains("needs you")
+            && !row(&first.data, "DF-2").contains("needs you"),
+        "{}",
+        first.data
+    );
+
+    crate::testkit::set_task_status(&f.app.pool, nested, TaskStatus::Blocked).await;
+
+    let frame = sse.next_within(Duration::from_secs(2)).await;
+    for key in ["DF-1", "DF-2"] {
+        assert!(
+            row(&frame.data, key).contains("aria-label=\"1 subtask needs you\""),
+            "{key}: {}",
+            frame.data
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_listed_subtask_of_a_scoped_list_changes_live() {
+    let f = fixture().await;
+    let subtask = new_subtask(&f.app.pool, &f.seed, "subtask", f.task)
+        .await
+        .id;
+    let mut sse = f.events("/tasks/events?parent=DF-1").await;
+    let first = sse.next().await;
+    assert!(
+        !row(&first.data, "DF-2").contains("Needs you"),
+        "{}",
+        first.data
+    );
+
+    crate::testkit::set_task_status(&f.app.pool, subtask, TaskStatus::Waiting).await;
+
+    let frame = sse.next_within(Duration::from_secs(2)).await;
+    assert!(
+        row(&frame.data, "DF-2").contains("aria-label=\"Needs you\""),
+        "{}",
+        frame.data
+    );
 }

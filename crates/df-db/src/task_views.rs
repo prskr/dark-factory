@@ -2,8 +2,8 @@
 //! usage records) and the transcript.
 
 use df_core::{
-    DependencyKind, Principal, RunState, StatusSet, TaskId, TaskSort, TaskStatus, TitleSource,
-    is_satisfied,
+    DependencyKind, Principal, RunState, StatusSet, TaskId, TaskKey, TaskSort, TaskStatus,
+    TitleSource, is_satisfied,
 };
 use df_proto::transcript::v1::Event;
 use jiff::Timestamp;
@@ -11,6 +11,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::pool::DbError;
+use crate::tasks::PR_SYNC_KIND;
 
 /// How far the direct subtasks of a task are (`task-ui`, "Subtask progress on task rows"): done
 /// counts those `in_review` or `completed`, total those that are not `cancelled`.
@@ -38,7 +39,7 @@ impl SubtaskProgress {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskListItem {
     pub id: Uuid,
-    pub key: String,
+    pub key: TaskKey,
     pub title: String,
     /// `Placeholder` while the title is provisional.
     pub title_source: TitleSource,
@@ -54,6 +55,12 @@ pub struct TaskListItem {
     pub resume_at: Option<Timestamp>,
     /// Progress of the direct subtasks; total 0 for a task without subtasks.
     pub subtasks: SubtaskProgress,
+    /// The task has direct subtasks, cancelled ones included (`subtasks.total` leaves them out).
+    pub has_subtasks: bool,
+    /// The task itself needs a board member (`task-ui`, "Needs you").
+    pub needs_you: bool,
+    /// How many tasks below this one, at any depth, need a board member.
+    pub needs_you_below: i64,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -74,6 +81,9 @@ struct TaskListRow {
     resume_at: Option<jiff_sqlx::Timestamp>,
     subtasks_done: i64,
     subtasks_total: i64,
+    has_subtasks: bool,
+    needs_you: bool,
+    needs_you_below: i64,
     created_at: Timestamp,
     updated_at: Timestamp,
 }
@@ -84,7 +94,7 @@ impl TryFrom<TaskListRow> for TaskListItem {
     fn try_from(row: TaskListRow) -> Result<Self, DbError> {
         Ok(Self {
             id: row.id,
-            key: row.key,
+            key: row.key.parse()?,
             title: row.title,
             title_source: row.title_source.parse()?,
             project_key: row.project_key,
@@ -99,27 +109,77 @@ impl TryFrom<TaskListRow> for TaskListItem {
                 done: row.subtasks_done,
                 total: row.subtasks_total,
             },
+            has_subtasks: row.has_subtasks,
+            needs_you: row.needs_you,
+            needs_you_below: row.needs_you_below,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
     }
 }
 
+/// Which level of the task tree the list shows (`task-list-tree` design D2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListScope {
+    /// Tasks without a parent task: a task created in a chat counts as top level.
+    TopLevel,
+    /// The direct subtasks of a task, whatever their status or project.
+    SubtasksOf(TaskId),
+    /// The task with this key, which a scoped list shows first; nothing for an unknown key.
+    Task(TaskKey),
+}
+
 /// Which tasks the list shows; the default is all of them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskFilter {
-    /// Only tasks whose status is in this set.
+    /// Only tasks whose status is in this set. Ignored for [`ListScope::SubtasksOf`] and
+    /// [`ListScope::Task`].
     pub group: Option<StatusSet>,
-    /// Only tasks of the project with this key.
+    /// Only tasks of the project with this key. Ignored like `group`.
     pub project_key: Option<String>,
+    /// The tree level; `None` lists every task, subtasks included (the link-only status filters).
+    pub scope: Option<ListScope>,
     /// The order of the rows.
     pub sort: TaskSort,
 }
 
+/// What a [`TaskFilter`] binds in the list query.
+#[derive(Default)]
+struct Selection<'a> {
+    statuses: Option<Vec<String>>,
+    project_key: Option<&'a str>,
+    subtasks_of: Option<Uuid>,
+    top_level: bool,
+    key: Option<String>,
+    /// Active also keeps a final top-level task while a task below it needs you.
+    keeps_finished: bool,
+}
+
 impl TaskFilter {
-    /// The status names of the group, or `None` for every status.
-    fn statuses(&self) -> Option<Vec<String>> {
-        self.group.map(statuses_of)
+    /// The arguments of the query. A scope that picks tasks by their place in the tree
+    /// ([`ListScope::SubtasksOf`], [`ListScope::Task`]) ignores the status group and the project.
+    fn selection(&self) -> Selection<'_> {
+        let by_filters = || Selection {
+            statuses: self.group.map(statuses_of),
+            project_key: self.project_key.as_deref(),
+            ..Selection::default()
+        };
+        match &self.scope {
+            Some(ListScope::SubtasksOf(parent)) => Selection {
+                subtasks_of: Some(parent.as_uuid()),
+                ..Selection::default()
+            },
+            Some(ListScope::Task(key)) => Selection {
+                key: Some(key.to_string()),
+                ..Selection::default()
+            },
+            Some(ListScope::TopLevel) => Selection {
+                top_level: true,
+                keeps_finished: self.group == Some(StatusSet::Active),
+                ..by_filters()
+            },
+            None => by_filters(),
+        }
     }
 }
 
@@ -348,11 +408,17 @@ pub struct StoredEvent {
 
 /// The tasks matching `filter` in the order of `filter.sort`. Ties are ordered by task ID in the
 /// direction of the sort, so rows with the same time keep their place between calls.
+///
+/// A task needs you (`needs_you`, `needs_you_below`; `task-ui` "Needs you") when it is in one of
+/// `TaskStatus::MAY_NEED_YOU`, and, if `in_review`, is not a subtask without a pull request or pending
+/// pull-request job, or its parent agent merges it. The pull-request part repeats the one of
+/// `tasks::tree::open_subtasks`; a test runs both against the same tasks. The Active list also
+/// keeps a top-level task in a final status while a task below it needs you.
 pub async fn list_task_items(
     pool: &PgPool,
     filter: &TaskFilter,
 ) -> Result<Vec<TaskListItem>, DbError> {
-    let statuses = filter.statuses();
+    let selection = filter.selection();
     sqlx::query_as!(
         TaskListRow,
         r#"
@@ -361,17 +427,49 @@ pub async fn list_task_items(
                ps.display_name AS persona_display_name,
                t.status, t.status_line, t.resume_at,
                COALESCE(sub.done, 0) AS "subtasks_done!", COALESCE(sub.total, 0) AS "subtasks_total!",
+               COALESCE(sub.all_subtasks, 0) > 0 AS "has_subtasks!",
+               COALESCE(nb.own, 0) > 0 AS "needs_you!", COALESCE(nb.below, 0) AS "needs_you_below!",
                t.created_at, t.updated_at
         FROM tasks t
         JOIN projects p ON p.id = t.project_id
         JOIN personas ps ON ps.id = t.persona_id
+        LEFT JOIN tasks tp ON tp.id = t.parent_id
         LEFT JOIN LATERAL (
             SELECT count(*) FILTER (WHERE s.status = ANY($4)) AS done,
-                   count(*) FILTER (WHERE s.status <> 'cancelled') AS total
+                   count(*) FILTER (WHERE s.status <> 'cancelled') AS total,
+                   count(*) AS all_subtasks
             FROM tasks s WHERE s.parent_id = t.id
         ) sub ON true
+        LEFT JOIN LATERAL (
+            WITH RECURSIVE tree AS (
+                SELECT t.id, 0 AS depth
+                UNION ALL
+                SELECT c.id, tr.depth + 1 FROM tasks c JOIN tree tr ON c.parent_id = tr.id
+            )
+            SELECT count(*) FILTER (WHERE tr.depth = 0) AS own,
+                   count(*) FILTER (WHERE tr.depth > 0) AS below
+            FROM tree tr
+            JOIN tasks x ON x.id = tr.id
+            JOIN projects xp ON xp.id = x.project_id
+            LEFT JOIN tasks xparent ON xparent.id = x.parent_id AND xparent.kind = 'task'
+            WHERE x.status = ANY($5)
+              AND (x.status <> 'in_review'
+                   OR (NOT (xparent.id IS NOT NULL AND x.pr_number IS NULL
+                            AND NOT EXISTS (
+                                SELECT 1 FROM outbox o
+                                WHERE o.kind = $6 AND o.payload ->> 'task_id' = x.id::text
+                                  AND (o.payload ->> 'open')::boolean
+                                  AND o.done_at IS NULL AND o.gave_up_at IS NULL))
+                       AND NOT COALESCE(xp.subtask_merge = 'parent-agent'
+                                        AND x.base_task_id = x.parent_id
+                                        AND xparent.status <> ALL($7), false)))
+        ) nb ON true
         WHERE t.kind = 'task'
-          AND ($1::text[] IS NULL OR t.status = ANY($1))
+          AND ($8::uuid IS NULL OR t.parent_id = $8)
+          AND ($11::text IS NULL OR t.key = $11)
+          AND (NOT $9 OR t.parent_id IS NULL OR tp.kind = 'chat')
+          AND ($1::text[] IS NULL OR t.status = ANY($1)
+               OR ($10 AND t.status = ANY($7) AND nb.below > 0))
           AND ($2::text IS NULL OR p.key = $2)
         ORDER BY CASE WHEN $3 = 'updated_desc' THEN t.updated_at END DESC,
                  CASE WHEN $3 = 'updated_asc' THEN t.updated_at END ASC,
@@ -379,15 +477,70 @@ pub async fn list_task_items(
                  CASE WHEN $3 = 'updated_asc' THEN t.id END ASC,
                  t.id DESC
         "#,
-        statuses.as_deref(),
-        filter.project_key,
+        selection.statuses.as_deref(),
+        selection.project_key,
         order_key(filter.sort),
-        &status_list(TaskStatus::SUBTASK_DONE)
+        &status_list(TaskStatus::SUBTASK_DONE),
+        &status_list(TaskStatus::MAY_NEED_YOU),
+        PR_SYNC_KIND,
+        &status_list(TaskStatus::DONE),
+        selection.subtasks_of,
+        selection.top_level,
+        selection.keeps_finished,
+        selection.key
     )
     .fetch_all(pool)
     .await?
     .into_iter()
     .map(TaskListItem::try_from)
+    .collect()
+}
+
+/// A task above another one, a link of the breadcrumb of a scoped list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ancestor {
+    pub key: TaskKey,
+    pub title: String,
+}
+
+struct AncestorRow {
+    key: String,
+    title: String,
+}
+
+impl TryFrom<AncestorRow> for Ancestor {
+    type Error = DbError;
+
+    fn try_from(row: AncestorRow) -> Result<Self, DbError> {
+        Ok(Self {
+            key: row.key.parse()?,
+            title: row.title,
+        })
+    }
+}
+
+/// The tasks above `id`, the parent first and the top-level task last. It stops below a chat
+/// parent (the chat is no task of the list); an unknown `id` has none (`task-list-tree` D4).
+pub async fn ancestors(pool: &PgPool, id: TaskId) -> Result<Vec<Ancestor>, DbError> {
+    sqlx::query_as!(
+        AncestorRow,
+        r#"
+        WITH RECURSIVE up AS (
+            SELECT p.key, p.title, p.parent_id, 1 AS depth
+            FROM tasks s JOIN tasks p ON p.id = s.parent_id AND p.kind = 'task'
+            WHERE s.id = $1
+            UNION ALL
+            SELECT p.key, p.title, p.parent_id, up.depth + 1
+            FROM up JOIN tasks p ON p.id = up.parent_id AND p.kind = 'task'
+        )
+        SELECT key AS "key!", title AS "title!" FROM up ORDER BY depth
+        "#,
+        id.as_uuid()
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(Ancestor::try_from)
     .collect()
 }
 
@@ -772,384 +925,4 @@ pub async fn project_status_counts(pool: &PgPool) -> Result<Vec<ProjectStatusCou
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use df_core::TaskStatus;
-
-    async fn seed(pool: &PgPool) -> (TaskId, Uuid) {
-        let project = Uuid::now_v7();
-        let persona = Uuid::now_v7();
-        sqlx::query(
-            "INSERT INTO projects (id, key, name, repo_url, image) VALUES ($1, 'DF', 'Dark Factory', 'https://g/o/r.git', 'img')",
-        )
-        .bind(project)
-        .execute(pool)
-        .await
-        .unwrap();
-        crate::model_providers::tests::seed_provider(pool).await;
-        sqlx::query("INSERT INTO personas (id, display_name, handle, commit_email, system_prompt, model, model_provider_id) VALUES ($1, 'Linus', 'linus', 'linus@example.org', 'p', 'test-model', (SELECT id FROM model_providers LIMIT 1))")
-            .bind(persona)
-            .execute(pool)
-            .await
-            .unwrap();
-        let (task, _) = crate::create_task(
-            pool,
-            crate::NewTask {
-                project_id: df_core::ProjectId::from_uuid(project),
-                persona_id: df_core::PersonaId::from_uuid(persona),
-                title: Some("Fix login".into()),
-                description: String::new(),
-                issue_number: Some(7),
-                created_by: Principal::system("test"),
-                parent_id: None,
-                depends_on: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
-        let run = Uuid::now_v7();
-        sqlx::query("INSERT INTO runs (id, task_id, number, state) VALUES ($1, $2, 1, 'running')")
-            .bind(run)
-            .bind(task.id.as_uuid())
-            .execute(pool)
-            .await
-            .unwrap();
-        (task.id, run)
-    }
-
-    async fn insert_event(
-        pool: &PgPool,
-        task: TaskId,
-        run: Uuid,
-        seq: i64,
-        kind: &str,
-        payload: serde_json::Value,
-    ) -> i64 {
-        sqlx::query_scalar(
-            "INSERT INTO transcript_events (task_id, run_id, seq, occurred_at, kind, payload)
-             VALUES ($1, $2, $3, now(), $4, $5) RETURNING id",
-        )
-        .bind(task.as_uuid())
-        .bind(run)
-        .bind(seq)
-        .bind(kind)
-        .bind(payload)
-        .fetch_one(pool)
-        .await
-        .unwrap()
-    }
-
-    /// A gateway usage record; without a model its usage is unknown.
-    async fn insert_usage(
-        pool: &PgPool,
-        run: Uuid,
-        model: Option<&str>,
-        input: i64,
-        output: i64,
-        cache_read: i64,
-    ) {
-        sqlx::query(
-            "INSERT INTO model_usage (request_id, run_id, recorded_at, model, wire_api, input_tokens, output_tokens, cache_read_tokens, usage_known)
-             VALUES ($1, $2, now(), $3, 'anthropic-messages', $4, $5, $6, $7)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(run)
-        .bind(model)
-        .bind(input)
-        .bind(output)
-        .bind(cache_read)
-        .bind(model.is_some())
-        .execute(pool)
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn lists_tasks_details_runs_usage_and_transcript() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (task, run) = seed(&pool).await;
-
-        let list = list_task_items(&pool, &TaskFilter::default())
-            .await
-            .unwrap();
-        assert_eq!(
-            (list[0].key.as_str(), list[0].status.as_str()),
-            ("DF-1", "queued")
-        );
-        let detail = get_task_detail_by_key(&pool, "DF-1")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            (detail.project_key.as_str(), detail.issue_number),
-            ("DF", Some(7))
-        );
-        assert_eq!(
-            get_task_detail(&pool, task).await.unwrap().unwrap().id,
-            detail.id
-        );
-        assert!(
-            get_task_detail_by_key(&pool, "DF-9")
-                .await
-                .unwrap()
-                .is_none()
-        );
-
-        let ended = || serde_json::json!({"turnEnded": {}});
-        let first = insert_event(&pool, task, run, 1, "turn_ended", ended()).await;
-        insert_event(&pool, task, run, 2, "turn_ended", ended()).await;
-        insert_event(&pool, task, run, 3, "turn_ended", ended()).await;
-        for (input, model) in [(10, "opus"), (20, "opus"), (1, "haiku")] {
-            insert_usage(&pool, run, Some(model), input, 5, 2).await;
-        }
-        insert_usage(&pool, run, None, 0, 0, 0).await;
-        insert_usage(&pool, run, None, 0, 0, 0).await;
-        let last = insert_event(&pool, task, run, 4, "bogus", serde_json::json!({"nope": 1})).await;
-
-        let runs = list_runs(&pool, task).await.unwrap();
-        assert_eq!(runs.len(), 1);
-        let opus = runs[0].usage.iter().find(|u| u.model_id == "opus").unwrap();
-        assert_eq!(
-            (
-                opus.input_tokens,
-                opus.output_tokens,
-                opus.cache_read_tokens,
-                opus.cache_write_tokens
-            ),
-            (30, 10, 4, 0)
-        );
-        assert_eq!(runs[0].usage.len(), 2);
-        assert_eq!(runs[0].unknown_usage_requests, 2);
-
-        let all = transcript_after(&pool, task, 0, 100).await.unwrap();
-        assert_eq!(all.len(), 4);
-        assert!(all[0].event.is_some());
-        assert!(all[3].event.is_none());
-        let tail = transcript_after(&pool, task, first, 100).await.unwrap();
-        assert_eq!(tail.first().map(|e| e.id), Some(first + 1));
-        assert_eq!(tail.last().map(|e| e.id), Some(last));
-        assert_eq!(transcript_after(&pool, task, 0, 2).await.unwrap().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn turn_ends_stored_with_the_removed_usage_fields_still_decode() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (task, run) = seed(&pool).await;
-        let old = serde_json::json!({
-            "schemaVersion": 1,
-            "turnEnded": {
-                "stopReason": "STOP_REASON_END_TURN",
-                "usage": [{"modelId": "opus", "inputTokens": "10"}],
-                "usageSource": 1
-            }
-        });
-        insert_event(&pool, task, run, 1, "turn_ended", old).await;
-
-        let rows = transcript_after(&pool, task, 0, 10).await.unwrap();
-
-        let Some(Event {
-            kind: Some(df_proto::transcript::v1::event::Kind::TurnEnded(ended)),
-            ..
-        }) = &rows[0].event
-        else {
-            panic!("the old turn end does not decode: {:?}", rows[0].event);
-        };
-        assert_eq!(
-            ended.stop_reason(),
-            df_proto::transcript::v1::StopReason::EndTurn
-        );
-    }
-
-    #[tokio::test]
-    async fn lists_runs_newest_first() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (task, _) = seed(&pool).await;
-        sqlx::query(
-            "INSERT INTO runs (id, task_id, number, state) VALUES ($1, $2, 2, 'succeeded')",
-        )
-        .bind(Uuid::now_v7())
-        .bind(task.as_uuid())
-        .execute(&pool)
-        .await
-        .unwrap();
-        let numbers: Vec<i64> = list_runs(&pool, task)
-            .await
-            .unwrap()
-            .iter()
-            .map(|r| r.number)
-            .collect();
-        assert_eq!(numbers, [2, 1]);
-    }
-
-    /// Three tasks with chosen times: DF-1 updated last, DF-2 and DF-3 with the same update time,
-    /// and a creation order (DF-3, DF-1, DF-2) unlike the order of the IDs, so that the sorts
-    /// and the tie breaker (ID) can be told apart.
-    async fn seed_sorted_tasks(pool: &PgPool) {
-        seed(pool).await;
-        let (project, persona): (Uuid, Uuid) =
-            sqlx::query_as("SELECT project_id, persona_id FROM tasks")
-                .fetch_one(pool)
-                .await
-                .unwrap();
-        for title in ["Second", "Third"] {
-            crate::create_task(
-                pool,
-                crate::NewTask {
-                    project_id: df_core::ProjectId::from_uuid(project),
-                    persona_id: df_core::PersonaId::from_uuid(persona),
-                    title: Some(title.into()),
-                    description: String::new(),
-                    issue_number: None,
-                    created_by: Principal::system("test"),
-                    parent_id: None,
-                    depends_on: Vec::new(),
-                },
-            )
-            .await
-            .unwrap();
-        }
-        for (key, created, updated) in [("DF-1", 10, 50), ("DF-2", 20, 20), ("DF-3", 0, 20)] {
-            sqlx::query(
-                "UPDATE tasks SET created_at = '2026-11-01T00:00:00Z'::timestamptz + make_interval(mins => $2::int),
-                                  updated_at = '2026-11-01T00:00:00Z'::timestamptz + make_interval(mins => $3::int)
-                 WHERE key = $1",
-            )
-            .bind(key)
-            .bind(created)
-            .bind(updated)
-            .execute(pool)
-            .await
-            .unwrap();
-        }
-    }
-
-    #[tokio::test]
-    async fn lists_tasks_in_each_sort_with_a_stable_tie_order() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        seed_sorted_tasks(&pool).await;
-        let keys = |sort| {
-            let pool = pool.clone();
-            async move {
-                list_task_items(
-                    &pool,
-                    &TaskFilter {
-                        sort,
-                        ..TaskFilter::default()
-                    },
-                )
-                .await
-                .unwrap()
-                .into_iter()
-                .map(|t| t.key)
-                .collect::<Vec<_>>()
-            }
-        };
-
-        // The default is the last update, newest first.
-        assert_eq!(TaskFilter::default().sort, TaskSort::Updated);
-        // Every variant, so a sort whose key the query does not know cannot pass: it would fall
-        // through to the tie breaker alone (newest ID first).
-        for sort in TaskSort::ALL {
-            let expected = match sort {
-                // DF-2 and DF-3 tie on the update time; the tie breaks by ID, newest first.
-                TaskSort::Updated => ["DF-1", "DF-3", "DF-2"],
-                TaskSort::UpdatedAsc => ["DF-2", "DF-3", "DF-1"],
-                TaskSort::Created => ["DF-2", "DF-1", "DF-3"],
-            };
-            assert_eq!(keys(sort).await, expected, "{sort:?}");
-        }
-    }
-
-    #[tokio::test]
-    async fn the_sort_keeps_the_status_and_project_filters() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        seed_sorted_tasks(&pool).await;
-        let filter = TaskFilter {
-            group: Some(StatusSet::Active),
-            project_key: Some("DF".into()),
-            sort: TaskSort::UpdatedAsc,
-        };
-        let keys: Vec<_> = list_task_items(&pool, &filter)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|t| t.key)
-            .collect();
-        assert_eq!(keys, ["DF-2", "DF-3", "DF-1"]);
-    }
-
-    #[tokio::test]
-    async fn filters_tasks_by_status_group_and_project_and_counts_per_project() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (task, _) = seed(&pool).await;
-        sqlx::query("INSERT INTO projects (id, key, name, repo_url, image) VALUES ($1, 'WEB', 'Website', 'https://g/o/w.git', 'img')")
-            .bind(Uuid::now_v7())
-            .execute(&pool)
-            .await
-            .unwrap();
-        let by = |group, project: Option<&str>| TaskFilter {
-            group,
-            project_key: project.map(str::to_string),
-            ..TaskFilter::default()
-        };
-
-        let active = list_task_items(&pool, &by(Some(StatusSet::Active), None))
-            .await
-            .unwrap();
-        let done = list_task_items(&pool, &by(Some(StatusSet::Done), None))
-            .await
-            .unwrap();
-        let web = list_task_items(&pool, &by(None, Some("WEB")))
-            .await
-            .unwrap();
-        let df = list_task_items(&pool, &by(None, Some("DF"))).await.unwrap();
-        assert_eq!(
-            (active.len(), done.len(), web.len(), df.len()),
-            (1, 0, 0, 1)
-        );
-
-        crate::task_events::set_status_for_test(&pool, task, TaskStatus::Completed).await;
-        let active = list_task_items(&pool, &by(Some(StatusSet::Active), None))
-            .await
-            .unwrap();
-        let done = list_task_items(&pool, &by(Some(StatusSet::Done), None))
-            .await
-            .unwrap();
-        assert_eq!((active.len(), done.len()), (0, 1));
-
-        let counts = list_project_filter_items(&pool, Some(StatusSet::Done))
-            .await
-            .unwrap();
-        let counts: Vec<_> = counts
-            .iter()
-            .map(|p| (p.key.as_str(), p.task_count))
-            .collect();
-        assert_eq!(counts, [("DF", 1), ("WEB", 0)]);
-        let all = list_project_filter_items(&pool, None).await.unwrap();
-        assert_eq!(all[0].task_count, 1);
-    }
-
-    #[tokio::test]
-    async fn narrower_sets_and_counts_per_project_and_status() {
-        let pool = df_test_postgres::migrated_pool(&crate::MIGRATOR).await;
-        let (task, _) = seed(&pool).await;
-        let by = |set| TaskFilter {
-            group: Some(set),
-            project_key: None,
-            ..TaskFilter::default()
-        };
-        crate::task_events::set_status_for_test(&pool, task, TaskStatus::RateLimited).await;
-        let running = list_task_items(&pool, &by(StatusSet::Running))
-            .await
-            .unwrap();
-        let queued = list_task_items(&pool, &by(StatusSet::Queued))
-            .await
-            .unwrap();
-        assert_eq!((running.len(), queued.len()), (1, 0));
-
-        let counts = project_status_counts(&pool).await.unwrap();
-        assert_eq!(counts.len(), 1);
-        assert_eq!(counts[0].status, "rate_limited");
-        assert_eq!(counts[0].count, 1);
-    }
-}
+mod tests;

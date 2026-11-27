@@ -58,8 +58,9 @@ counts hold tasks only; [chats](chats.md) have their own pages under **Chats**.
   direct subtasks are done (in review or done, cancelled ones left out), as "2 of 3 done" with a
   percentage and a progress bar, and one row per subtask with a status ring, the title, its key
   and status, and a done/total chip when the subtask has subtasks of its own. The same chip sits
-  next to the status badge of a task row in the list (`2/3`); subtasks stay ordinary rows of the
-  flat list. Both update live ([delegation](delegation.md#in-the-task-view)).
+  next to the key of a task row in the list (`2/3`); the list shows subtasks
+  [below their parent](#subtasks-in-the-list). Both update live
+  ([delegation](delegation.md#in-the-task-view)).
 - **Artifacts**: once the agent has written an [artifact](artifacts.md), the details get an
   Artifacts tab with a card per artifact; an artifact opens next to the transcript.
 
@@ -162,7 +163,56 @@ text.
 The list's filters group them: *Active* (the default) is every task that is not done, *Done*
 (`completed`, `cancelled`, `failed`) holds the rest, and *All* shows both. The *Waiting* counter of a
 project (`awaiting_dependencies`, `waiting`, `blocked`, `in_review`, `limit_reached`) links to the
-narrower `?status=waiting` filter, which has no chip.
+narrower `?status=waiting` filter, which has no chip. The counters' links (`waiting`, `queued`,
+`running`) list every matching task, subtasks included, as flat rows without a disclosure control.
+
+## Subtasks in the list
+
+With a status chip selected (*Active*, *Done* or *All*), the list shows top-level tasks only: tasks
+without a parent and tasks created in a [chat](chats.md). The status and project filters select among
+them. *Active* also keeps a top-level task in a final status while a task below it
+[needs you](#what-needs-you), so a finished feature with an open question stays in sight.
+
+- **Open a task.** A task with subtasks has a chevron in the left gutter of its row (`›` closed, `˅`
+  open; named "Show subtasks of DF-12" or "Hide subtasks of DF-12"). It lists the task's direct
+  subtasks right below it, indented one level and in the list's sort order, whatever the status
+  filter. The open rows are part of the URL (`open=DF-12,DF-14`), stay open across live updates and
+  reloads, and are kept by the status chips and the sort. A task whose subtasks are all cancelled
+  has the chevron and lists them, but shows no `done/total` chip.
+- **Go deeper.** A listed subtask that has subtasks of its own has a chevron too ("Open subtasks of
+  DF-17"). It scopes the list to that task (`parent=DF-17`): the task first, its direct subtasks
+  below it, and a breadcrumb instead of the chips and the project menu, for example
+  `Tasks › DF-12 › DF-17`. "Tasks" leads back to the list with the status, project and sort from
+  before, the top-level task to that list with the task open, every other ancestor to the list scoped
+  to it, and the last key is plain text. The scoped list updates live. An unknown key shows the
+  top-level list.
+
+Opening a task does not open it in the task view: select the row for that. Opening `/tasks/DF-22`
+directly shows the top-level list; the details name the task's parent as a link.
+
+### Status cues on a row
+
+A row shows no badge for `running` and for `completed`, and a completed task's title is struck
+through. Every other status keeps its badge (`queued`, `failed`, `cancelled`, `rate limited`, ...).
+A task that needs you shows a dot before its key (named "Needs you") instead of a badge.
+
+A row whose own task does not need you but has a task below it that does shows the dot next to its
+own cue and the status line "1 subtask needs you" ("2 subtasks need you"), at any depth, so a
+collapsed row still tells. A resume time ("Resumes at ...") replaces that line. The dot updates live.
+
+### What needs you
+
+A task needs you when it is `waiting`, `blocked` or `limit_reached` (a limit does not resume by
+itself; a message continues it), or when it is `in_review`, except:
+
+- a subtask in review with no pull request and no pending job that opens one (a research subtask
+  that only reports back), and
+- a subtask whose pull request its parent agent merges: the project's **Subtask merges** setting is
+  *Parent agent*, the subtask's base task is its parent, and the parent is not done, failed or
+  cancelled ([delegation](delegation.md#merge-subtask-pull-requests)). With *Human* merges, or after
+  the parent was cancelled, you merge it and it needs you.
+
+A top-level task in review needs you with or without a pull request.
 
 ## Sort order
 
