@@ -68,7 +68,7 @@ gRPC adds a dependency and a listener and gains nothing, because the probe would
 
 No allow rule for the health ports. Kubernetes NetworkPolicy always allows traffic from the pod's own node, which is where the kubelet probes from; an `ipBlock` for node CIDRs would also open the port to every pod with `hostNetwork` on any node and needs a cluster-specific value. Pods of the release namespace and the sandboxes cannot reach the port because no rule names it.
 
-Cilium (checked in `cilium/cilium` main, `pkg/option/config.go` and `daemon/cmd/daemon.go`): `allow-localhost` defaults to `auto`, which becomes `always` on Kubernetes, so traffic from the local host reaches the pods and probes work. Only a cluster set to `allow-localhost: policy` needs a `CiliumNetworkPolicy` with `fromEntities: [host]` for the health port; `remote-node` is not needed and would open the port to other nodes. The chart renders no Cilium objects; the Helm README and the security page say what to add.
+Cilium (checked in `cilium/cilium` branch `main` on 2026-11-27, `pkg/option/config.go` and `daemon/cmd/daemon.go`): `allow-localhost` defaults to `auto`, which becomes `always` on Kubernetes, so traffic from the local host reaches the pods and probes work. Only a cluster set to `allow-localhost: policy` needs a `CiliumNetworkPolicy` with `fromEntities: [host]` for the health port; `remote-node` is not needed and would open the port to other nodes. The chart renders no Cilium objects; the Helm README and the security page say what to add.
 
 Node traffic also includes pods with `hostNetwork` on the same node: they can reach the health port. They can call `/readyz`, nothing more.
 

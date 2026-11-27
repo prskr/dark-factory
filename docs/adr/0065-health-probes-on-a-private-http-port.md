@@ -14,7 +14,7 @@ The control plane and the gateway serve `/healthz` (liveness, no dependency) and
 
 ## Consequences
 
-- Probes are unreachable from the ingress, from other pods and from sandboxes; only node traffic reaches them, which includes `hostNetwork` pods on the same node. `/readyz` may ping the database on every call.
+- Probes are unreachable from the ingress, and, with the chart's NetworkPolicies on (`networkPolicy.enabled`), from other pods and from sandboxes; only node traffic reaches them, which includes `hostNetwork` pods on the same node. `/readyz` may ping the database on every call.
 - One more port in the control plane's values (`controlPlane.ports.health`).
 - A CNI that applies policy to host traffic needs a rule for the health port (documented, not rendered).
 - External uptime checks can no longer use `/healthz` through the ingress.

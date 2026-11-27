@@ -28,8 +28,8 @@ The control plane serves `/healthz` and `/readyz` on its UI port (`controlPlane.
 
 ## Impact
 
-- **Code:** `crates/df-core/src/config.rs` (`ServerConfig::health_port`), `crates/df-web/src/lib.rs` (probe routes leave `base_router`, own health router), `crates/dark-factory/src/main.rs` (health listener of `serve`, tests), `crates/df-gateway` (no behavior change, docs only).
-- **Helm:** `values.yaml`, `values.schema.json`, `templates/configmap.yaml`, `templates/control-plane-deployment.yaml`, `tests/control_plane_test.yaml`, `README.md`. The new value `controlPlane.ports.health` has a default, so existing values files need no change (Helm merges value maps); the breaking part is that the probe paths left the UI port.
+- **Code:** `crates/df-core/src/config.rs` (`ServerConfig::health_port`), `crates/df-web/src/lib.rs` (probe routes leave `base_router`, own health router), `crates/dark-factory/src/main.rs` (health listener of `serve`, bind error context for `serve` and `gateway`, tests), `crates/df-gateway` (a test only, no behavior change), `docs/authorization.md`.
+- **Helm:** `values.yaml`, `values.schema.json`, `templates/configmap.yaml`, `templates/control-plane-deployment.yaml`, `tests/control_plane_test.yaml`, `tests/gateway_test.yaml`, `README.md`. The new value `controlPlane.ports.health` has a default, so existing values files need no change (Helm merges value maps); the breaking part is that the probe paths left the UI port.
 - **Dependencies:** none added (no `tonic-health`).
 - **E2E and local dev:** nothing waits on the control plane's `/healthz` outside Kubernetes probes; `helm --wait` in `deploy/e2e/e2e-local.sh` follows the readiness probe and needs no change. `compose.yml` is not affected. `just serve-local` opens the health port on `8081`.
 - **Domain model:** unchanged (no glossary term added or changed). Adds ADR-0065 "Health probes on a private HTTP port".
