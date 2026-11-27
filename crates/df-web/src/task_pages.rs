@@ -4,6 +4,7 @@
 mod dependencies;
 mod resume;
 mod subtasks;
+mod tree;
 mod view;
 
 use axum::extract::{Form, FromRequestParts, MatchedPath, Path, Query, State};
@@ -37,9 +38,10 @@ use crate::transcript::{Folder, render_transcript};
 pub(crate) use dependencies::dependencies_region;
 pub(crate) use resume::ResumeNote;
 pub(crate) use subtasks::tab_panel as subtasks_panel;
+pub(crate) use tree::{load_list, task_rows};
 pub(crate) use view::{
     CancelNote, Choices, Filters, TaskForm, composer_action, details_region, head_region,
-    interruptible, list_column, message_area, pending_region, runs_region, status_name, task_rows,
+    interruptible, list_column, message_area, pending_region, runs_region, status_name,
 };
 use view::{composer_dialog, composer_form, details_column};
 
@@ -76,6 +78,8 @@ pub(crate) struct ListQuery {
     status: Option<String>,
     project: Option<String>,
     sort: Option<String>,
+    open: Option<String>,
+    parent: Option<String>,
 }
 
 impl ListQuery {
@@ -85,6 +89,7 @@ impl ListQuery {
             self.project.as_deref(),
             self.sort.as_deref(),
         )
+        .with_tree(self.open.as_deref(), self.parent.as_deref())
     }
 }
 
@@ -151,11 +156,10 @@ async fn workspace(
     filters: &Filters,
     selected: Option<Selected>,
 ) -> Response {
-    let filter = filters.to_db();
-    let list = df_db::task_views::list_task_items(&state.pool, &filter);
+    let list = load_list(&state.pool, filters);
     let projects =
         df_db::task_views::list_project_filter_items(&state.pool, filters.status.group());
-    let (items, projects) = match tokio::try_join!(list, projects) {
+    let (list, projects) = match tokio::try_join!(list, projects) {
         Ok(loaded) => loaded,
         Err(e) => return internal_error(&e),
     };
@@ -170,7 +174,7 @@ async fn workspace(
         // `collapsed` (the details column of 1280 px and more) is remembered in this browser.
         div class="ws" ":data-collapsed"="collapsed" ":data-list-collapsed"="listCollapsed" "x-on:keydown.escape.window"="details = false"
             x-data="workspace" {
-            (list_column(&items, &projects, filters, current, &shell))
+            (list_column(&list, &projects, filters, current, &shell))
             div id=(Region::WsDetail.id()) x-data=[selected.as_ref().map(|s| crate::artifacts::split_args(&s.detail.key))] {
                 @match &selected {
                     Some(s) => (selected_columns(s)),

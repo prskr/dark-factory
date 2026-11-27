@@ -2,12 +2,13 @@
 
 use super::*;
 use df_core::Principal;
+use df_db::task_views::TaskListItem;
 
 fn list_item(key: &str) -> TaskListItem {
     let at: Timestamp = "2026-10-03T04:05:06Z".parse().unwrap();
     TaskListItem {
         id: uuid::Uuid::nil(),
-        key: key.to_owned(),
+        key: key.parse().unwrap(),
         title: "Fix login".to_owned(),
         title_source: TitleSource::User,
         project_key: "DF".to_owned(),
@@ -19,16 +20,282 @@ fn list_item(key: &str) -> TaskListItem {
         status_line: String::new(),
         resume_at: None,
         subtasks: df_db::task_views::SubtaskProgress { done: 0, total: 0 },
+        has_subtasks: false,
+        needs_you: false,
+        needs_you_below: 0,
         created_at: at,
         updated_at: at,
     }
+}
+
+fn key(key: &str) -> TaskKey {
+    key.parse().unwrap()
+}
+
+fn rows_of(items: Vec<TaskListItem>, filters: &Filters) -> String {
+    task_rows(&TaskList::of(items), None, filters).into_string()
+}
+
+fn item_in(key: &str, status: &str) -> TaskListItem {
+    TaskListItem {
+        status: status.to_owned(),
+        ..list_item(key)
+    }
+}
+
+#[test]
+fn a_running_task_shows_no_badge_and_a_completed_one_a_struck_through_title() {
+    let filters = Filters::default();
+
+    let running = rows_of(vec![item_in("DF-14", "running")], &filters);
+    let done = rows_of(vec![item_in("DF-10", "completed")], &filters);
+
+    assert!(!running.contains("rounded-full px-2"), "{running}");
+    assert!(!done.contains("rounded-full px-2"), "{done}");
+    assert!(
+        done.contains("line-through") && !running.contains("line-through"),
+        "{done}"
+    );
+}
+
+#[test]
+fn a_task_that_needs_you_shows_the_dot_in_place_of_its_badge() {
+    let waiting = TaskListItem {
+        needs_you: true,
+        ..item_in("DF-14", "waiting")
+    };
+
+    let html = rows_of(vec![waiting], &Filters::default());
+
+    assert!(html.contains("aria-label=\"Needs you\""), "{html}");
+    assert!(!html.contains(">waiting<"), "{html}");
+}
+
+#[test]
+fn the_other_statuses_keep_their_badge() {
+    for status in ["failed", "cancelled", "queued", "rate_limited"] {
+        let html = rows_of(vec![item_in("DF-8", status)], &Filters::default());
+        assert!(
+            html.contains(&format!(">{}<", status.replace('_', " "))),
+            "{status}: {html}"
+        );
+    }
+}
+
+#[test]
+fn a_row_with_tasks_below_that_need_you_shows_the_dot_and_counts_them() {
+    let one = TaskListItem {
+        needs_you_below: 1,
+        ..item_in("DF-12", "running")
+    };
+    let two = TaskListItem {
+        needs_you_below: 2,
+        ..item_in("DF-12", "running")
+    };
+
+    let one = rows_of(vec![one], &Filters::default());
+    let two = rows_of(vec![two], &Filters::default());
+
+    assert!(one.contains("aria-label=\"1 subtask needs you\""), "{one}");
+    assert!(one.contains(">1 subtask needs you<"), "{one}");
+    assert!(two.contains(">2 subtasks need you<"), "{two}");
+    assert!(
+        one.find("role=\"img\"").unwrap() < one.find(">DF-12<").unwrap(),
+        "the dot comes before the key: {one}"
+    );
+    assert!(!one.contains(">running<"), "{one}");
+}
+
+#[test]
+fn a_failed_row_with_tasks_below_that_need_you_shows_the_badge_and_the_dot() {
+    let failed = TaskListItem {
+        needs_you_below: 2,
+        ..item_in("DF-8", "failed")
+    };
+
+    let html = rows_of(vec![failed], &Filters::default());
+
+    assert!(
+        html.contains(">failed<") && html.contains("role=\"img\""),
+        "{html}"
+    );
+    assert!(html.contains(">2 subtasks need you<"), "{html}");
+}
+
+#[test]
+fn a_resume_time_wins_over_the_needs_you_text() {
+    let limited = TaskListItem {
+        needs_you_below: 1,
+        resume_at: Some("2099-01-01T00:00:00Z".parse().unwrap()),
+        ..item_in("DF-9", "rate_limited")
+    };
+
+    let html = rows_of(vec![limited], &Filters::default());
+
+    assert!(html.contains("Resumes at"), "{html}");
+    assert!(!html.contains(">1 subtask needs you<"), "{html}");
+}
+
+#[test]
+fn a_top_level_row_with_subtasks_has_a_disclosure_link_named_for_its_state() {
+    let parent = TaskListItem {
+        subtasks: df_db::task_views::SubtaskProgress { done: 1, total: 2 },
+        has_subtasks: true,
+        ..item_in("DF-12", "running")
+    };
+    let none = item_in("DF-14", "running");
+    let filters = Filters::default();
+
+    let closed = rows_of(vec![parent.clone(), none], &filters);
+    let mut list = TaskList::of(vec![parent]);
+    list.subtasks
+        .insert(key("DF-12"), vec![item_in("DF-13", "completed")]);
+    let open = task_rows(&list, None, &Filters::default().toggled(&key("DF-12"))).into_string();
+
+    let control = crate::testkit::tag_around(&closed, "aria-label=\"Show subtasks of DF-12\"");
+    assert!(
+        control.contains("aria-expanded=\"false\"") && control.contains("href=\"?open=DF-12\""),
+        "{control}"
+    );
+    assert!(!closed.contains("subtasks of DF-14"), "{closed}");
+    let control = crate::testkit::tag_around(&open, "aria-label=\"Hide subtasks of DF-12\"");
+    assert!(
+        control.contains("aria-expanded=\"true\"") && control.contains("href=\"?\""),
+        "{control}"
+    );
+    assert!(open.contains("row-DF-13"), "{open}");
+}
+
+#[test]
+fn a_row_whose_subtasks_are_all_cancelled_has_a_disclosure_link_but_no_chip() {
+    let parent = TaskListItem {
+        has_subtasks: true,
+        ..item_in("DF-12", "running")
+    };
+
+    let html = rows_of(vec![parent], &Filters::default());
+
+    assert!(
+        html.contains("aria-label=\"Show subtasks of DF-12\""),
+        "{html}"
+    );
+    assert!(!html.contains("data-subtasks"), "{html}");
+}
+
+#[test]
+fn a_running_row_without_tasks_below_that_need_you_shows_no_dot_and_its_own_status_line() {
+    let running = TaskListItem {
+        status_line: "Running cargo test".to_owned(),
+        ..item_in("DF-14", "running")
+    };
+
+    let html = rows_of(vec![running], &Filters::default());
+
+    assert!(
+        !html.contains("role=\"img\" aria-label=\"Needs you\""),
+        "{html}"
+    );
+    assert!(!html.contains("subtask"), "{html}");
+    assert!(html.contains(">Running cargo test<"), "{html}");
+}
+
+#[test]
+fn a_listed_subtask_with_subtasks_has_a_scope_link() {
+    let parent = TaskListItem {
+        has_subtasks: true,
+        ..item_in("DF-12", "running")
+    };
+    let subtask = TaskListItem {
+        has_subtasks: true,
+        ..item_in("DF-17", "running")
+    };
+    let mut list = TaskList::of(vec![parent]);
+    list.subtasks.insert(key("DF-12"), vec![subtask]);
+    let filters = Filters::default().toggled(&key("DF-12"));
+
+    let html = task_rows(&list, None, &filters).into_string();
+
+    let control = crate::testkit::tag_around(&html, "aria-label=\"Open subtasks of DF-17\"");
+    assert!(
+        control.contains("href=\"?parent=DF-17\"") && !control.contains("aria-expanded"),
+        "{control}"
+    );
+    // The scoped list shows DF-17 on top without a control: focus goes to its row link.
+    assert!(
+        control.contains("data-focus-after-swap=\"#row-DF-17 &gt; a\""),
+        "{control}"
+    );
+    // A disclosure control stays in its row: focus comes back to it.
+    let disclosure = crate::testkit::tag_around(&html, "aria-label=\"Hide subtasks of DF-12\"");
+    assert!(
+        disclosure.contains("data-focus-after-swap=\"#control-DF-12\""),
+        "{disclosure}"
+    );
+}
+
+#[test]
+fn the_chevrons_are_centred_on_the_key_line_and_leave_a_gap_before_the_key() {
+    let parent = TaskListItem {
+        has_subtasks: true,
+        ..item_in("DF-12", "running")
+    };
+    let subtask = TaskListItem {
+        has_subtasks: true,
+        ..item_in("DF-17", "running")
+    };
+    let mut list = TaskList::of(vec![parent]);
+    list.subtasks.insert(key("DF-12"), vec![subtask]);
+    let filters = Filters::default().toggled(&key("DF-12"));
+
+    let html = task_rows(&list, None, &filters).into_string();
+
+    // The key line is 20 px high below 14 px (top level) or 12 px (subtask) of padding; the 44 px
+    // control is moved down by the difference. The 16 px chevron ends 8 px before the key.
+    let disclosure = crate::testkit::tag_around(&html, "aria-label=\"Hide subtasks of DF-12\"");
+    assert!(
+        disclosure.contains("left-0") && disclosure.contains("top-0.5"),
+        "{disclosure}"
+    );
+    let top_link = crate::testkit::tag_around(crate::testkit::row(&html, "DF-12"), "hx-push-url");
+    assert!(top_link.contains("py-3.5 pl-[35px]"), "{top_link}");
+    let scope = crate::testkit::tag_around(&html, "aria-label=\"Open subtasks of DF-17\"");
+    assert!(
+        scope.contains("left-5") && scope.contains("top-0 "),
+        "{scope}"
+    );
+    let sub_link = crate::testkit::tag_around(crate::testkit::row(&html, "DF-17"), "hx-push-url");
+    assert!(sub_link.contains("py-3 pl-[55px]"), "{sub_link}");
+}
+
+#[test]
+fn open_and_parent_keys_are_deduplicated_and_malformed_ones_ignored() {
+    let f = Filters::new(None, None, None).with_tree(Some("DF-12,DF-12,x y"), Some("DF-17"));
+
+    assert_eq!(f.open, [key("DF-12")]);
+    assert_eq!(f.query(), "?open=DF-12&parent=DF-17");
+    assert_eq!(
+        Filters::new(None, None, None)
+            .with_tree(Some("a b"), Some("no key"))
+            .query(),
+        ""
+    );
+}
+
+#[test]
+fn the_chips_keep_the_open_rows() {
+    let f = Filters::new(None, None, None).with_tree(Some("DF-12"), None);
+
+    assert_eq!(
+        f.with_status(StatusFilter::Done).query(),
+        "?status=done&open=DF-12"
+    );
 }
 
 #[test]
 fn a_task_row_shows_the_persona_avatar_labelled_with_its_name_before_the_time() {
     let filters = Filters::new(None, None, None);
 
-    let html = task_rows(&[list_item("DF-21")], None, &filters).into_string();
+    let html = rows_of(vec![list_item("DF-21")], &filters);
 
     let avatar = crate::testkit::tag_around(&html, "aria-label=\"Linus\"");
     assert!(
@@ -544,7 +811,7 @@ fn the_task_head_is_a_focus_target_named_by_a_screen_reader_only_heading() {
 fn a_task_row_selects_itself_and_hands_focus_to_the_head_after_loading() {
     let filters = Filters::new(None, None, None);
 
-    let html = task_rows(&[list_item("DF-21")], None, &filters).into_string();
+    let html = rows_of(vec![list_item("DF-21")], &filters);
 
     // Marked and shown (phone) once its task loaded: a failed load leaves the list, the open
     // task's row and the focus on the row as they are.

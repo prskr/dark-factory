@@ -88,7 +88,8 @@ The pull request of an iteration opens shortly after its run ended. If the coord
 
 The feature task's **Subtasks** tab shows how many iterations are done ("1 of 2 done"), a progress
 bar and a row per iteration with its status. The task list shows `1/2` next to the feature task's
-status. An iteration's details name the feature task as **Parent** and as **Base task**.
+key and opens to the iterations; the feature task's row carries the needs-you dot while an
+iteration waits for you ([Tasks](tasks.md#subtasks-in-the-list)). An iteration's details name the feature task as **Parent** and as **Base task**.
 
 ## Review and merge the feature
 

@@ -32,8 +32,8 @@ use crate::auth::CurrentUser;
 use crate::htmx::{Region, partial};
 use crate::task_pages::{
     CancelNote, ListQuery, ResumeNote, composer_action, dependencies_region, details_region,
-    head_region, interruptible, load_detail, pending_region, runs_region, subtasks_panel,
-    task_rows,
+    head_region, interruptible, load_detail, load_list, pending_region, runs_region,
+    subtasks_panel, task_rows,
 };
 use crate::transcript::{Change, Folder, ItemKind, render_group, render_group_head, render_item};
 
@@ -464,11 +464,11 @@ pub(crate) async fn task_list_events(
         move |state| {
             let filters = filters.clone();
             async move {
-                let items = df_db::task_views::list_task_items(&state.pool, &filters.to_db())
+                let list = load_list(&state.pool, &filters)
                     .await
                     .inspect_err(|error| tracing::warn!(%error, "task list stream failed"))
                     .ok()?;
-                Some(task_rows(&items, None, &filters).into_string())
+                Some(task_rows(&list, None, &filters).into_string())
             }
         },
     )

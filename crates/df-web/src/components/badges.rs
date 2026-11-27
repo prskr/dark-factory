@@ -114,6 +114,15 @@ pub fn status_badge(status: TaskStatus) -> Markup {
     tone_badge(Tone::of_status(status), &status.as_str().replace('_', " "))
 }
 
+/// The dot of a chat or task that needs a board member, named `name` ("Needs you" without one).
+pub fn needs_you_dot(name: Option<&str>) -> Markup {
+    let name = name.unwrap_or("Needs you");
+    html! {
+        span role="img" aria-label=(name) title=(name)
+            class={"inline-block size-2.5 shrink-0 rounded-full " (Tone::Limited.dot_class())} {}
+    }
+}
+
 /// A harness by its product name, shown for a persona.
 pub fn harness_label(harness: &str) -> &str {
     match harness {

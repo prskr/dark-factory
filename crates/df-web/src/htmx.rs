@@ -51,6 +51,8 @@ regions! {
     // The workspace of a task or chat: what live updates and actions replace.
     WsDetail => "ws-detail",
     WsDetailsHeading => "ws-details-heading",
+    // The task list column; its opening and scoping controls swap it whole.
+    TaskList => "task-list",
     TaskRows => "task-rows",
     TaskHead => "task-head",
     TaskDetails => "task-details",

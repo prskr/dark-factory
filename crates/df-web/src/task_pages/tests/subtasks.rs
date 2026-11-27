@@ -6,7 +6,9 @@ use std::time::Duration;
 use df_core::{PersonaId, Principal, ProjectId, TaskId, TaskStatus};
 use df_db::TaskPlacement;
 
-use crate::testkit::{Seed, SseReader, TestApp, new_task, seed, set_task_status, tag_around, text};
+use crate::testkit::{
+    Seed, SseReader, TestApp, new_task, row, seed, set_task_status, tag_around, text,
+};
 
 /// A task of the seeded project with the given parent and base task.
 async fn create(
@@ -188,21 +190,16 @@ async fn task_rows_show_the_done_and_total_chip_only_for_tasks_with_subtasks() {
         set_task_status(&app.pool, child.id, status).await;
     }
 
-    let html = text(app.get("/tasks?status=all", &cookie).await).await;
+    let html = text(app.get("/tasks?status=all&open=DF-1", &cookie).await).await;
 
-    let row = |key: &str| {
-        let start = html.find(&format!(r#"<li id="row-{key}""#)).unwrap();
-        let rest = &html[start..];
-        rest[..rest.find("</li>").unwrap()].to_string()
-    };
-    let feature_row = row("DF-1");
+    let feature_row = row(&html, "DF-1");
     assert!(
         feature_row.contains(r#"data-subtasks="2/3""#),
         "{feature_row}"
     );
     assert!(feature_row.contains(">2/3<"), "{feature_row}");
-    // Subtasks stay ordinary rows of the flat list, without a chip.
-    assert!(!row("DF-2").contains("data-subtasks"));
+    // An open row lists its subtasks below it, without a chip of their own.
+    assert!(!row(&html, "DF-2").contains("data-subtasks"));
 }
 
 #[tokio::test]

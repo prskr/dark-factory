@@ -764,6 +764,25 @@ pub(crate) async fn seed(pool: &PgPool) -> Seed {
 }
 
 pub(crate) async fn new_task(pool: &PgPool, seed: &Seed, title: &str) -> df_db::TaskRow {
+    task_below(pool, seed, title, None).await
+}
+
+/// A task of the seeded project below `parent`.
+pub(crate) async fn new_subtask(
+    pool: &PgPool,
+    seed: &Seed,
+    title: &str,
+    parent: df_core::TaskId,
+) -> df_db::TaskRow {
+    task_below(pool, seed, title, Some(parent)).await
+}
+
+async fn task_below(
+    pool: &PgPool,
+    seed: &Seed,
+    title: &str,
+    parent: Option<df_core::TaskId>,
+) -> df_db::TaskRow {
     df_db::create_task(
         pool,
         df_db::NewTask {
@@ -773,7 +792,7 @@ pub(crate) async fn new_task(pool: &PgPool, seed: &Seed, title: &str) -> df_db::
             description: String::new(),
             issue_number: None,
             created_by: df_core::Principal::system("test"),
-            parent_id: None,
+            parent_id: parent,
             depends_on: Vec::new(),
         },
     )
@@ -1134,6 +1153,18 @@ pub(crate) fn tag_around<'a>(html: &'a str, marker: &str) -> &'a str {
         .unwrap_or_else(|| panic!("{marker}: {html}"));
     let start = html[..at].rfind('<').unwrap();
     &html[start..=(start + html[start..].find('>').unwrap())]
+}
+
+/// The `<li id="row-<key>">` of a task or chat in a rendered list or stream frame, up to and
+/// including its `</li>`.
+pub(crate) fn row<'a>(html: &'a str, key: &str) -> &'a str {
+    let from = html
+        .find(&format!("<li id=\"row-{key}\""))
+        .unwrap_or_else(|| panic!("no row {key}: {html}"));
+    let rest = &html[from..];
+    &rest[..rest
+        .find("</li>")
+        .map_or(rest.len(), |at| at + "</li>".len())]
 }
 
 /// The `data-tab` of the tab marked open in `html`.

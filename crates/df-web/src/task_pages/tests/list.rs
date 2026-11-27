@@ -1,7 +1,7 @@
 //! The task list: rows, filters, project menu and empty states.
 
 use super::set_status;
-use crate::testkit::{TestApp, new_task, seed, tag_around, text};
+use crate::testkit::{TestApp, new_task, row, seed, tag_around, text};
 
 #[tokio::test]
 async fn task_list_shows_status_and_status_line_in_the_default_order() {
@@ -19,7 +19,7 @@ async fn task_list_shows_status_and_status_line_in_the_default_order() {
     let html = text(app.get("/tasks", &cookie).await).await;
     assert!(
         html.contains("compiling")
-            && html.contains("running")
+            && html.contains(">queued<")
             && html.contains("Linus")
             && html.contains("Dark Factory")
     );
@@ -583,7 +583,7 @@ async fn the_selected_row_has_an_accent_edge_and_the_others_a_transparent_one() 
     for class in [
         "border-l-[3px]",
         "border-l-transparent",
-        "pl-[17px]",
+        "pl-[35px]",
         "pr-5",
         "aria-[current=page]:border-l-accent",
         "aria-[current=page]:bg-accent-soft",
@@ -605,7 +605,7 @@ async fn the_selected_row_has_an_accent_edge_and_the_others_a_transparent_one() 
 }
 
 #[tokio::test]
-async fn in_review_has_its_own_badge_and_belongs_to_the_waiting_filter() {
+async fn a_top_level_task_in_review_needs_you_and_belongs_to_the_waiting_filter() {
     let app = TestApp::new().await;
     let cookie = app.login().await;
     let seed = seed(&app.pool).await;
@@ -615,8 +615,7 @@ async fn in_review_has_its_own_badge_and_belongs_to_the_waiting_filter() {
     let waiting = text(app.get("/tasks?status=waiting", &cookie).await).await;
     assert!(waiting.contains("review me"), "{waiting}");
     assert!(
-        waiting.contains("bg-status-review-bg text-status-review-fg")
-            && waiting.contains("in review"),
+        waiting.contains("aria-label=\"Needs you\"") && !waiting.contains(">in review<"),
         "{waiting}"
     );
     let active = text(app.get("/tasks", &cookie).await).await;
@@ -677,20 +676,9 @@ async fn a_live_update_from_running_to_waiting_keeps_the_row_in_the_active_list(
     let frame = sse.next_within(std::time::Duration::from_secs(2)).await;
     let row = row(&frame.data, "DF-1");
     assert!(
-        row.contains("keeps its row") && row.contains("waiting"),
+        row.contains("keeps its row") && row.contains("aria-label=\"Needs you\""),
         "{row}"
     );
-}
-
-/// The `<li id="row-<key>">` of a task in a list page or stream frame, up to its `</li>`.
-fn row<'a>(html: &'a str, key: &str) -> &'a str {
-    let from = html
-        .find(&format!("<li id=\"row-{key}\""))
-        .unwrap_or_else(|| panic!("no row {key}: {html}"));
-    let row = &html[from..];
-    &row[..row
-        .find("</li>")
-        .map_or(row.len(), |end| end + "</li>".len())]
 }
 
 /// The status chips (Active, Done, All) of a list page: none carries `aria-current`.

@@ -370,7 +370,7 @@ async fn progress_of(env: &Env, task: &TaskRow) -> SubtaskProgress {
         .unwrap();
     items
         .into_iter()
-        .find(|t| t.key == task.key.to_string())
+        .find(|t| t.key == task.key)
         .unwrap()
         .subtasks
 }

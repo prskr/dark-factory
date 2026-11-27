@@ -37,7 +37,8 @@ pub const PR_SYNC_KIND: &str = "pr.sync";
 
 /// Payload of a [`PR_SYNC_KIND`] job (`pr-forge-outbox` design D1). `open_subtasks` reads the
 /// fields `task_id` and `open` from the JSON in SQL (`tasks/tree.rs`), as does
-/// `outbox::has_unfinished_pr_open_job`: renaming either needs both queries changed.
+/// `outbox::has_unfinished_pr_open_job` and `task_views::list_task_items`: renaming either needs
+/// all three queries changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrSyncJob {
     pub task_id: TaskId,
@@ -559,11 +560,7 @@ async fn open_branch_holder(
     .bind(status_list(TaskStatus::DONE))
     .fetch_optional(conn)
     .await?;
-    key.map(|key| {
-        key.parse()
-            .map_err(|e: df_core::KeyError| DbError::InvalidData(e.to_string()))
-    })
-    .transpose()
+    Ok(key.map(|key| key.parse()).transpose()?)
 }
 
 /// Maps a violation of `tasks_open_branch` that the checks did not catch (a concurrent
@@ -817,10 +814,7 @@ pub async fn get_task(
             .ok_or_else(|| {
                 DbError::InvalidData(format!("non-positive task number `{}`", r.number))
             })?;
-        let key: TaskKey = r
-            .key
-            .parse()
-            .map_err(|e: df_core::KeyError| DbError::InvalidData(e.to_string()))?;
+        let key: TaskKey = r.key.parse()?;
         if key.number() != number {
             return Err(DbError::InvalidData(format!(
                 "task number `{number}` does not match key `{key}`"

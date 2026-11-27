@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH RECURSIVE up AS (\n            SELECT p.key, p.title, p.parent_id, 1 AS depth\n            FROM tasks s JOIN tasks p ON p.id = s.parent_id AND p.kind = 'task'\n            WHERE s.id = $1\n            UNION ALL\n            SELECT p.key, p.title, p.parent_id, up.depth + 1\n            FROM up JOIN tasks p ON p.id = up.parent_id AND p.kind = 'task'\n        )\n        SELECT key AS \"key!\", title AS \"title!\" FROM up ORDER BY depth\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "8780061c50b3ae957865a59410b4a8277667696b37c94b1a324c51d14b91d715"
+}

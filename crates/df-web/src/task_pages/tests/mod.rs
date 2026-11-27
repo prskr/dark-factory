@@ -13,6 +13,7 @@ mod reset_workspace;
 mod resume;
 mod stop_cancel;
 mod subtasks;
+mod tree;
 
 async fn set_status(app: &TestApp, status: &str) {
     sqlx::query("UPDATE tasks SET status = $1")

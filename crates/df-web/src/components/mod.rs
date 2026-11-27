@@ -26,7 +26,7 @@ pub use actions::{
     action_class, button, link_button, submit_button,
 };
 pub use badges::{
-    Tone, attached_badge, chip, filter_chip, harness_label, status_badge, tone_badge,
+    Tone, attached_badge, chip, filter_chip, harness_label, needs_you_dot, status_badge, tone_badge,
 };
 pub(crate) use detail_head::detail_head;
 pub use forms::{

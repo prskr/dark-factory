@@ -15,7 +15,7 @@ use crate::components::{
     ButtonKind, DialogStyle, EmptyPanel, EmptySize, FormErrors, ICON_BUTTON_CLASS, Icon,
     ROUND_ACTION_CLASS, Tone, action_class, avatar, definition_list, detail_head,
     details_panel_with_heading, dialog_close, dialog_with, field_error, form_error, harness_label,
-    icon, initials, phone_profile_menu, search_menu, section, status_badge,
+    icon, initials, needs_you_dot, phone_profile_menu, search_menu, section, status_badge,
 };
 use crate::htmx::Region;
 use crate::layout::Shell;
@@ -36,14 +36,6 @@ pub(super) fn archive_blocker(detail: &TaskDetail) -> Option<String> {
 
 fn url_encode(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
-}
-
-/// The dot of a chat that needs a board member: an open approval request.
-fn needs_you_dot() -> Markup {
-    html! {
-        span role="img" aria-label="Needs you" title="Needs you"
-            class={"inline-block size-2.5 shrink-0 rounded-full " (Tone::Limited.dot_class())} {}
-    }
 }
 
 /// The chat list: the chats of the selected project and the entry of the archive, replaced as a
@@ -68,7 +60,7 @@ pub(crate) fn chat_rows(
                             div class="flex items-center gap-2" {
                                 (avatar(&initials(&chat.persona_display_name)))
                                 span class="min-w-0 truncate text-sm font-medium" { (chat.persona_display_name) }
-                                @if chat.needs_you { (needs_you_dot()) }
+                                @if chat.needs_you { (needs_you_dot(None)) }
                                 @else if chat.status != TaskStatus::Waiting { (status_badge(chat.status)) }
                                 time datetime=(chat.last_activity_at.to_string()) class="ml-auto shrink-0 font-mono text-xs text-faint" { (short_time(chat.last_activity_at)) }
                             }
@@ -125,7 +117,7 @@ pub(super) fn list_column(
                 @for chat in &personas {
                     a href={"/chats/" (chat.key)} aria-label=(format!("Chat with {}", chat.persona_display_name)) title=(chat.persona_display_name) class="relative rounded-full" {
                         (avatar(&initials(&chat.persona_display_name)))
-                        @if chat.needs_you { span class="absolute -right-0.5 -top-0.5" { (needs_you_dot()) } }
+                        @if chat.needs_you { span class="absolute -right-0.5 -top-0.5" { (needs_you_dot(None)) } }
                     }
                 }
             }
@@ -144,7 +136,7 @@ pub(super) fn list_column(
                                 a href={"/chats?project=" (url_encode(&project.key))} aria-current=[current.then_some("true")]
                                     class={"flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm hover:bg-sunk " (if current { "bg-sunk font-medium text-ink" } else { "text-muted" })} {
                                     span class="min-w-0 flex-1 truncate" { (project.name) }
-                                    @if project.needs_you { (needs_you_dot()) }
+                                    @if project.needs_you { (needs_you_dot(None)) }
                                     span class="font-mono text-xs text-faint" { (project.chats) }
                                 }
                             }
