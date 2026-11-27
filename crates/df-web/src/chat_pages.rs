@@ -19,6 +19,7 @@ use serde::Deserialize;
 use crate::WebState;
 use crate::auth::CurrentUser;
 use crate::components::{EmptyPanel, EmptySize, FormErrors, Icon, icon};
+use crate::htmx::Region;
 use crate::layout::{Shell, View, chat_layout};
 use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 use crate::sse;
@@ -188,7 +189,7 @@ async fn workspace(
         div class="ws" ":data-collapsed"="collapsed" ":data-list-collapsed"="listCollapsed" "x-on:keydown.escape.window"="details = false"
             x-data="chatLayout" {
             (view::list_column(&projects, project, &chats, current, &shell))
-            div id="ws-detail" x-data=[selected.as_ref().map(|s| crate::artifacts::split_args(&s.data.task.key))] {
+            div id=(Region::WsDetail.id()) x-data=[selected.as_ref().map(|s| crate::artifacts::split_args(&s.data.task.key))] {
                 @match &selected {
                     Some(s) => (chat_columns(s, state.show_hidden_blocks)),
                     None => (view::center_empty(project)),

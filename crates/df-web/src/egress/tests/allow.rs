@@ -112,8 +112,11 @@ async fn allowing_a_row_for_its_project_creates_an_announced_and_audited_entry()
     .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(header_str(&response, "hx-trigger"), "modal-close");
-    assert_eq!(header_str(&response, "hx-retarget"), "#allow-toast");
+    assert!(response.headers().get("hx-retarget").is_none());
+    assert_eq!(header_str(&response, "hx-reswap"), "none");
     let toast = text(response).await;
+    crate::testkit::assert_toast(&toast);
+    assert!(toast.contains("aria-label=\"Dismiss\""), "{toast}");
     assert!(
         toast.contains("Rule created") && toast.contains(" is allowed for project DF."),
         "{toast}"

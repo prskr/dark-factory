@@ -13,10 +13,11 @@ use crate::components::forms::{INPUT_CLASS, MenuItem};
 use crate::components::short_time;
 use crate::components::{
     ButtonKind, DialogStyle, EmptyPanel, EmptySize, FormErrors, ICON_BUTTON_CLASS, Icon,
-    ROUND_ACTION_CLASS, Tone, action_class, avatar, definition_list, details_panel_with_heading,
-    dialog_close, dialog_with, field_error, form_error, harness_label, icon, initials,
-    phone_profile_menu, search_menu, section, status_badge,
+    ROUND_ACTION_CLASS, Tone, action_class, avatar, definition_list, detail_head,
+    details_panel_with_heading, dialog_close, dialog_with, field_error, form_error, harness_label,
+    icon, initials, phone_profile_menu, search_menu, section, status_badge,
 };
+use crate::htmx::Region;
 use crate::layout::Shell;
 use crate::task_pages::{runs_region, status_name};
 
@@ -54,12 +55,13 @@ pub(crate) fn chat_rows(
     current: Option<&str>,
 ) -> Markup {
     html! {
-        div id="chat-rows" {
+        div id=(Region::ChatRows.id()) data-rows {
             ul {
                 @for chat in chats {
                     @let href = format!("/chats/{}", chat.key);
                     li id={"row-" (chat.key)} {
-                        a href=(href) hx-get=(href) hx-target="#ws-detail" hx-select="#ws-detail" hx-swap="outerHTML" hx-push-url="true"
+                        a href=(href) hx-get=(href) hx-target=(Region::WsDetail.selector()) hx-select=(Region::WsDetail.selector()) hx-swap="outerHTML" hx-push-url="true"
+                            data-focus-after-swap=(Region::ChatHead.selector())
                             aria-current=[(current == Some(chat.key.as_str())).then_some("page")]
                             "x-on:click"="select($el)"
                             class="block min-h-11 border-b border-line border-l-[3px] border-l-transparent py-3.5 pr-5 pl-[17px] hover:bg-sunk aria-[current=page]:border-l-accent aria-[current=page]:bg-accent-soft" {
@@ -80,7 +82,7 @@ pub(crate) fn chat_rows(
                     }
                 }
             }
-            button type="button" hx-get={"/chats/archive?project=" (url_encode(&project.key))} hx-target="#composer-slot" hx-swap="innerHTML"
+            button type="button" hx-get={"/chats/archive?project=" (url_encode(&project.key))} hx-target=(Region::ComposerSlot.selector()) hx-swap="innerHTML"
                 class="flex min-h-11 w-full items-center gap-2 border-b border-line px-5 text-left text-sm text-muted hover:bg-sunk" {
                 (icon(Icon::Archive)) "Archived chats"
                 span class="ml-auto rounded-full bg-sunk px-1.5 font-mono text-xs" { (project.archived) }
@@ -182,7 +184,7 @@ pub(super) fn center_empty(project: &ChatProject) -> Markup {
                 text,
                 phone_hint: None,
                 action: html! {
-                    button type="button" hx-get=(compose) hx-target="#composer-slot" hx-swap="innerHTML"
+                    button type="button" hx-get=(compose) hx-target=(Region::ComposerSlot.selector()) hx-swap="innerHTML"
                         class={(action_class(ButtonKind::Primary)) " mt-1.5"} { (icon(Icon::Plus)) "New chat" }
                 },
             }.render())
@@ -196,7 +198,7 @@ pub(crate) fn head_region(task: &TaskDetail) -> Markup {
     let compose = format!("/chats/compose?project={}", url_encode(&task.project_key));
     let list = format!("/chats?project={}", url_encode(&task.project_key));
     html! {
-        header id="chat-head" class="border-b border-line bg-panel px-2 py-2 lg:px-4" {
+        (detail_head(Region::ChatHead, &task.key, &task.title, html! {
             div class="flex items-center gap-1" {
                 a href=(list) aria-label="Back to chats" class={(ICON_BUTTON_CLASS) " md:hidden"} { (icon(Icon::ChevronLeft)) }
                 div class="flex min-w-0 flex-1 items-center gap-2 md:hidden" {
@@ -210,11 +212,11 @@ pub(crate) fn head_region(task: &TaskDetail) -> Markup {
                 // From 768 px the persona block is hidden and nothing grows: "New chat" alone takes
                 // the free space, so "Details" stays at the right edge (a second `ml-auto` would
                 // split it and put "Details" mid-header).
-                button type="button" hx-get=(compose) hx-target="#composer-slot" hx-swap="innerHTML"
+                button type="button" hx-get=(compose) hx-target=(Region::ComposerSlot.selector()) hx-swap="innerHTML"
                     class={(action_class(ButtonKind::Primary)) " ml-auto max-md:hidden"} { (icon(Icon::Plus)) "New chat" }
                 button type="button" aria-label="Details" "x-on:click"="details = true; sheet = 'half'" class={(ICON_BUTTON_CLASS) " xl:hidden"} { (icon(Icon::PanelRight)) }
             }
-        }
+        }))
     }
 }
 
@@ -246,7 +248,7 @@ pub(crate) fn overview_region(task: &TaskDetail, base_branch: &str, error: Optio
                         button type="button" hx-post={"/chats/" (task.key) "/unarchive"} hx-swap="none"
                             class=(action_class(ButtonKind::Secondary)) { "Unarchive" }
                     } @else {
-                        button type="button" hx-post={"/chats/" (task.key) "/archive"} hx-target="#chat-overview" hx-swap="outerMorph"
+                        button type="button" hx-post={"/chats/" (task.key) "/archive"} hx-target=(Region::ChatOverview.selector()) hx-swap="outerMorph"
                             disabled[blocker.is_some()] title=[blocker.as_deref()]
                             class=(action_class(ButtonKind::Secondary)) { (icon(Icon::Archive)) "Archive" }
                     }
@@ -262,7 +264,7 @@ pub(crate) fn overview_region(task: &TaskDetail, base_branch: &str, error: Optio
                         span class={"min-w-0 break-words" @if task.title_source == TitleSource::Placeholder { " italic text-muted" }} { (task.title) }
                         button type="button" aria-label="Rename chat" "x-on:click"="editing = true; $nextTick(() => $refs.title.focus())" class=(ICON_BUTTON_CLASS) { (icon(Icon::Pencil)) }
                     }
-                    form x-show="editing" x-cloak hx-post=(rename) hx-target="#chat-overview" hx-swap="outerMorph"
+                    form x-show="editing" x-cloak hx-post=(rename) hx-target=(Region::ChatOverview.selector()) hx-swap="outerMorph"
                         "x-on:keydown.escape"="editing = false; $refs.title.value = $refs.title.defaultValue"
                         class="flex flex-wrap items-center gap-2" {
                         label class="sr-only" for="title" { "Topic" }
@@ -291,7 +293,7 @@ pub(crate) fn overview_region(task: &TaskDetail, base_branch: &str, error: Optio
         ),
     ];
     html! {
-        div id="chat-overview" class="md:shrink-0" {
+        div id=(Region::ChatOverview.id()) class="md:shrink-0" {
             div class="ws-strip flex-col items-center gap-3 p-2" {
                 button type="button" class=(ICON_BUTTON_CLASS) aria-label="Show details" title="Show details" "x-on:click"="setCollapsed(false)" { (icon(Icon::PanelRight)) }
                 span class={"size-3 rounded-full " (Tone::of_status(task.status).dot_class())}

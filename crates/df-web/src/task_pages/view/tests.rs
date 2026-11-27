@@ -100,7 +100,7 @@ fn composer_remembers_the_issue_and_names_every_control() {
         ..TaskForm::default()
     };
     let html = composer_form(&values, &FormErrors::default(), &choices).into_string();
-    assert!(html.contains("issue: '7'"), "{html}");
+    assert!(html.contains("&quot;issue&quot;:&quot;7&quot;"), "{html}");
     for name in [
         "Project",
         "Description",
@@ -506,7 +506,7 @@ fn composer_keeps_the_branch_as_a_json_string_and_shows_the_error_outside_the_po
     let html = composer_form(&values, &errors, &choices).into_string();
 
     assert!(
-        html.contains("branch: &quot;renovate/\\&quot;x\\&quot;&quot;"),
+        html.contains("&quot;branch&quot;:&quot;renovate/\\&quot;x\\&quot;&quot;"),
         "{html}"
     );
     assert!(
@@ -516,6 +516,44 @@ fn composer_keeps_the_branch_as_a_json_string_and_shows_the_error_outside_the_po
     let error = html.find("renovate/x is held by DF-13.").unwrap();
     assert!(
         error < html.find("aria-label=\"Linked issue and branch\"").unwrap(),
+        "{html}"
+    );
+}
+
+#[test]
+fn the_task_head_is_a_focus_target_named_by_a_screen_reader_only_heading() {
+    let task = crate::testkit::task_detail("DF-21");
+
+    let html = head_region(&task, None).into_string();
+
+    // The frame is tested once, in `components::detail_head`.
+    assert!(
+        html.starts_with("<header id=\"task-head\" tabindex=\"-1\""),
+        "{html}"
+    );
+    assert!(
+        html.contains(&format!(
+            "<h2 id=\"detail-title\" class=\"sr-only\">DF-21 {}</h2>",
+            task.title
+        )),
+        "{html}"
+    );
+}
+
+#[test]
+fn a_task_row_selects_itself_and_hands_focus_to_the_head_after_loading() {
+    let filters = Filters::new(None, None, None);
+
+    let html = task_rows(&[list_item("DF-21")], None, &filters).into_string();
+
+    assert!(html.contains("x-on:click=\"select($el)\""), "{html}");
+    assert!(
+        !html.contains("querySelectorAll") && !html.contains("dataset"),
+        "{html}"
+    );
+    assert!(html.contains("<ul id=\"task-rows\" data-rows>"), "{html}");
+    assert!(
+        html.contains("data-focus-after-swap=\"#task-head\""),
         "{html}"
     );
 }

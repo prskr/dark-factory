@@ -18,3 +18,23 @@ fn details_comes_after_new_chat_and_only_new_chat_pushes_the_buttons_right() {
     let new_chat_tag = tag_around(&html, "hx-get=\"/chats/compose");
     assert!(new_chat_tag.contains("ml-auto"), "{new_chat_tag}");
 }
+
+#[test]
+fn the_chat_head_is_a_focus_target_named_by_a_screen_reader_only_heading() {
+    let task = task_detail("DF-1-CHAT");
+
+    let html = head_region(&task).into_string();
+
+    // The frame is tested once, in `components::detail_head`.
+    assert!(
+        html.starts_with("<header id=\"chat-head\" tabindex=\"-1\""),
+        "{html}"
+    );
+    assert!(
+        html.contains(&format!(
+            "<h2 id=\"detail-title\" class=\"sr-only\">DF-1-CHAT {}</h2>",
+            task.title
+        )),
+        "{html}"
+    );
+}

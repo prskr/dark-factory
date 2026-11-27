@@ -29,6 +29,7 @@ use tokio::sync::broadcast;
 use crate::WebState;
 use crate::artifacts::details_heading;
 use crate::auth::CurrentUser;
+use crate::htmx::{Region, partial};
 use crate::task_pages::{
     CancelNote, ListQuery, ResumeNote, composer_action, dependencies_region, details_region,
     head_region, interruptible, load_detail, pending_region, runs_region, subtasks_panel,
@@ -188,7 +189,11 @@ impl DetailStream {
                 continue;
             };
             let Some(group) = item.group.as_deref() else {
-                partials.push(item_partial(item, change.added, "#transcript"));
+                partials.push(item_partial(
+                    item,
+                    change.added,
+                    Region::Transcript.selector(),
+                ));
                 continue;
             };
             if created.contains(&group) {
@@ -197,7 +202,11 @@ impl DetailStream {
             let members = self.folder.group_members(change.index);
             if change.added && members.first().is_some_and(|m| m.dom_id == item.dom_id) {
                 created.push(group);
-                partials.push(partial("#transcript", "beforeend", &render_group(members)));
+                partials.push(partial(
+                    Region::Transcript.selector(),
+                    "beforeend",
+                    render_group(members),
+                ));
                 continue;
             }
             partials.push(item_partial(item, change.added, &format!("#{group}-items")));
@@ -279,7 +288,11 @@ impl DetailStream {
         for (slot, (id, markup)) in self.regions.iter_mut().zip(rendered) {
             let html = markup.0;
             if *slot != html {
-                changed.push(partial(id, "outerMorph", &maud::PreEscaped(html.clone())));
+                changed.push(partial(
+                    id.selector(),
+                    "outerMorph",
+                    maud::PreEscaped(html.clone()),
+                ));
                 *slot = html;
             }
         }
@@ -293,7 +306,7 @@ impl DetailStream {
         &self,
         data: &crate::task_pages::DetailData,
         artifacts: usize,
-    ) -> Result<Vec<(&'static str, Markup)>, df_db::DbError> {
+    ) -> Result<Vec<(Region, Markup)>, df_db::DbError> {
         let task = &data.task;
         let runs = runs_region(&task.key, &data.runs, task.persona_model.as_deref());
         let pending = pending_region(
@@ -309,25 +322,25 @@ impl DetailStream {
         if self.kind == TaskKind::Chat {
             let base = df_db::base_branch(&self.state.pool, self.task_id).await?;
             return Ok(vec![
-                ("#chat-head", crate::chat_pages::head_region(task)),
+                (Region::ChatHead, crate::chat_pages::head_region(task)),
                 (
-                    "#chat-overview",
+                    Region::ChatOverview,
                     crate::chat_pages::overview_region(task, &base, None),
                 ),
-                ("#runs", runs),
-                ("#pending", pending),
-                ("#composer-action", composer),
+                (Region::Runs, runs),
+                (Region::Pending, pending),
+                (Region::ComposerAction, composer),
                 (
-                    "#ws-details-heading",
+                    Region::WsDetailsHeading,
                     crate::artifacts::chat_details_heading(data.subtasks.len(), artifacts, false),
                 ),
-                ("#panel-subtasks", subtasks),
+                (Region::PanelSubtasks, subtasks),
             ]);
         }
         Ok(vec![
-            ("#task-head", head_region(task, None)),
+            (Region::TaskHead, head_region(task, None)),
             (
-                "#task-details",
+                Region::TaskDetails,
                 details_region(
                     task,
                     &CancelNote::new(&data.runs, &data.pending),
@@ -336,17 +349,17 @@ impl DetailStream {
                 ),
             ),
             (
-                "#dependencies",
+                Region::Dependencies,
                 dependencies_region(&data.dependencies, task.status),
             ),
-            ("#runs", runs),
-            ("#pending", pending),
-            ("#composer-action", composer),
+            (Region::Runs, runs),
+            (Region::Pending, pending),
+            (Region::ComposerAction, composer),
             (
-                "#ws-details-heading",
+                Region::WsDetailsHeading,
                 details_heading(data.subtasks.len(), artifacts, false),
             ),
-            ("#panel-subtasks", subtasks),
+            (Region::PanelSubtasks, subtasks),
         ])
     }
 
@@ -378,7 +391,7 @@ impl DetailStream {
             changed.push(crate::requests::upsert_partial(
                 &markup,
                 anchor.as_deref(),
-                "#transcript",
+                Region::Transcript.selector(),
             ));
         }
         Ok(changed)
@@ -441,7 +454,7 @@ pub(crate) async fn task_list_events(
     list_events(
         state,
         &user,
-        "#task-rows",
+        Region::TaskRows.selector(),
         |n| {
             matches!(
                 n,
@@ -505,7 +518,7 @@ where
             let html = (s.render)(s.state.clone()).await?;
             if html != s.last {
                 let body =
-                    partial(target, "outerMorph", &maud::PreEscaped(html.clone())).into_string();
+                    partial(target, "outerMorph", maud::PreEscaped(html.clone())).into_string();
                 s.last = html;
                 return Some((Ok::<_, Infallible>(Event::default().data(body)), s));
             }
@@ -532,7 +545,7 @@ pub(crate) async fn chat_list_events(
     list_events(
         state,
         &user,
-        "#chat-rows",
+        Region::ChatRows.selector(),
         |n| {
             matches!(
                 n,
@@ -567,11 +580,6 @@ fn item_partial(item: &crate::transcript::Item, added: bool, container: &str) ->
     } else {
         partial(&format!("#{}", item.dom_id), "outerMorph", &rendered)
     }
-}
-
-/// Wraps `inner` in a partial that htmx swaps into `target`.
-fn partial(target: &str, swap: &str, inner: &Markup) -> Markup {
-    html! { hx-partial hx-target=(target) hx-swap=(swap) { (inner) } }
 }
 
 fn last_event_id(headers: &HeaderMap) -> Option<i64> {

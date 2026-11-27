@@ -3,6 +3,8 @@
 use df_proto::gateway::v1::{FlowEvent, Verdict};
 use serde::Deserialize;
 
+use crate::htmx::Region;
+
 /// The *Advanced* filters, by parameter name (the page's script counts the same ones).
 pub(in crate::egress) const ADVANCED_FIELDS: [&str; 2] = ["persona", "task"];
 /// The choices of the *Rows* select: how many rows the table keeps.
@@ -26,6 +28,15 @@ impl VerdictFilter {
             Self::All => "all",
             Self::Blocked => "blocked",
             Self::Allowed => "allowed",
+        }
+    }
+
+    /// The element that shows the count of the segment.
+    pub(in crate::egress) const fn count_region(self) -> Region {
+        match self {
+            Self::All => Region::CountAll,
+            Self::Blocked => Region::CountBlocked,
+            Self::Allowed => Region::CountAllowed,
         }
     }
 

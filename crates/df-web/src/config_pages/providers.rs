@@ -32,6 +32,7 @@ use crate::components::{
     Cell, FormErrors, ICON_BUTTON_CLASS, Icon, actions_cell, data_table, empty_panel, entry_link,
     entry_tr, icon, name_cell, select_field, separator, td, text_field, th,
 };
+use crate::htmx::Region;
 use crate::layout::{Nav, Shell};
 use crate::responses::{htmx_location, internal_error, invalid, not_found};
 
@@ -664,7 +665,7 @@ fn preset_select() -> Markup {
         div class="space-y-1" {
             label for="preset" class="block text-sm font-medium text-muted" { "Preset" }
             select id="preset" name="preset" class=(INPUT_CLASS)
-                hx-get="/model-providers/preset" hx-trigger="change" hx-target="#form" hx-swap="outerHTML" hx-include="#name" {
+                hx-get="/model-providers/preset" hx-trigger="change" hx-target=(Region::Form.selector()) hx-swap="outerHTML" hx-include="#name" {
                 option value="" { "Start from a preset…" }
                 @for (id, label) in &options { option value=(id) { (label) } }
             }
@@ -684,7 +685,7 @@ struct ListEntry {
 
 fn region(entries: &[ListEntry], credentials: &[CredentialRef], notice: Option<&str>) -> Markup {
     html! {
-        div id="config-list" {
+        div id=(Region::ConfigList.id()) {
             (list_header("Model providers", entries.len(), create_button("/model-providers/new", "New model provider"), None))
             @if let Some(notice) = notice {
                 p class="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger" role="alert" { (notice) }
@@ -737,7 +738,7 @@ fn row(entry: &ListEntry, credentials: &[CredentialRef]) -> Markup {
                 }
             }))
             (actions_cell(html! {
-                button type="button" hx-delete={"/model-providers/" (id)} hx-target="#config-list" hx-swap="outerHTML"
+                button type="button" hx-delete={"/model-providers/" (id)} hx-target=(Region::ConfigList.selector()) hx-swap="outerHTML"
                     hx-confirm={"Delete model provider " (input.name) "?"}
                     aria-label={"Delete model provider " (input.name)} title="Delete" class=(ICON_BUTTON_CLASS) {
                     (icon(Icon::Trash))
@@ -779,7 +780,7 @@ async fn list(State(state): State<WebState>, shell: Shell) -> Response {
 // ---------------------------------------------------------------------------------------------
 
 async fn new(State(state): State<WebState>, headers: HeaderMap) -> Response {
-    if !crate::auth::is_htmx(&headers) {
+    if !crate::htmx::is_htmx(&headers) {
         return Redirect::to("/model-providers").into_response();
     }
     match df_db::catalog::list_credential_refs(&state.pool).await {

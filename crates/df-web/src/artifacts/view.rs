@@ -8,6 +8,7 @@ use maud::{Markup, html};
 use crate::components::{
     ICON_BUTTON_CLASS, INITIAL_DETAILS_TAB, Icon, MarkerInset, TAB_CLASS, icon, tab_marker,
 };
+use crate::htmx::Region;
 use crate::markdown::{ImageArtifacts, highlight_by_extension, render_with_images};
 
 /// A card shows at most this many lines of a text artifact, and at most [`PREVIEW_BYTES`].
@@ -131,7 +132,7 @@ pub(crate) fn card_grid(
             @for card in artifacts {
                 @let url = open_url(&card.meta.name);
                 li {
-                    a href=(url) hx-get=(url) hx-target="#archive-body" hx-swap="outerHTML"
+                    a href=(url) hx-get=(url) hx-target=(Region::ArchiveBody.selector()) hx-swap="outerHTML"
                         class="block overflow-hidden rounded-xl border border-line bg-panel hover:border-line-strong" {
                         (card_body(task_key, card))
                     }
@@ -168,7 +169,7 @@ fn card_body(task_key: &str, card: &ArtifactCard) -> Markup {
 /// `oob` makes it replace the heading in the page (response of the tab fragment).
 pub(crate) fn details_heading(subtasks: usize, artifacts: usize, oob: bool) -> Markup {
     html! {
-        div id="ws-details-heading" hx-swap-oob=[oob.then_some("outerHTML")] class="min-w-0" {
+        div id=(Region::WsDetailsHeading.id()) hx-swap-oob=[oob.then_some("outerHTML")] class="min-w-0" {
             @if subtasks == 0 && artifacts == 0 {
                 h2 class="text-base font-semibold" { "Details" }
             } @else {
@@ -191,7 +192,7 @@ pub(crate) fn details_heading(subtasks: usize, artifacts: usize, oob: bool) -> M
 /// two with their counts.
 pub(crate) fn chat_details_heading(subtasks: usize, artifacts: usize, oob: bool) -> Markup {
     html! {
-        div id="ws-details-heading" hx-swap-oob=[oob.then_some("outerHTML")] class="min-w-0" {
+        div id=(Region::WsDetailsHeading.id()) hx-swap-oob=[oob.then_some("outerHTML")] class="min-w-0" {
             div role="tablist" aria-label="Details" "x-on:keydown"="move($event)" x-init="adopt()" class="flex items-center gap-4 text-sm" {
                 (tab_button("overview", "panel-overview", html! { "Overview" }))
                 (tab_button("subtasks", "panel-subtasks", html! { "Subtasks " (count(subtasks)) }))

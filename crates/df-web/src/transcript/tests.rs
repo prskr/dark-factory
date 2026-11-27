@@ -1330,3 +1330,17 @@ fn the_webhook_summary_is_one_sentence_for_the_queued_stack() {
         "bob commented on issue #7"
     );
 }
+
+#[test]
+fn the_transcript_is_a_polite_log_live_region() {
+    let html = render_transcript(&[], &[]).into_string();
+
+    let tag = &html[..html.find('>').unwrap()];
+    assert!(
+        tag.contains("id=\"transcript\"")
+            && tag.contains("role=\"log\"")
+            && tag.contains("aria-live=\"polite\"")
+            && !tag.contains("aria-atomic"),
+        "{tag}"
+    );
+}

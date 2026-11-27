@@ -13,8 +13,9 @@ extend-exclude = [
 ]
 
 [default]
-# The `flate2` crate.
-extend-ignore-identifiers-re = ["flate2"]
+# The `flate2` crate; `IIFE`s (immediately invoked function expressions) in the planning docs of
+# web-htmx-robustness.
+extend-ignore-identifiers-re = ["flate2", "IIFEs?"]
 extend-ignore-re = [
     # Verbatim linker error message.
     "mis-aligned",

@@ -9,26 +9,39 @@ use crate::WebState;
 use crate::assets::{asset_url, get_asset};
 use crate::auth::CurrentUser;
 use crate::components::shell::is_settings;
-use crate::components::{CreateAction, bottom_bar, floating_create, rail, settings_sidebar};
+use crate::components::{
+    CreateAction, bottom_bar, error_toast, floating_create, rail, settings_sidebar,
+};
+use crate::htmx::Region;
 
-/// Alpine components in `scripts/`, compiled to `<name>.js` (`Alpine.data` on `alpine:init`),
-/// loaded on every page before Alpine starts.
-pub(crate) const COMPONENT_SCRIPTS: [&str; 14] = [
+/// The scripts in `scripts/` that load on every page before Alpine starts, compiled to
+/// `<name>.js`: the Alpine components (`Alpine.data` on `alpine:init`) and the
+/// plain scripts (`PLAIN_SCRIPTS` below), which listen on `document` instead.
+pub(crate) const COMPONENT_SCRIPTS: [&str; 19] = [
     "archiveModal.js",
     "artifactSplit.js",
     "chatLayout.js",
+    "composer.js",
     "copy-values.js",
     "egress-log.js",
     "egress-rule.js",
+    "focusAfterSwap.js",
+    "htmxErrors.js",
     "markdown.js",
     "markdownField.js",
+    "pageView.js",
     "persona-avatar.js",
     "questionOther.js",
     "requestCards.js",
     "secret-field.js",
     "tabs.js",
+    "transcriptScroll.js",
     "workspace.js",
 ];
+
+/// The entries of `COMPONENT_SCRIPTS` that are not Alpine components.
+#[cfg(test)]
+pub(crate) const PLAIN_SCRIPTS: [&str; 2] = ["focusAfterSwap.js", "htmxErrors.js"];
 
 /// The diagram renderer, loaded by the `mermaidDiagram` component when a page has a diagram.
 const MERMAID_ASSET: &str = "vendor/mermaid.min.js";
@@ -239,8 +252,10 @@ fn document(
                 // leaves each diagram as source and says so.
                 data-mermaid-src=[get_asset(MERMAID_ASSET).map(|_| asset_url(MERMAID_ASSET))]
                 data-editor-src=[get_asset(EDITOR_ASSET).map(|_| asset_url(EDITOR_ASSET))]
-                x-data=[workspace.map(|_| "")]
-                "x-on:popstate.window"=[workspace.map(|_|"document.body.dataset.view = /^\\/(tasks|chats)\\/[A-Z]/.test(location.pathname) ? 'task' : 'list'")] {
+                data-toasts=(Region::Toasts.selector())
+                data-network-error=(Region::NetworkErrorToast.selector())
+                x-data=[workspace.map(|_| "pageView")]
+                "x-on:popstate.window"=[workspace.map(|_| "syncView()")] {
                 div class="flex min-h-dvh" {
                     // The rail creates tasks everywhere; the chat page's compose link is for the floating button.
                     @if nav != Nav::None { (rail(nav, if nav == Nav::Chats { "/tasks/compose" } else { compose_href }, shell)) }
@@ -257,7 +272,15 @@ fn document(
                     // Live pending count of the navigation (and the inbox list on its page).
                     div hx-sse:connect=(if nav == Nav::Requests { "/requests/events?list=1" } else { "/requests/events" }) hx-swap="none" {}
                 }
-                div id="composer-slot" {}
+                div id=(Region::ComposerSlot.id()) {}
+                // The toast region is the live region: it announces what a toast puts in. On a
+                // phone it sits above the floating create button (80 px offset, 56 px button, 16 px gap).
+                div id=(Region::Toasts.id()) role="status" aria-live="polite"
+                    class="fixed inset-x-4 bottom-38 z-40 md:inset-x-auto md:right-6 md:bottom-6" {}
+                // What `htmxErrors.ts` shows when a request got no answer.
+                template id=(Region::NetworkErrorToast.id()) {
+                    (error_toast("Could not reach the server", "Check your connection and try again."))
+                }
             }
         }
     }
@@ -700,9 +723,11 @@ mod tests {
         .into_string();
         assert!(page.contains("data-view=\"task\""));
         assert!(
-            page.contains("x-on:popstate.window=\"document.body.dataset.view"),
+            page.contains("x-data=\"pageView\"")
+                && page.contains("x-on:popstate.window=\"syncView()\""),
             "{page}"
         );
+        assert!(!page.contains("document.body.dataset"), "{page}");
         // Other pages carry no view: the body has only its classes (and the renderer URL).
         let plain = layout("T", Nav::Tasks, &Shell::default(), html! {}).into_string();
         assert!(
@@ -745,8 +770,9 @@ mod tests {
         );
         assert!(page.contains("data-view=\"list\""));
         assert!(
-            page.contains("(tasks|chats)"),
-            "back on a phone follows both sections"
+            page.contains("x-data=\"pageView\"")
+                && page.contains("x-on:popstate.window=\"syncView()\""),
+            "back on a phone follows the history (`pageView.ts` handles both sections)"
         );
     }
 
@@ -802,6 +828,31 @@ mod tests {
         let page = layout("Tasks", Nav::Tasks, &shell, html! {}).into_string();
         assert!(page.contains("Account menu of Ada Byron"), "{page}");
         assert!(page.contains("Dark Factory 2026.11.0"), "{page}");
+    }
+
+    #[test]
+    fn every_page_has_one_live_toast_region_and_the_network_error_template() {
+        for nav in [Nav::Tasks, Nav::None] {
+            let page = layout("T", nav, &Shell::default(), html! {}).into_string();
+
+            assert_eq!(page.matches("id=\"toasts\"").count(), 1, "{page}");
+            let region = &page[page.find("id=\"toasts\"").unwrap()..];
+            let tag = &region[..region.find('>').unwrap()];
+            assert!(
+                tag.contains("role=\"status\"") && tag.contains("aria-live=\"polite\""),
+                "{tag}"
+            );
+            assert!(
+                page.contains("<template id=\"network-error-toast\">")
+                    && page.contains("Could not reach the server"),
+                "{page}"
+            );
+            assert!(
+                page.contains("data-toasts=\"#toasts\"")
+                    && page.contains("data-network-error=\"#network-error-toast\""),
+                "{page}"
+            );
+        }
     }
 
     #[test]

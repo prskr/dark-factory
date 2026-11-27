@@ -3,6 +3,7 @@
 use maud::{Markup, html};
 
 use super::icons::{Icon, icon, logo};
+use crate::htmx::Region;
 use crate::layout::{Nav, Shell};
 use crate::requests::count_badge;
 
@@ -252,7 +253,7 @@ pub fn initials(name: &str) -> String {
 /// A button that fetches a create form into the page's `#composer-slot`.
 fn create_button(create: &CreateAction<'_>, class: &str) -> Markup {
     html! {
-        button type="button" aria-label=(create.label) title=(create.label) hx-get=(create.href) hx-target="#composer-slot" hx-swap="innerHTML" class=(class) {
+        button type="button" aria-label=(create.label) title=(create.label) hx-get=(create.href) hx-target=(Region::ComposerSlot.selector()) hx-swap="innerHTML" class=(class) {
             (icon(Icon::Plus))
         }
     }

@@ -100,6 +100,8 @@ pub enum Icon {
     CircleCheck,
     /// A chosen option of a multiple-choice answer (Lucide `square-check`).
     SquareCheck,
+    /// An error toast (Lucide `circle-alert`).
+    CircleAlert,
 }
 
 /// Inner elements of the factory mark (Lucide `factory`, ISC licence); `assets/logo.svg` has the
@@ -167,6 +169,7 @@ impl Icon {
         Self::Columns,
         Self::CircleCheck,
         Self::SquareCheck,
+        Self::CircleAlert,
     ];
 
     /// Inner SVG elements of the 24x24 icon.
@@ -277,6 +280,9 @@ impl Icon {
             }
             Self::CircleCheck => {
                 "<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/>"
+            }
+            Self::CircleAlert => {
+                "<circle cx=\"12\" cy=\"12\" r=\"10\"/><line x1=\"12\" x2=\"12\" y1=\"8\" y2=\"12\"/><line x1=\"12\" x2=\"12.01\" y1=\"16\" y2=\"16\"/>"
             }
             Self::SquareCheck => {
                 "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"m9 12 2 2 4-4\"/>"

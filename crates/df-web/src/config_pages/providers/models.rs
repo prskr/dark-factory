@@ -11,6 +11,7 @@ use maud::{Markup, html};
 
 use crate::components::forms::INPUT_CLASS;
 use crate::components::{ButtonKind, FormErrors, ICON_BUTTON_CLASS, Icon, action_class, icon};
+use crate::htmx::Region;
 
 const HINT: &str = "Context and max output are in tokens: set both or neither. OpenCode uses them for context tracking and compaction.";
 
@@ -193,7 +194,7 @@ pub(super) fn panel(rows: &[ModelRow], errors: &FormErrors, wide: bool) -> Marku
     html! {
         div class="flex items-start justify-between gap-4" {
             p class="text-sm text-muted" { "Personas of this provider pick one of these models. Each model uses one of the provider's wire APIs." }
-            button type="button" hx-post="/model-providers/refresh" hx-vals=(r#"{"op":"add"}"#) hx-target="#form" hx-swap="outerHTML"
+            button type="button" hx-post="/model-providers/refresh" hx-vals=(r#"{"op":"add"}"#) hx-target=(Region::Form.selector()) hx-swap="outerHTML"
                 class={(action_class(ButtonKind::Secondary)) " shrink-0"} { "+ Add model" }
         }
         @if let Some(error) = errors.get("models") { p class="text-sm text-danger" role="alert" { (error) } }
@@ -237,7 +238,7 @@ fn row_markup(index: usize, row: &ModelRow, errors: &FormErrors, layout: Layout)
                 (number("model_context", "Context window in tokens", &row.context))
                 (number("model_output", "Max output tokens", &row.output))
                 button type="button" hx-post="/model-providers/refresh" hx-vals=(format!(r#"{{"op":"remove:{index}"}}"#))
-                    hx-target="#form" hx-swap="outerHTML" aria-label={"Remove model " (row.id)} title="Remove" class=(ICON_BUTTON_CLASS) {
+                    hx-target=(Region::Form.selector()) hx-swap="outerHTML" aria-label={"Remove model " (row.id)} title="Remove" class=(ICON_BUTTON_CLASS) {
                     (icon(Icon::Trash))
                 }
             }

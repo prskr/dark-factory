@@ -11,11 +11,13 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use df_e2e::browser::{Session, assert_no_sideways_scroll, button};
+use df_e2e::browser::{Session, assert_no_sideways_scroll, button, button_in};
 use df_e2e::fixture::{self, World};
-use df_e2e::wait::{RUN_TIMEOUT, eventually};
-use df_e2e::{E2eEnv, data};
-use playwright_rs::protocol::{AriaRole, DragToOptions, GetByRoleOptions, Locator, Position};
+use df_e2e::wait::{RECONNECT_TIMEOUT, RUN_TIMEOUT, eventually};
+use df_e2e::{E2eEnv, data, db};
+use playwright_rs::protocol::{
+    AriaRole, ContinueOptions, DragToOptions, GetByRoleOptions, Locator, Position,
+};
 use playwright_rs::{Viewport, expect, expect_page};
 
 /// Wide enough for the graph to grow next to the 520 px events table.
@@ -827,7 +829,314 @@ async fn swap_tasks_body(world: Arc<World>) -> Result<()> {
         .chain(session.page.page_errors())
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
+
     Ok(())
+}
+
+/// Creates two tasks of the network project and opens the first one with the list beside it.
+/// Returns their keys.
+async fn two_tasks_with_the_first_open(world: &World) -> Result<(String, String)> {
+    let (env, session) = (&world.env, &world.session);
+    let first = session
+        .create_task(env, data::NETWORK_PROJECT_KEY, "Focus, first.", None)
+        .await?;
+    let second = session
+        .create_task(env, data::NETWORK_PROJECT_KEY, "Focus, second.", None)
+        .await?;
+    session
+        .page
+        .goto(
+            &format!(
+                "{}/tasks/{first}?project={}",
+                env.base_url,
+                data::NETWORK_PROJECT_KEY
+            ),
+            None,
+        )
+        .await?;
+    expect(session.page.locator("#task-head"))
+        .to_contain_text(&first)
+        .await?;
+    Ok((first, second))
+}
+
+/// task-ui, "Task selected from the list": a keyboard activation of a row puts focus on the head
+/// of that task, with a visible focus outline.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn selecting_a_task_with_the_keyboard_focuses_its_head_with_a_visible_outline() -> Result<()>
+{
+    fixture::run(
+        "selecting_a_task_with_the_keyboard_focuses_its_head_with_a_visible_outline",
+        |world| async move {
+            let session = &world.session;
+            let (first, second) = two_tasks_with_the_first_open(&world).await?;
+
+            let row = session.page.locator(format!("#row-{second} a"));
+            row.focus().await?;
+            row.press("Enter", None).await?;
+
+            expect(session.page.locator("#task-head"))
+                .to_contain_text(&second)
+                .await
+                .with_context(|| format!("{second} replaces {first}"))?;
+            expect(session.page.locator("#task-head"))
+                .to_be_focused()
+                .await
+                .context("focus is on the head of the opened task")?;
+            let outline = session
+                .evaluate(
+                    "read the outline of the focused head",
+                    "getComputedStyle(document.activeElement).outlineStyle",
+                )
+                .await?;
+            assert!(
+                !outline.contains("none"),
+                "visible focus outline: {outline}"
+            );
+            Ok(())
+        },
+    )
+    .await
+}
+
+/// task-ui, "Selecting a task fails" and "Failed selection keeps focus": the load of the selected
+/// task is answered by the server with an error (the request is sent to a task that does not
+/// exist). A toast appears, the open task stays shown, the URL is the same and focus stays on
+/// the row.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_failed_selection_shows_a_toast_and_keeps_the_open_task_the_url_and_the_focus()
+-> Result<()> {
+    fixture::run(
+        "a_failed_selection_shows_a_toast_and_keeps_the_open_task_the_url_and_the_focus",
+        |world| async move {
+            let session = &world.session;
+            let (first, second) = two_tasks_with_the_first_open(&world).await?;
+            // A real 404 rather than the 500 of the scenario: it takes the same `error_answers`
+            // path, and the unit tests of `df-web` (`htmx/tests.rs`) cover the 500.
+            let missing = format!(
+                "{}/tasks/{}-404",
+                world.env.base_url,
+                data::NETWORK_PROJECT_KEY
+            );
+            session
+                .page
+                .route(&format!("**/tasks/{second}?*"), move |route| {
+                    let missing = missing.clone();
+                    async move {
+                        route
+                            .continue_(Some(ContinueOptions::builder().url(missing).build()))
+                            .await
+                    }
+                })
+                .await?;
+            let url = session.page.url();
+
+            let next = session.page.locator(format!("#row-{second} a"));
+            next.focus().await?;
+            next.press("Enter", None).await?;
+
+            expect(session.page.locator("#toasts"))
+                .to_contain_text("404 Not found")
+                .await
+                .context("the failed selection shows a toast")?;
+            assert_eq!(session.page.url(), url, "the URL stays");
+            expect(session.page.locator("#ws-detail"))
+                .to_contain_text(&first)
+                .await
+                .context("the open task stays shown")?;
+            expect(next)
+                .to_be_focused()
+                .await
+                .context("focus stays on the row")?;
+            Ok(())
+        },
+    )
+    .await
+}
+
+/// task-ui, "Live update does not move focus": another viewer renames the task, which replaces
+/// the task head on this page while the cursor is in the message input.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_live_update_of_the_task_head_leaves_the_focus_in_the_message_input() -> Result<()> {
+    fixture::run(
+        "a_live_update_of_the_task_head_leaves_the_focus_in_the_message_input",
+        |world| async move {
+            let (env, session) = (&world.env, &world.session);
+            let (first, _second) = two_tasks_with_the_first_open(&world).await?;
+            let input = session.page.locator("#message");
+            input.focus().await?;
+            expect(input.clone()).to_be_focused().await?;
+
+            let renamer = Session::start_logged_in(env).await?;
+            renamer.open_task(env, &first).await?;
+            let title = world.unique("Renamed while typing");
+            renamer
+                .page
+                .get_by_role(
+                    AriaRole::Button,
+                    Some(GetByRoleOptions::default().name("Rename task")),
+                )
+                .click(None)
+                .await?;
+            renamer.page.locator("#title").fill(&title, None).await?;
+            button_in(&renamer.page.locator("#task-head"), "Save")
+                .click(None)
+                .await?;
+
+            expect(session.page.locator("#task-head"))
+                .to_contain_text(&title)
+                .await
+                .context("the live update replaced the head")?;
+            expect(input)
+                .to_be_focused()
+                .await
+                .context("focus stays in the message input")?;
+            renamer.close_page().await;
+            Ok(())
+        },
+    )
+    .await
+}
+
+/// web-ui-shell, "Live updates reconnect": the live connection of the task page drops and
+/// returns; no toast appears.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_dropped_and_restored_live_connection_shows_no_toast() -> Result<()> {
+    fixture::run(
+        "a_dropped_and_restored_live_connection_shows_no_toast",
+        |world| async move {
+            let session = &world.session;
+            let (first, _second) = two_tasks_with_the_first_open(&world).await?;
+
+            session.set_offline(true).await?;
+            let extra =
+                db::raise_text_question(&world.pool, &first, &world.unique("While offline?"))
+                    .await?;
+            session.set_offline(false).await?;
+
+            // The request raised while offline can only arrive through the reconnect.
+            expect(session.request_card(extra))
+                .with_timeout(RECONNECT_TIMEOUT)
+                .to_be_visible()
+                .await?;
+            expect(session.page.locator("#toasts > *"))
+                .to_have_count(0)
+                .await
+                .context("no toast after the reconnect")?;
+            Ok(())
+        },
+    )
+    .await
+}
+
+/// task-ui, "Toast region on every page": at 390 px an error toast lies above the floating
+/// create button and the bottom bar.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn on_a_phone_an_error_toast_sits_above_the_create_button_and_the_bottom_bar() -> Result<()> {
+    fixture::run(
+        "on_a_phone_an_error_toast_sits_above_the_create_button_and_the_bottom_bar",
+        |world| async move {
+            let (env, session) = (&world.env, &world.session);
+            session
+                .page
+                .set_viewport_size(Viewport {
+                    width: 390,
+                    height: 800,
+                })
+                .await?;
+            session
+                .page
+                .goto(&format!("{}/tasks", env.base_url), None)
+                .await?;
+            // The create button's request goes to a task that does not exist: the server's 404.
+            let missing = format!("{}/tasks/{}-404", env.base_url, data::PROJECT_KEY);
+            session
+                .page
+                .route("**/tasks/compose*", move |route| {
+                    let missing = missing.clone();
+                    async move {
+                        route
+                            .continue_(Some(ContinueOptions::builder().url(missing).build()))
+                            .await
+                    }
+                })
+                .await?;
+            // By role and name only the visible button matches: the rail's is hidden on a phone.
+            let create = button(&session.page, "New task");
+            create.click(None).await?;
+            let toast = session.page.locator("#toasts > *");
+            expect(toast.clone()).to_be_visible().await?;
+
+            let toast = toast.bounding_box().await?.context("box of the toast")?;
+            let create = create
+                .bounding_box()
+                .await?
+                .context("box of the create button")?;
+            let bar = session
+                .page
+                .locator("#mobile-menu")
+                .bounding_box()
+                .await?
+                .context("box of the bottom bar")?;
+            let bottom = toast.y + toast.height;
+            assert!(
+                bottom <= create.y,
+                "toast ends at {bottom}, button starts at {}",
+                create.y
+            );
+            assert!(
+                bottom <= bar.y,
+                "toast ends at {bottom}, bar starts at {}",
+                bar.y
+            );
+            Ok(())
+        },
+    )
+    .await
+}
+
+/// web-ui-shell, "Unreachable server shows a toast": a message post that gets no answer shows
+/// the network toast, and the input keeps its text.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn a_message_post_without_an_answer_shows_the_network_toast_and_keeps_the_text() -> Result<()>
+{
+    fixture::run(
+        "a_message_post_without_an_answer_shows_the_network_toast_and_keeps_the_text",
+        |world| async move {
+            let (env, session) = (&world.env, &world.session);
+            let key = session
+                .create_task(env, data::NETWORK_PROJECT_KEY, "Network toast.", None)
+                .await?;
+            session.open_task(env, &key).await?;
+            session
+                .page
+                .route(
+                    "**/messages",
+                    |route| async move { route.abort(None).await },
+                )
+                .await?;
+
+            let text = world.unique("keep this text");
+            session.send_message(&text).await?;
+
+            expect(session.page.locator("#toasts"))
+                .to_contain_text("Could not reach the server")
+                .await
+                .context("the network toast")?;
+            expect(session.page.locator("#message"))
+                .to_have_value(&text)
+                .await
+                .context("the input keeps its text")?;
+            Ok(())
+        },
+    )
+    .await
 }
 
 /// task-ui, "Sort on a phone": at 390 px the sort menu is in the title row, choosing an option

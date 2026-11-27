@@ -3,7 +3,7 @@
 Known shortcomings that were deferred on purpose. Each entry says what is wrong, when it matters, and how to fix it.
 
 - **Fixing an entry:** add a test that fails without the fix, then delete the entry in the same change.
-- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-132.
+- **Adding an entry:** use the next free ID. IDs are never reused. The next free ID is TD-133.
 - Origin of TD-1 to TD-7: code review of the iteration-1 agent runtime (2026-10-19). The `TD-n (Rn)` headings give the review IDs, which commit messages and code comments may refer to.
 - Origin of TD-8 to TD-26: code review of `iter1-run-orchestration` (`df-agent-channel`, 2026-10-19).
 - Origin of TD-27: removal of remote build execution (2026-10-20).
@@ -118,6 +118,7 @@ Entries tracked in a GitHub issue or an OpenSpec change link it in the Issue col
 | TD-129 | low   | design file (PenPot) | Project settings boards keep a white panel in the Dark theme preview |
 | TD-130 | low   | `plugins/forgejo`, `plugins/github` | Both plugins carry the same issue-list page cursor code |
 | TD-131 | low   | `df-web` persona signing key | `verify-key` error statuses for an unknown persona and an unreadable Secret are untested |
+| TD-132 | low   | `df-web` scripts | `select(row)` is duplicated in the task and chat list components |
 
 ## Entries
 
@@ -851,6 +852,18 @@ The README row of `POST /personas/{id}/verify-key` promises two error answers th
 **Matters when:** someone changes `verify_forgejo` or `SigningKeySection::from_db`. A wrong status, or a token signed for an unknown persona, would go unnoticed.
 
 **Fix:** two df-web tests. A random persona id → 404 and no `persona.signing_key.forge_verify` audit entry. A missing Secret for a persona with a stored key → 422 with the reason in the dialog.
+
+Origin of TD-132: code review of `web-htmx-robustness` (`df-web`, 2026-11-27). The `TD-n (ID)` heading gives the ID used in that review.
+
+### TD-132 (S5). `select(row)` is duplicated in the task and chat list components
+
+`crates/df-web/scripts/workspace.ts`, `crates/df-web/scripts/chatLayout.ts`
+
+Both components carry the same `select(row)`: set `body.dataset.view = 'task'`, close the details, clear the marked row of `row.closest('[data-rows]')` and mark the new one. The test `both_workspaces_clear_the_marked_row_of_their_own_list_only` has to check both copies.
+
+**Matters when:** a third list view needs row selection, or the selection behaviour changes; both copies must change in step.
+
+**Fix:** move `select(row)` into one shared function that both components call, and test it once.
 
 [#121]: https://github.com/prskr/dark-factory/issues/121
 [#122]: https://github.com/prskr/dark-factory/issues/122

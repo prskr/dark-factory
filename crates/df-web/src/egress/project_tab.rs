@@ -26,15 +26,13 @@ use super::allowlist::dialogs::{Answer, respond};
 use super::allowlist::rows::{self, RowEnv, scope_label, target};
 use super::allowlist::{Origin, validate_required_port};
 use crate::WebState;
-use crate::auth::CurrentUser;
+use crate::auth::{CurrentUser, error_page};
 use crate::components::{
     ButtonKind, Cell, Icon, ProjectHosts, action_class, data_table, empty_panel, icon, td, th,
 };
 use crate::config_pages::open_modal;
+use crate::htmx::Region;
 use crate::responses::{internal_error, not_found};
-
-/// Selector of the region.
-const REGION: &str = "#project-egress";
 
 /// Id of the empty form that the posting buttons of the tab belong to.
 const ACTIONS_FORM: &str = "egress-actions";
@@ -63,7 +61,7 @@ pub(super) async fn region(
     headers: HeaderMap,
     Path(key): Path<String>,
 ) -> Response {
-    if !crate::auth::is_htmx(&headers) {
+    if !crate::htmx::is_htmx(&headers) {
         return Redirect::to(&format!("/projects/{key}?tab=egress")).into_response();
     }
     match region_markup(&state, &key).await {
@@ -104,7 +102,11 @@ pub(super) async fn make_global(
     Form(form): Form<MakeGlobalForm>,
 ) -> Response {
     let Ok(port) = validate_required_port(&form.port) else {
-        return StatusCode::BAD_REQUEST.into_response();
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "Bad request",
+            "The port is not valid.",
+        );
     };
     let principal = user.principal();
     let actor = Actor {
@@ -185,7 +187,7 @@ fn render(key: &str, entries: &[EntryRecord], projects: &ProjectHosts) -> Markup
     let env = RowEnv {
         projects,
         query: &query,
-        region: REGION,
+        region: Region::ProjectEgress.selector(),
     };
     let own: Vec<&EntryRecord> = entries
         .iter()
@@ -199,7 +201,7 @@ fn render(key: &str, entries: &[EntryRecord], projects: &ProjectHosts) -> Markup
         .collect();
     let hints = hints(entries);
     html! {
-        div id="project-egress" x-data="{ confirming: '' }" class="space-y-6" {
+        div id=(Region::ProjectEgress.id()) x-data="{ confirming: '' }" class="space-y-6" {
             div {
                 h2 class="text-base font-semibold" { "Egress rules" }
                 p class="mt-1 text-sm text-muted" {
@@ -313,7 +315,7 @@ fn hint_line(entry: &EntryRecord, hint: Option<&Hint>, env: &RowEnv<'_>, stacked
             "Already allowed everywhere".to_string(),
             html! {
                 button type="button" hx-delete={"/egress/allowlist/" (entry.id) (env.query)}
-                    hx-target=(REGION) hx-swap="outerHTML" class=(HINT_ACTION) { "Remove" }
+                    hx-target=(Region::ProjectEgress.selector()) hx-swap="outerHTML" class=(HINT_ACTION) { "Remove" }
             },
         ),
     };

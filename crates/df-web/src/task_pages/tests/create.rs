@@ -119,7 +119,7 @@ async fn linked_issue_is_stored_and_shown_as_a_chip_when_the_composer_reopens() 
     ]);
     let html = text(app.post("/tasks", &body, &cookie).await).await;
     assert!(
-        html.contains("issue: '7'") && html.contains("x-text=\"issue\""),
+        html.contains("&quot;issue&quot;:&quot;7&quot;") && html.contains("x-text=\"issue\""),
         "{html}"
     );
 
@@ -151,7 +151,15 @@ async fn composer_defaults_to_the_filtered_project_and_offers_the_keyboard_short
         html.contains("x-on:keydown.ctrl.enter.prevent")
             && html.contains("x-on:keydown.meta.enter.prevent")
     );
-    assert!(html.contains("localStorage.getItem('df.composer')"));
+    // The remembered choice is the `composer` component's: no script code in the markup.
+    assert!(html.contains("x-data=\"composer({"), "{html}");
+    assert!(html.contains("x-on:submit=\"remember()\""), "{html}");
+    // (The dialog around the form has its own `x-init`.)
+    let form_tag = tag_around(&html, "id=\"composer-form\"");
+    assert!(
+        !form_tag.contains("x-init") && !html.contains("localStorage"),
+        "{html}"
+    );
     assert!(html.contains("aria-label=\"Close\""));
     // An unknown project key falls back to the first project without marking it explicit.
     let html = text(app.get("/tasks/compose?project=NOPE", &cookie).await).await;
@@ -160,6 +168,29 @@ async fn composer_defaults_to_the_filtered_project_and_offers_the_keyboard_short
         app.get("/tasks/new", &cookie).await.status(),
         StatusCode::NOT_FOUND
     );
+}
+
+#[test]
+fn the_composer_component_remembers_the_choice_and_survives_blocked_storage() {
+    let js = crate::assets::script_source("composer.ts");
+
+    assert!(js.contains("Alpine.data('composer'"), "{js}");
+    assert!(
+        js.contains("data-explicit") || js.contains("dataset.explicit"),
+        "{js}"
+    );
+    let accesses: Vec<&str> = js
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//") && l.contains("localStorage"))
+        .collect();
+    assert_eq!(accesses.len(), 2, "one read, one write: {accesses:?}");
+    assert_eq!(
+        js.matches("try {").count(),
+        accesses.len(),
+        "each access inside try/catch: {js}"
+    );
+    assert_eq!(js.matches("} catch (e) {}").count(), accesses.len(), "{js}");
+    assert!(crate::layout::COMPONENT_SCRIPTS.contains(&"composer.js"));
 }
 
 #[tokio::test]

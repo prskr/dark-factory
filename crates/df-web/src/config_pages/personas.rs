@@ -32,6 +32,7 @@ use crate::components::{
     AvatarSize, FormErrors, ICON_BUTTON_CLASS, Icon, empty_panel, form_error, harness_label, icon,
     persona_avatar, persona_avatar_preview, text_field,
 };
+use crate::htmx::Region;
 use crate::layout::{Nav, Shell};
 use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 
@@ -267,7 +268,7 @@ fn create_form(
     providers: &[ModelProviderRecord],
 ) -> Markup {
     html! {
-        form id="form" class="space-y-4" hx-post="/personas" hx-target="#form" hx-swap="outerHTML"
+        form id=(Region::Form.id()) class="space-y-4" hx-post="/personas" hx-target=(Region::Form.selector()) hx-swap="outerHTML"
             x-data={"personaAvatar(" (serde_json::json!(values.display_name)) ")"} "x-on:input"="track($event)" {
             (form_error(errors))
             div class="space-y-5" {
@@ -377,7 +378,7 @@ fn with_empty(mut options: Vec<(String, String)>) -> Vec<(String, String)> {
 
 fn personas_region(personas: &[PersonaRecord], providers: &[ModelProviderRecord]) -> Markup {
     html! {
-        div id="config-list" {
+        div id=(Region::ConfigList.id()) {
             (list_header("Personas", personas.len(), create_button("/personas/new", "New persona"), None))
             @if personas.is_empty() {
                 (empty_panel(
@@ -439,7 +440,7 @@ async fn personas_list(State(state): State<WebState>, shell: Shell) -> Response 
 }
 
 async fn persona_new(State(state): State<WebState>, headers: HeaderMap) -> Response {
-    if !crate::auth::is_htmx(&headers) {
+    if !crate::htmx::is_htmx(&headers) {
         return Redirect::to("/personas").into_response();
     }
     let providers = match df_db::model_providers::list_model_providers(&state.pool).await {

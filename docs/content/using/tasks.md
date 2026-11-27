@@ -21,6 +21,11 @@ and an open pull request from it is attached
 ([details](existing-branches.md#from-the-composer)). If the branch is taken or not usable, the
 composer stays open with the error above the buttons and keeps everything you entered.
 
+The composer remembers the project and the persona of your last task in this browser. It
+preselects them when it opens, unless the task list is filtered to a project (that project wins) or
+the remembered one is no longer offered. It works without browser storage and then opens with its
+defaults.
+
 ## Follow and steer it
 
 The task view has three columns: the task list, the transcript and the details. The list and its
@@ -57,6 +62,9 @@ counts hold tasks only; [chats](chats.md) have their own pages under **Chats**.
   flat list. Both update live ([delegation](delegation.md#in-the-task-view)).
 - **Artifacts**: once the agent has written an [artifact](artifacts.md), the details get an
   Artifacts tab with a card per artifact; an artifact opens next to the transcript.
+
+When you select a task in the list with the keyboard, focus moves to the task's header, which a
+screen reader reads as the key and the title.
 
 The transcript shows the author of each message. The author of an agent message is its persona:
 the display name with the `@handle` ("Linus @linus · 10:42") and the persona's
@@ -214,6 +222,23 @@ From the status menu in the details:
 | **Reset workspace** | Deletes the task's volume (not possible while a run is active). Committed work and the WIP snapshot stay in Git; the next run clones again. |
 
 All of them, and Interrupt (`run.interrupt`), are audited with your name and need the same permission.
+
+## When something fails
+
+When an action or a partial load fails (for example removing a queued message of a task that no
+longer exists, or a server error while selecting a task in the list), a toast appears in the
+corner of the page with the status, the title and the reason, such as **404 Not found** and "The
+task does not exist.". The page stays as it was: the region you acted on keeps its content, the
+URL does not change and focus stays where it was. A toast stays until you dismiss it with its
+**Dismiss** button or the next toast replaces it. A screen reader announces it.
+
+If the browser gets no answer at all, the toast says **Could not reach the server** and "Check your
+connection and try again."; what you typed stays in the input. Live updates reconnect on their own
+without a toast.
+
+Forms that are not valid (an empty description in the composer) show their message in place, with
+no toast. Opening a page by its URL, reloading it or going back to it shows the full error page
+with the links **Home** and **Log out**.
 
 ## Where the work is
 

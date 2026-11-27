@@ -209,7 +209,13 @@ mod tests {
         for script in crate::layout::COMPONENT_SCRIPTS {
             let file = get_asset(script).unwrap_or_else(|| panic!("{script} is embedded"));
             let js = std::str::from_utf8(&file.data).unwrap();
-            assert!(js.contains("Alpine.data("), "{script}");
+            // The plain scripts listen on `document` instead of registering a component.
+            let registers = if crate::layout::PLAIN_SCRIPTS.contains(&script) {
+                "addEventListener("
+            } else {
+                "Alpine.data("
+            };
+            assert!(js.contains(registers), "{script}");
         }
         let tabs = String::from_utf8(get_asset("tabs.js").unwrap().data.into_owned()).unwrap();
         // The source has `initial: string` and `move(event: KeyboardEvent): void`.

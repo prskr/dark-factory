@@ -51,7 +51,7 @@ document.addEventListener('alpine:init', () => {
     select(row: HTMLElement): void {
       document.body.dataset.view = 'task'
       this.details = false
-      document.querySelectorAll('#chat-rows [aria-current]').forEach((e) => e.removeAttribute('aria-current'))
+      row.closest('[data-rows]')?.querySelectorAll('[aria-current]').forEach((e) => e.removeAttribute('aria-current'))
       row.setAttribute('aria-current', 'page')
     },
     sheetToggle(): void {

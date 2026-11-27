@@ -29,6 +29,7 @@ use crate::components::PersonaLabel;
 use crate::components::{
     ButtonKind, EmptyPanel, EmptySize, FormErrors, Icon, action_class, icon, logo,
 };
+use crate::htmx::Region;
 use crate::layout::{Shell, View, workspace_layout};
 use crate::responses::{htmx_redirect, internal_error, invalid, not_found};
 use crate::sse;
@@ -170,7 +171,7 @@ async fn workspace(
         div class="ws" ":data-collapsed"="collapsed" ":data-list-collapsed"="listCollapsed" "x-on:keydown.escape.window"="details = false"
             x-data="workspace" {
             (list_column(&items, &projects, filters, current, &shell))
-            div id="ws-detail" x-data=[selected.as_ref().map(|s| crate::artifacts::split_args(&s.detail.key))] {
+            div id=(Region::WsDetail.id()) x-data=[selected.as_ref().map(|s| crate::artifacts::split_args(&s.detail.key))] {
                 @match &selected {
                     Some(s) => (selected_columns(s)),
                     None => section class="ws-main items-center justify-center" aria-label="Task" {
@@ -181,7 +182,7 @@ async fn workspace(
                             text: "Pick a task from the list, or describe a new one and a persona starts on it.",
                             phone_hint: None,
                             action: html! {
-                                button type="button" hx-get=(compose) hx-target="#composer-slot" hx-swap="innerHTML"
+                                button type="button" hx-get=(compose) hx-target=(Region::ComposerSlot.selector()) hx-swap="innerHTML"
                                     class={(action_class(ButtonKind::Primary)) " mt-1.5"} { (icon(Icon::Plus)) "New task" }
                             },
                         }.render())
@@ -226,16 +227,15 @@ fn selected_columns(s: &Selected) -> Markup {
 ///
 /// Follows new and growing items (DOM mutations) and a changed viewport or content height (queued
 /// messages, loaded images) while the reader is within 48 px of the bottom; a swapped-in container
-/// re-runs `x-init`, so opening another task lands at the bottom too.
+/// re-runs `init()` of `transcriptScroll` (`scripts/transcriptScroll.ts`), so opening another task
+/// lands at the bottom too.
 pub(crate) fn transcript_scroll(transcript: Markup) -> Markup {
     html! {
         // `relative`: the screen-reader-only text of a card (an absolutely positioned legend or
         // "chosen") then lies in this container and is clipped with it. Without it a card far
         // down the transcript made the page itself taller than the window.
         div id="transcript-scroll" class="relative min-h-0 flex-1 overflow-y-auto p-4"
-            x-data="{ pinned: true }"
-            x-init="const down = () => { if (pinned) $el.scrollTop = $el.scrollHeight }; down(); new MutationObserver(down).observe($el, { childList: true, subtree: true, characterData: true }); new ResizeObserver(down).observe($el); new ResizeObserver(down).observe($el.querySelector('#transcript'))"
-            "x-on:scroll"="pinned = $el.scrollHeight - $el.scrollTop - $el.clientHeight < 48" {
+            x-data="transcriptScroll" "x-on:scroll"="onScroll()" {
             (transcript)
         }
     }

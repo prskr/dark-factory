@@ -155,11 +155,11 @@ async fn deny_always_creates_a_deny_rule_for_exactly_the_host() {
         .await;
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response.headers().get("hx-retarget").unwrap(),
-        "#allow-toast"
-    );
+    assert!(response.headers().get("hx-retarget").is_none());
+    assert_eq!(response.headers().get("hx-reswap").unwrap(), "none");
     let toast = text(response).await;
+    crate::testkit::assert_toast(&toast);
+    assert!(toast.contains("aria-label=\"Dismiss\""), "{toast}");
     assert!(
         toast.contains("Deny rule created") && toast.contains("View rule"),
         "{toast}"
@@ -197,6 +197,13 @@ async fn deny_always_rejects_wildcards_and_ip_addresses() {
             response.status(),
             StatusCode::UNPROCESSABLE_ENTITY,
             "{host}"
+        );
+        assert!(response.headers().get("hx-retarget").is_none(), "{host}");
+        let toast = text(response).await;
+        crate::testkit::assert_toast(&toast);
+        assert!(
+            toast.contains("Rule not created") && toast.contains("aria-label=\"Dismiss\""),
+            "{host}: {toast}"
         );
     }
     assert!(df_db::list_entries(&app.pool).await.unwrap().is_empty());

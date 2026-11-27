@@ -16,7 +16,7 @@
 // released sheet closes, `fullAbove` the share over which it becomes full height (otherwise half),
 // `dragSlop` the pixels a press has to move before it counts as a drag.
 //
-// Methods: `setCollapsed(value)`, `setListCollapsed(value)`, `sheetToggle()` (tap or keyboard on the handle), and the
+// Methods: `setCollapsed(value)`, `setListCollapsed(value)`, `select(row)`, `sheetToggle()` (tap or keyboard on the handle), and the
 // pointer sequence `sheetDragStart(e)`, `sheetDragMove(e)`, `sheetDragEnd(e)` (pointerup) and
 // `sheetDragCancel(e)` (pointercancel: no click follows, so `dragged` is reset).
 interface SheetDrag {
@@ -49,6 +49,13 @@ document.addEventListener('alpine:init', () => {
     setListCollapsed(value: boolean): void {
       this.listCollapsed = value
       try { localStorage.setItem('df.list.collapsed', value ? '1' : '0') } catch (e) {}
+    },
+    // A task row was clicked: show the task pane (phone), close the details and mark the row.
+    select(row: HTMLElement): void {
+      document.body.dataset.view = 'task'
+      this.details = false
+      row.closest('[data-rows]')?.querySelectorAll('[aria-current]').forEach((e) => e.removeAttribute('aria-current'))
+      row.setAttribute('aria-current', 'page')
     },
     sheetToggle(): void {
       if (this.dragged) { this.dragged = false; return }

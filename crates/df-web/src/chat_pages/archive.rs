@@ -18,6 +18,7 @@ use crate::components::{
     ButtonKind, DialogStyle, ICON_BUTTON_CLASS, Icon, action_class, avatar, dialog_with, icon,
     initials,
 };
+use crate::htmx::Region;
 use crate::responses::{internal_error, not_found};
 use crate::transcript::render_transcript;
 
@@ -149,7 +150,7 @@ async fn body(
         None => None,
     };
     Ok(html! {
-        div id="archive-body" x-data=(format!("archiveModal({})", serde_json::json!({ "selected": selected.is_some() })))
+        div id=(Region::ArchiveBody.id()) x-data=(format!("archiveModal({})", serde_json::json!({ "selected": selected.is_some() })))
             class="flex h-[calc(100dvh-4.625rem)] min-h-0 md:h-[75dvh]" {
             aside ":class"="chat ? 'max-md:hidden' : ''"
                 class={"flex min-h-0 flex-col border-r border-line " (if selected.is_some() { "w-full md:w-80 md:shrink-0" } else { "w-full" })} {
@@ -157,7 +158,7 @@ async fn body(
                     label class="sr-only" for="archive-search" { "Search archived chats" }
                     input id="archive-search" name="q" type="search" value=(stand.q) placeholder="Search topic, persona and messages"
                         hx-get=(Stand { project: stand.project, q: "" }.url(current, None, None))
-                        hx-trigger="input changed delay:250ms, search" hx-target="#archive-body" hx-swap="outerHTML"
+                        hx-trigger="input changed delay:250ms, search" hx-target=(Region::ArchiveBody.selector()) hx-swap="outerHTML"
                         class="min-h-11 w-full rounded-[10px] border border-line-strong bg-transparent px-3 text-sm lg:min-h-9";
                     p class="mt-1 text-xs text-faint" { (chats.len()) " of " (total) " archived" }
                 }
@@ -165,7 +166,7 @@ async fn body(
                     @for chat in chats {
                         @let url = stand.url(Some(&chat.key), None, None);
                         li {
-                            a href=(url) hx-get=(url) hx-target="#archive-body" hx-swap="outerHTML"
+                            a href=(url) hx-get=(url) hx-target=(Region::ArchiveBody.selector()) hx-swap="outerHTML"
                                 "x-on:click"="chat = true"
                                 aria-current=[(current == Some(chat.key.as_str())).then_some("true")]
                                 class="block border-b border-line px-4 py-3 hover:bg-sunk aria-[current=true]:bg-accent-soft" {
@@ -220,7 +221,7 @@ async fn chat_pane(
     let tab_link = |label: &str, target: Tab, name: &str| {
         let url = stand.url(Some(&chat.key), Some(name), None);
         html! {
-            a href=(url) hx-get=(url) hx-target="#archive-body" hx-swap="outerHTML" role="tab" aria-selected=(tab == target)
+            a href=(url) hx-get=(url) hx-target=(Region::ArchiveBody.selector()) hx-swap="outerHTML" role="tab" aria-selected=(tab == target)
                 class={"min-h-11 content-center border-b-2 px-1 text-sm font-medium lg:min-h-9 " (if tab == target { "border-accent text-ink" } else { "border-transparent text-muted" })} { (label) }
         }
     };
@@ -266,7 +267,7 @@ async fn artifacts_content(
         let back = stand.url(Some(&chat.key), Some("artifacts"), None);
         return Ok(html! {
             div class="flex min-h-0 flex-1 flex-col" {
-                a href=(back) hx-get=(back) hx-target="#archive-body" hx-swap="outerHTML"
+                a href=(back) hx-get=(back) hx-target=(Region::ArchiveBody.selector()) hx-swap="outerHTML"
                     class="flex min-h-11 items-center gap-1 border-b border-line px-4 text-sm font-medium text-accent-text" {
                     (icon(Icon::ArrowLeft)) "Artifacts"
                 }

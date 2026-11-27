@@ -6,13 +6,14 @@
 use std::collections::{HashMap, VecDeque};
 
 use df_proto::gateway::v1::{FlowEvent, Phase};
-use maud::{Markup, html};
+use maud::{Markup, PreEscaped, html};
 
 use super::context::Context;
 use super::filter::Filter;
 use super::graph::{self, Edges};
 use super::rows::{row, row_id};
 use crate::components::{ButtonKind, action_class};
+use crate::htmx::{Region, partial};
 
 /// Flows a viewer keeps track of (open ones and their edges). A gateway pod keeps 10,000
 /// events, so more are rare; past the cap the set is cleared and the closes of those flows are
@@ -170,7 +171,7 @@ impl Viewer {
                         }
                     }
                     None => batch.replacements.push_str(
-                        &partial(&format!("#{id}"), "outerMorph", &row(event, &self.context))
+                        &partial(&format!("#{id}"), "outerMorph", row(event, &self.context))
                             .into_string(),
                     ),
                 },
@@ -209,8 +210,8 @@ impl Viewer {
     /// showed is cleared.
     pub(in crate::egress) fn backlog_message(&mut self, backlog: &[FlowEvent]) -> String {
         let state = self.apply_backlog(backlog);
-        let mut body = partial("#flows tbody", "innerHTML", &state.rows).into_string();
-        body.push_str(&partial_str("#graph", "innerHTML", &state.graph));
+        let mut body = partial(&tbody(), "innerHTML", &state.rows).into_string();
+        body.push_str(&graph_partial(&state.graph));
         body.push_str(&counts_partials(&state.counts, &self.filter));
         self.sent_graph = Some(state.graph);
         self.sent_counts = Some(state.counts);
@@ -234,7 +235,7 @@ impl Viewer {
                 self.forget_row(trimmed);
             }
             let rows = html! { @for event in rows.iter().rev() { (row(event, &self.context)) } };
-            body.push_str(&partial("#flows tbody", "afterbegin", &rows).into_string());
+            body.push_str(&partial(&tbody(), "afterbegin", &rows).into_string());
         }
         body.push_str(&replacements);
         body.push_str(&self.state_partials());
@@ -257,7 +258,7 @@ impl Viewer {
         let mut body = String::new();
         let graph = self.render_graph();
         if self.sent_graph.as_ref() != Some(&graph) {
-            body.push_str(&partial_str("#graph", "innerHTML", &graph));
+            body.push_str(&graph_partial(&graph));
             self.sent_graph = Some(graph);
         }
         if self.sent_counts.as_ref() != Some(&self.counts) {
@@ -321,15 +322,27 @@ struct RowBatch<'a> {
 fn counts_partials(counts: &Counts, filter: &Filter) -> String {
     let mut body = String::new();
     for (target, number) in [
-        ("#count-all", counts.all),
-        ("#count-blocked", counts.blocked),
-        ("#count-allowed", counts.allowed),
+        (Region::CountAll, counts.all),
+        (Region::CountBlocked, counts.blocked),
+        (Region::CountAllowed, counts.allowed),
     ] {
-        body.push_str(&partial(target, "innerHTML", &html! { (number) }).into_string());
+        body.push_str(&partial(target.selector(), "innerHTML", html! { (number) }).into_string());
     }
-    body.push_str(&partial("#event-count", "innerHTML", &event_count(counts)).into_string());
     body.push_str(
-        &partial("#flows-empty", "innerHTML", &empty_state(counts, filter)).into_string(),
+        &partial(
+            Region::EventCount.selector(),
+            "innerHTML",
+            event_count(counts),
+        )
+        .into_string(),
+    );
+    body.push_str(
+        &partial(
+            Region::FlowsEmpty.selector(),
+            "innerHTML",
+            empty_state(counts, filter),
+        )
+        .into_string(),
     );
     body
 }
@@ -339,10 +352,12 @@ fn row_key(event: &FlowEvent) -> Option<String> {
     (event.flow_id != 0).then(|| row_id(event))
 }
 
-fn partial(target: &str, swap: &str, inner: &Markup) -> Markup {
-    html! { hx-partial hx-target=(target) hx-swap=(swap) { (inner) } }
+/// The graph as a partial into its element.
+fn graph_partial(graph: &str) -> String {
+    partial(Region::Graph.selector(), "innerHTML", PreEscaped(graph)).into_string()
 }
 
-fn partial_str(target: &str, swap: &str, inner: &str) -> String {
-    format!("<hx-partial hx-target=\"{target}\" hx-swap=\"{swap}\">{inner}</hx-partial>")
+/// The body of the events table.
+fn tbody() -> String {
+    format!("{} tbody", Region::Flows.selector())
 }

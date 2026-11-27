@@ -5,6 +5,7 @@ use df_db::task_views::{Dependencies, TaskDetail};
 use maud::{Markup, html};
 
 use crate::components::{Icon, Tone, icon};
+use crate::htmx::Region;
 use crate::layout::item_path;
 
 /// The creator of a task: a board member by name, an agent as `KEY · persona` with the key of
@@ -29,7 +30,7 @@ pub(super) fn creator(task: &TaskDetail) -> Markup {
 pub(crate) fn dependencies_region(deps: &Dependencies, status: TaskStatus) -> Markup {
     let count = deps.waits_for.len() + deps.needed_by.len();
     html! {
-        div id="dependencies" class="ws-details-full" {
+        div id=(Region::Dependencies.id()) class="ws-details-full" {
             @if count > 0 {
                 details class="group space-y-2.5 border-b border-line px-5 py-4"
                     open[status == TaskStatus::AwaitingDependencies] {

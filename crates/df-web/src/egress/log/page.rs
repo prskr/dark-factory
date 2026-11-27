@@ -9,6 +9,7 @@ use super::graph::{DEFAULT_WIDTH as DEFAULT_GRAPH_WIDTH, MIN_WIDTH};
 use super::viewer::{Backlog, Counts, empty_state, event_count};
 use crate::components::forms::INPUT_CLASS;
 use crate::components::{ButtonKind, Icon, action_class, icon};
+use crate::htmx::Region;
 
 /// The controls of the *Advanced* row: like a form input, but as wide as their content, so a
 /// label and its control stay on one line.
@@ -56,8 +57,6 @@ pub(super) fn page_body(
             (filter_bar(filter, personas, &backlog.counts))
             (traffic(&events, filter, backlog))
             (details::panel())
-            // Where the allow action reports the created rule.
-            div id="allow-toast" role="status" aria-live="polite" class="fixed right-6 bottom-6 z-50" {}
         }
     }
 }
@@ -90,7 +89,7 @@ fn header() -> Markup {
 }
 
 fn segment(value: VerdictFilter, label: &str, selected: VerdictFilter, count: usize) -> Markup {
-    let id = format!("count-{}", value.param());
+    let id = value.count_region().id();
     html! {
         label class="relative" {
             input type="radio" name="verdict" value=(value.param()) checked[value == selected] class="peer sr-only";
@@ -99,6 +98,13 @@ fn segment(value: VerdictFilter, label: &str, selected: VerdictFilter, count: us
             }
         }
     }
+}
+
+/// The selector of the three segment counts, which sit outside the form's swap target.
+fn counts_selector() -> String {
+    [Region::CountAll, Region::CountBlocked, Region::CountAllowed]
+        .map(Region::selector)
+        .join(",")
 }
 
 fn filter_bar(filter: &Filter, personas: &[(String, String)], counts: &Counts) -> Markup {
@@ -112,7 +118,7 @@ fn filter_bar(filter: &Filter, personas: &[(String, String)], counts: &Counts) -
         form id="filters" method="get" action="/egress/log" class="mb-4 flex shrink-0 flex-col items-end gap-2"
             "x-on:input"="sync($el)" "x-on:change"="sync($el)"
             hx-get="/egress/log" hx-trigger="input changed delay:300ms, change" hx-target="#traffic" hx-select="#traffic"
-            hx-select-oob="#count-all,#count-blocked,#count-allowed" hx-swap="outerHTML" hx-push-url="true" {
+            hx-select-oob=(counts_selector()) hx-swap="outerHTML" hx-push-url="true" {
             div id="filter-row" class="flex flex-wrap items-center justify-end gap-2" {
                 button type="button" "x-show"="dirty" x-cloak[filter.is_empty()] "x-on:click"="clearFilters($el.form)"
                     class={(action_class(ButtonKind::Ghost)) " whitespace-nowrap"} { "Clear filters" }
@@ -180,7 +186,7 @@ fn traffic(events_url: &str, filter: &Filter, backlog: &Backlog) -> Markup {
                         class="relative min-h-0 flex-1 overflow-auto cursor-grab focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent-text"
                         "x-on:pointerdown"="graphDragStart($event)" "x-on:pointermove"="graphDragMove($event)"
                         "x-on:pointerup"="graphDragEnd()" "x-on:pointercancel"="graphDragEnd()" {
-                        div id="graph" { (PreEscaped(&backlog.graph)) }
+                        div id=(Region::Graph.id()) { (PreEscaped(&backlog.graph)) }
                     }
                 }
                 div role="separator" aria-orientation="vertical" aria-label="Resize connections and events"
@@ -205,10 +211,10 @@ fn events_panel(backlog: &Backlog, filter: &Filter) -> Markup {
         section id="events" aria-labelledby="events-title" class="@container flex min-h-0 min-w-0 flex-col rounded-xl border border-line bg-panel" {
             div class="flex shrink-0 items-baseline justify-between gap-3 border-b border-line px-5 py-3" {
                 h2 id="events-title" class="text-xs font-medium uppercase tracking-wide text-faint" { "Events · newest first" }
-                span id="event-count" class="font-mono text-xs text-faint" { (event_count(counts)) }
+                span id=(Region::EventCount.id()) class="font-mono text-xs text-faint" { (event_count(counts)) }
             }
             div id="flows-scroll" class="relative min-h-0 flex-1 overflow-auto has-[+#flows-empty:not(:empty)]:flex-none" {
-                table id="flows" class="w-full border-collapse text-left text-sm" {
+                table id=(Region::Flows.id()) class="w-full border-collapse text-left text-sm" {
                     thead {
                         tr class="text-xs font-medium uppercase tracking-wide text-faint" {
                             th scope="col" class=(th) { "Time" }
@@ -221,7 +227,7 @@ fn events_panel(backlog: &Backlog, filter: &Filter) -> Markup {
                     tbody data-limit=(filter.row_limit()) { (backlog.rows) }
                 }
             }
-            div id="flows-empty" class="flex shrink-0 grow items-center justify-center empty:grow-0" { (empty_state(counts, filter)) }
+            div id=(Region::FlowsEmpty.id()) class="flex shrink-0 grow items-center justify-center empty:grow-0" { (empty_state(counts, filter)) }
         }
     }
 }
@@ -247,13 +253,10 @@ mod tests {
     }
 
     #[test]
-    fn the_page_has_a_live_region_for_the_rule_created_toast() {
+    fn the_page_has_no_toast_region_of_its_own() {
+        // The layout's region shows the toasts of this page (`layout` tests).
         let html = page();
-        let toast = tag(&html, "id=\"allow-toast\"");
-        assert!(
-            toast.contains("role=\"status\"") && toast.contains("fixed"),
-            "{toast}"
-        );
+        assert!(!html.contains("allow-toast"), "{html}");
     }
 
     #[test]
