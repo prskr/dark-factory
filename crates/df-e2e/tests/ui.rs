@@ -1042,6 +1042,83 @@ async fn a_dropped_and_restored_live_connection_shows_no_toast() -> Result<()> {
     .await
 }
 
+/// task-ui, "Task selected from the list" and web-ui-shell, "Failed selection keeps focus", at
+/// 390 px: a row that loads shows the task screen with focus on its head; a row whose load fails
+/// leaves the list on screen with focus on the row.
+#[tokio::test]
+#[ignore = "needs the cluster of `just e2e-local`"]
+async fn on_a_phone_a_loaded_row_focuses_the_task_head_and_a_failed_one_keeps_the_list()
+-> Result<()> {
+    fixture::run(
+        "on_a_phone_a_loaded_row_focuses_the_task_head_and_a_failed_one_keeps_the_list",
+        |world| async move {
+            let (env, session) = (&world.env, &world.session);
+            let (first, second) = two_tasks_with_the_first_open(&world).await?;
+            session
+                .page
+                .set_viewport_size(Viewport {
+                    width: 390,
+                    height: 800,
+                })
+                .await?;
+            let list = format!(
+                "{}/tasks?project={}",
+                env.base_url,
+                data::NETWORK_PROJECT_KEY
+            );
+
+            session.page.goto(&list, None).await?;
+            let row = session.page.locator(format!("#row-{first} a"));
+            row.focus().await?;
+            row.press("Enter", None).await?;
+            let head = session.page.locator("#task-head");
+            expect(head.clone())
+                .to_contain_text(&first)
+                .await
+                .context("the task loads")?;
+            expect(head.clone())
+                .to_be_visible()
+                .await
+                .context("the phone shows the task screen")?;
+            expect(head)
+                .to_be_focused()
+                .await
+                .context("focus is on the head of the task")?;
+
+            let missing = format!("{}/tasks/{}-404", env.base_url, data::NETWORK_PROJECT_KEY);
+            session
+                .page
+                .route(&format!("**/tasks/{second}?*"), move |route| {
+                    let missing = missing.clone();
+                    async move {
+                        route
+                            .continue_(Some(ContinueOptions::builder().url(missing).build()))
+                            .await
+                    }
+                })
+                .await?;
+            session.page.goto(&list, None).await?;
+            let failing = session.page.locator(format!("#row-{second} a"));
+            failing.focus().await?;
+            failing.press("Enter", None).await?;
+            expect(session.page.locator("#toasts"))
+                .to_contain_text("404 Not found")
+                .await
+                .context("the failed load shows a toast")?;
+            expect(failing.clone())
+                .to_be_visible()
+                .await
+                .context("the phone keeps the list")?;
+            expect(failing)
+                .to_be_focused()
+                .await
+                .context("focus stays on the row")?;
+            Ok(())
+        },
+    )
+    .await
+}
+
 /// task-ui, "Toast region on every page": at 390 px an error toast lies above the floating
 /// create button and the bottom bar.
 #[tokio::test]
