@@ -53,7 +53,7 @@ async fn answer_question(world: &World, id: RequestId, question: &str, answer: &
     world
         .session
         .page
-        .locator(format!("{card} input[name=answer]"))
+        .locator(format!("{card} textarea[name=text]"))
         .fill(answer, None)
         .await
         .context("fill the question answer")?;

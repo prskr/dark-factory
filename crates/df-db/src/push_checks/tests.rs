@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use df_core::UserId;
+use df_core::{QuestionSpec, UserId};
 use df_proto::transcript::v1::content_block;
 
 use super::*;
@@ -473,7 +473,7 @@ async fn an_accepted_task_branch_push_closes_the_pending_exception_requests_only
         actor: &agent,
         blocking: false,
     };
-    let (question, _) = raise_question(&pool, from, "Which base?", &[])
+    let (question, _) = raise_question(&pool, from, QuestionSpec::text_question("Which base?"))
         .await
         .unwrap();
     record(

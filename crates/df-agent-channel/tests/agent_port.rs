@@ -1072,7 +1072,8 @@ async fn blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked()
         agent_message::Body::ToolCallRequest(ToolCallRequest {
             call_id: uuid::Uuid::now_v7().to_string(),
             tool_name: "ask_question".into(),
-            arguments_json: serde_json::json!({"text": text, "blocking": true}).to_string(),
+            arguments_json: serde_json::json!({"text": text, "kind": "text", "blocking": true})
+                .to_string(),
             attachment: Vec::new().into(),
         })
     };
@@ -1115,7 +1116,7 @@ async fn blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked()
         first.id,
         &peter,
         &["board-member".to_string()],
-        df_db::requests::Decision::Answer("Postgres".into()),
+        df_db::requests::Decision::Answer(df_core::QuestionAnswer::Text("Postgres".into())),
     )
     .await?;
     let msgs = runtime
@@ -1157,7 +1158,7 @@ async fn blocking_question_is_answered_in_the_live_run_or_ends_the_run_blocked()
         second.id,
         &peter,
         &[],
-        df_db::requests::Decision::Answer("5432".into()),
+        df_db::requests::Decision::Answer(df_core::QuestionAnswer::Text("5432".into())),
     )
     .await?;
     assert_eq!(task_status(&pool, &h).await, "queued");

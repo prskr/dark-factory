@@ -4,6 +4,7 @@
 //! Everything an agent wrote (question text, reasons, payload values) is untrusted: it is
 //! escaped, Markdown renders without raw HTML.
 
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::time::Duration;
 
@@ -37,6 +38,9 @@ use crate::markdown;
 use crate::responses::{internal_error, not_found};
 
 mod create_issue;
+mod question;
+
+use question::{Rejection, Submitted};
 
 /// Safety net against lost notifications.
 const POLL: Duration = Duration::from_secs(5);
@@ -127,14 +131,14 @@ pub(crate) fn request_list(cards: &[CardData]) -> Markup {
     html! {
         div id="request-list" class="mx-auto max-w-3xl space-y-3" {
             @if cards.is_empty() {
-                (EmptyPanel {
+                div data-empty-state { (EmptyPanel {
                     size: EmptySize::Page,
                     icon: None,
                     title: "Nothing waits for you",
                     text: "Questions and approval requests of the agents show up here.",
                     phone_hint: None,
                     action: html! {},
-                }.render())
+                }.render()) }
             }
             @for card in cards { (request_card(card, None)) }
         }
@@ -144,13 +148,23 @@ pub(crate) fn request_list(cards: &[CardData]) -> Markup {
 /// One request: what it asks, its state and, while pending, the ways to decide it. `error`
 /// is the reason the last decision failed.
 pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
+    request_card_with(card, error, None)
+}
+
+/// [`request_card`] for a question whose last answer the server refused: the form shows
+/// `rejection` again.
+fn request_card_with(
+    card: &CardData,
+    error: Option<&str>,
+    rejection: Option<&Rejection>,
+) -> Markup {
     let row = &card.row;
     let id = card_id(row.id);
     let target = format!("#{id}");
     let pending = row.state.is_pending();
     let is_issue = row.approval_type.as_deref() == Some(CREATE_ISSUE);
     let kind_label = match row.kind {
-        RequestKind::Question => "Question".to_string(),
+        RequestKind::Question => format!("Question · {}", row.question().kind.label()),
         RequestKind::Approval => row.approval_type.clone().unwrap_or_default(),
     };
     html! {
@@ -166,7 +180,7 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
             @if is_issue {
                 (create_issue::body(card, &id))
             } @else {
-                div class="md-body md-request min-w-0 break-words text-sm [&_p]:my-1" {
+                div id={(id) "-question"} class="md-body md-request min-w-0 break-words text-sm [&_p]:my-1" {
                     @match row.kind {
                         RequestKind::Question => (markdown::render(row.question_text())),
                         RequestKind::Approval => {
@@ -179,10 +193,14 @@ pub(crate) fn request_card(card: &CardData, error: Option<&str>) -> Markup {
             @if row.approval_type.as_deref() == Some(PUSH_CHECK_EXCEPTION) {
                 (finding_list(&request_findings(&row.payload)))
             }
-            @if pending {
+            @if pending && row.kind == RequestKind::Question {
+                (question::input(row, &id, rejection))
+            } @else if pending {
                 (actions(card, &target))
             } @else if is_issue {
                 p class="text-sm text-muted" { (create_issue::outcome(row)) }
+            } @else if row.state == RequestState::Answered {
+                (question::answered(row))
             } @else {
                 p class="text-sm text-muted" { (outcome(row)) }
             }
@@ -213,6 +231,7 @@ async fn inbox(State(state): State<WebState>, shell: Shell) -> Response {
         &shell,
         html! {
             (page_header("Requests", None, html! {}))
+            (updates_sink())
             (request_list(&cards))
         },
     )
@@ -293,24 +312,8 @@ fn actions(card: &CardData, target: &str) -> Markup {
     let post = |action: &str| format!("/requests/{}/{action}", row.id);
     let button_class = action_class(ButtonKind::Secondary);
     match row.kind {
-        RequestKind::Question => html! {
-            @let suggested = row.suggested_answers();
-            @if !suggested.is_empty() {
-                div class="flex flex-wrap gap-2" {
-                    @for answer in suggested {
-                        button type="button" hx-post=(post("answer")) hx-target=(target) hx-swap="outerHTML"
-                            hx-vals=(serde_json::json!({ "answer": answer }).to_string())
-                            class=(button_class) { (answer) }
-                    }
-                }
-            }
-            form hx-post=(post("answer")) hx-target=(target) hx-swap="outerHTML" class="flex gap-2" {
-                input type="text" name="answer" required maxlength="4000" autocomplete="off"
-                    aria-label="Your answer" placeholder="Your answer"
-                    class={(INPUT_CLASS) " min-w-0 flex-1"};
-                button type="submit" class=(action_class(ButtonKind::Primary)) { "Answer" }
-            }
-        },
+        // A question has its own form (`question::input`).
+        RequestKind::Question => html! {},
         RequestKind::Approval => html! {
             form class="space-y-3" {
                 @if let [only] = card.scopes.as_slice() {
@@ -358,7 +361,8 @@ fn outcome(row: &RequestRow) -> String {
         _ => String::new(),
     };
     match row.state {
-        RequestState::Answered => format!("Answered{by}: {}", row.answer().unwrap_or_default()),
+        // An answered question has its own view (`question::answered`).
+        RequestState::Answered => format!("Answered{by}"),
         RequestState::Approved => format!(
             "Approved{by} for scope {}",
             row.scope().map_or("-", |s| s.as_str())
@@ -370,12 +374,6 @@ fn outcome(row: &RequestRow) -> String {
         RequestState::Closed => format!("Closed: {}", row.close_reason.as_deref().unwrap_or("-")),
         RequestState::Pending => String::new(),
     }
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct AnswerForm {
-    answer: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -400,9 +398,36 @@ async fn answer(
     state: State<WebState>,
     user: Extension<CurrentUser>,
     Path(id): Path<String>,
-    Form(form): Form<AnswerForm>,
+    // `selected` repeats: only a list of pairs reads it.
+    Form(pairs): Form<Vec<(String, String)>>,
 ) -> Response {
-    decide(state.0, user.0, &id, Ok(Decision::Answer(form.answer))).await
+    let Ok(request_id) = id.parse::<RequestId>() else {
+        return not_found("The request");
+    };
+    let row = match df_db::requests::get_request(&state.pool, request_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return not_found("The request"),
+        Err(e) => return internal_error(&e),
+    };
+    let submitted = Submitted::from_form(&pairs);
+    let answer = submitted.answer(row.question().kind);
+    let result = df_db::requests::decide(
+        &state.pool,
+        &state.approval_types,
+        request_id,
+        &user.principal(),
+        &user.roles,
+        Decision::Answer(answer),
+    )
+    .await;
+    let rejection = match &result {
+        Err(RequestError::InvalidAnswer(error)) => Some(Rejection {
+            submitted,
+            error: error.clone(),
+        }),
+        _ => None,
+    };
+    respond(&state, request_id, result, rejection.as_ref()).await
 }
 
 async fn approve(
@@ -444,7 +469,7 @@ async fn deny_always(
         comment,
     )
     .await;
-    respond(&state, request_id, result).await
+    respond(&state, request_id, result, None).await
 }
 
 /// Stores the decision and answers with the card as it is now. A failed decision answers with
@@ -472,17 +497,22 @@ async fn decide(
         }
         Err(e) => Err(e),
     };
-    respond(&state, request_id, result).await
+    respond(&state, request_id, result, None).await
 }
 
-/// The card after a decision attempt. A failed one answers with the card and the reason.
+/// The card after a decision attempt. A failed one answers with the card and the reason; a
+/// refused answer shows `rejection` under its input instead of the card-wide line.
 async fn respond(
     state: &WebState,
     request_id: RequestId,
     result: Result<RequestRow, RequestError>,
+    rejection: Option<&Rejection>,
 ) -> Response {
     let (status, error) = match &result {
         Ok(_) => (StatusCode::OK, None),
+        Err(RequestError::InvalidAnswer(_)) if rejection.is_some() => {
+            (StatusCode::UNPROCESSABLE_ENTITY, None)
+        }
         Err(RequestError::NotFound) => return not_found("The request"),
         Err(RequestError::AlreadyDecided) => (
             StatusCode::CONFLICT,
@@ -494,6 +524,7 @@ async fn respond(
             | RequestError::ApplyFailed(_)
             | RequestError::UnknownType(_)
             | RequestError::Refused(_)
+            | RequestError::InvalidAnswer(_)
             | RequestError::TooManyPending),
         ) => (StatusCode::UNPROCESSABLE_ENTITY, Some(e.to_string())),
         Err(RequestError::Db(e)) => return internal_error(e),
@@ -512,7 +543,11 @@ async fn respond(
         Err(e) => return internal_error(&e),
     };
     let card = CardData::new(&state.approval_types, row, task.key.to_string(), task.title);
-    (status, request_card(&card, error.as_deref())).into_response()
+    (
+        status,
+        request_card_with(&card, error.as_deref(), rejection),
+    )
+        .into_response()
 }
 
 /// `GET /requests/events`: the pending count of the navigation, and with `?list=1` the inbox
@@ -528,7 +563,9 @@ async fn events(
         list: bool,
         first: bool,
         last_count: Option<i64>,
-        last_list: String,
+        /// The markup of every card sent by this connection.
+        sent: BTreeMap<RequestId, String>,
+        first_list: bool,
     }
     let stream = Stream {
         rx: state.notifier.subscribe(),
@@ -536,7 +573,8 @@ async fn events(
         list: query.list.is_some(),
         first: true,
         last_count: None,
-        last_list: String::new(),
+        sent: BTreeMap::new(),
+        first_list: true,
     };
     let events = futures::stream::unfold(stream, |mut s| async move {
         loop {
@@ -565,11 +603,8 @@ async fn events(
                 }
             }
             if s.list {
-                let list = request_list(&cards).into_string();
-                if list != s.last_list {
-                    partials.push(partial("#request-list", &maud::PreEscaped(list.clone())));
-                    s.last_list = list;
-                }
+                partials.extend(list_updates(&mut s.sent, &cards, s.first_list));
+                s.first_list = false;
             }
             if !partials.is_empty() {
                 let body = html! { @for p in &partials { (p) } }.into_string();
@@ -597,6 +632,86 @@ async fn load(state: &WebState, list: bool) -> Result<(Vec<CardData>, i64), df_d
 
 fn partial(target: &str, inner: &Markup) -> Markup {
     html! { hx-partial hx-target=(target) hx-swap="outerMorph" { (inner) } }
+}
+
+/// The hidden sink the live card updates are appended to; `requestCards.ts` applies them.
+pub(crate) fn updates_sink() -> Markup {
+    html! { div id="request-updates" hidden x-data="requestCards" {} }
+}
+
+/// A card for the sink: replaces the card with its id, else goes before `before` (a DOM id), else
+/// to the end of `into`.
+pub(crate) fn upsert_partial(card: &Markup, before: Option<&str>, into: &str) -> Markup {
+    html! {
+        hx-partial hx-target="#request-updates" hx-swap="beforeend" {
+            template data-request-card data-before=[before] data-into=(into) { (card) }
+        }
+    }
+}
+
+/// The removal of the card `card_id` for the sink.
+fn delete_partial(card_id: &str) -> Markup {
+    html! {
+        hx-partial hx-target="#request-updates" hx-swap="beforeend" {
+            template data-request-delete=(card_id) {}
+        }
+    }
+}
+
+/// The pending cards of the inbox list for the sink: it removes every other card of the list.
+fn keep_partial(cards: &[CardData]) -> Markup {
+    let ids = cards
+        .iter()
+        .map(|c| card_id(c.row.id))
+        .collect::<Vec<_>>()
+        .join(" ");
+    html! {
+        hx-partial hx-target="#request-updates" hx-swap="beforeend" {
+            template data-request-keep=(ids) data-into="#request-list" {}
+        }
+    }
+}
+
+/// What the inbox list needs to match `cards` after `sent` (the cards this connection sent): a
+/// delete for each card that left, an upsert for each new or changed card, and the whole list
+/// when the last card left or the first send finds none (the empty state). The first send also
+/// names the pending cards, so cards decided while the page was offline leave. Unchanged cards
+/// send nothing, so a draft in the form of a card is never touched.
+fn list_updates(
+    sent: &mut BTreeMap<RequestId, String>,
+    cards: &[CardData],
+    first: bool,
+) -> Vec<Markup> {
+    if cards.is_empty() {
+        let had_cards = !sent.is_empty();
+        sent.clear();
+        return if had_cards || first {
+            vec![partial("#request-list", &request_list(cards))]
+        } else {
+            Vec::new()
+        };
+    }
+    let mut updates: Vec<Markup> = sent
+        .keys()
+        .filter(|id| cards.iter().all(|c| c.row.id != **id))
+        .map(|id| delete_partial(&card_id(*id)))
+        .collect();
+    if first {
+        // A reconnect: the page may still show cards decided while it was offline.
+        updates.push(keep_partial(cards));
+    }
+    sent.retain(|id, _| cards.iter().any(|c| c.row.id == *id));
+    // Last first: each card's anchor is then on the page or sent before it.
+    for (i, card) in cards.iter().enumerate().rev() {
+        let markup = request_card(card, None);
+        if sent.get(&card.row.id) == Some(&markup.0) {
+            continue;
+        }
+        sent.insert(card.row.id, markup.0.clone());
+        let before = cards.get(i + 1).map(|next| card_id(next.row.id));
+        updates.push(upsert_partial(&markup, before.as_deref(), "#request-list"));
+    }
+    updates
 }
 
 #[cfg(test)]

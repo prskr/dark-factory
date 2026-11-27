@@ -162,8 +162,8 @@ pub struct TaskDetail {
     pub pr_attached: bool,
     /// When a chat was archived.
     pub archived_at: Option<Timestamp>,
-    /// The task has an agent request that is still pending.
-    pub has_pending_request: bool,
+    /// The task has an approval request that is still pending.
+    pub has_pending_approval: bool,
     /// The branch the task commits to.
     pub branch: String,
     pub resume_at: Option<Timestamp>,
@@ -206,7 +206,7 @@ struct TaskDetailRow {
     pr_title: Option<String>,
     pr_attached: bool,
     archived_at: Option<jiff_sqlx::Timestamp>,
-    has_pending_request: bool,
+    has_pending_approval: bool,
     branch: String,
     resume_at: Option<jiff_sqlx::Timestamp>,
     auto_resumes: i32,
@@ -247,7 +247,7 @@ impl TryFrom<TaskDetailRow> for TaskDetail {
             pr_title: row.pr_title,
             pr_attached: row.pr_attached,
             archived_at: row.archived_at.map(Into::into),
-            has_pending_request: row.has_pending_request,
+            has_pending_approval: row.has_pending_approval,
             branch: row.branch,
             resume_at: row.resume_at.map(Into::into),
             auto_resumes: row.auto_resumes,
@@ -437,8 +437,9 @@ pub async fn get_task_detail_by_key(
             ps.harness AS persona_harness, ps.model AS persona_model,
             ps.description AS persona_description, t.issue_number, t.status,
             t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.archived_at,
-            EXISTS (SELECT 1 FROM agent_requests r WHERE r.task_id = t.id AND r.state = $2)
-                AS "has_pending_request!",
+            EXISTS (SELECT 1 FROM agent_requests r
+                    WHERE r.task_id = t.id AND r.state = $2 AND r.kind = $3)
+                AS "has_pending_approval!",
             t.branch,
             t.resume_at, t.auto_resumes, t.created_by, creator.key AS "creator_task_key?",
             parent.key AS "parent_key?", parent.title AS "parent_title?",
@@ -455,7 +456,8 @@ pub async fn get_task_detail_by_key(
         WHERE t.key = $1
         "#,
         key,
-        crate::requests::RequestState::Pending.as_str()
+        crate::requests::RequestState::Pending.as_str(),
+        crate::requests::RequestKind::Approval.as_str()
     )
     .fetch_optional(pool)
     .await?
@@ -473,8 +475,9 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
             ps.harness AS persona_harness, ps.model AS persona_model,
             ps.description AS persona_description, t.issue_number, t.status,
             t.status_line, t.pr_number, t.pr_url, t.pr_title, t.pr_attached, t.archived_at,
-            EXISTS (SELECT 1 FROM agent_requests r WHERE r.task_id = t.id AND r.state = $2)
-                AS "has_pending_request!",
+            EXISTS (SELECT 1 FROM agent_requests r
+                    WHERE r.task_id = t.id AND r.state = $2 AND r.kind = $3)
+                AS "has_pending_approval!",
             t.branch,
             t.resume_at, t.auto_resumes, t.created_by, creator.key AS "creator_task_key?",
             parent.key AS "parent_key?", parent.title AS "parent_title?",
@@ -491,7 +494,8 @@ pub async fn get_task_detail(pool: &PgPool, id: TaskId) -> Result<Option<TaskDet
         WHERE t.id = $1
         "#,
         id.as_uuid(),
-        crate::requests::RequestState::Pending.as_str()
+        crate::requests::RequestState::Pending.as_str(),
+        crate::requests::RequestKind::Approval.as_str()
     )
     .fetch_optional(pool)
     .await?

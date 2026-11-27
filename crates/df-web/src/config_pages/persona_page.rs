@@ -210,6 +210,7 @@ fn page_form(
                 &MarkdownField {
                     label: "System prompt",
                     name: "system_prompt",
+                    submit_name: None,
                     value: &values.system_prompt,
                     hint: None,
                     rows: 20,

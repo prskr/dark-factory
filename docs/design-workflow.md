@@ -53,14 +53,16 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 
 | Page | Content |
 |---|---|
-| Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button` (phone floating create action), `Button`, `Task row`, `Request card`, `Icon button` (properties Icon, Size, State; every icon-only control on the boards is an instance), `Settings nav` (property Active; the settings sidebar on every settings board is an instance) |
+| Components | Variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button` (phone floating create action), `Button`, `Task row`, `Icon button` (properties Icon, Size, State; every icon-only control on the boards is an instance), `Settings nav` (property Active; the settings sidebar on every settings board is an instance), `Tab` (Style Underline, Side, Boxed × State Active, Inactive, Focus; layer `count` hidden where a tab has none: details tabs, settings page tabs, modal side tabs, the create-issue Preview/Markdown tabs), `Artifact type badge` (text MD, PNG, TXT, …) |
+| Components - Requests | Variant sets `Request card` (Kind Question, Approval, Push check exception, Create issue × State × Size Desktop, Phone), `Question option` (Control, State), `Answered option` (Mark), `Field tabs` (Active) |
 | Chat | Chat conversation, subtasks tab with compaction notice; phone chat list, chat, details sheet (overview, subtasks) |
 | Chat - New chat | New chat dialog and persona picker (partial boards: dialog only), new chat started; phone |
 | Chat - Artifacts | Artifacts tab, scrolled, markdown split with sidebars collapsed; phone artifacts sheet and artifact page |
 | Chat - Archive | Archived chats modal: list (full screen), transcript, artifacts, artifact opened (partial boards: modal only); phone |
 | Tasks | Main task workspace, persona identity, profile menu (partial board: rail and menu) |
 | Tasks - Transcript | Tool groups, tool details, user message with code, rate limited (partial boards: transcript, details) |
-| Tasks - Conversation flow | Question pending (full screen); blocked question, question answered, approval pending, approved, denied (partial boards: transcript only); request card states |
+| Tasks - Conversation flow | Approval pending, approved, denied (partial boards: transcript only); approval card states |
+| Tasks - Questions | Question card per kind (single choice, multiple choice, text) and state: pending, Other open, field errors, answered (partial boards: cards only); phone |
 | Tasks - Status | Stop and cancel (full screen); status `in_review`, reset workspace, reset while running (partial boards: details only); cancel and reset confirmations (dialog only); rename task (transcript only) |
 | Tasks - Queue | Queued messages: many, editing one; phone |
 | Tasks - Details Overview | Details overview: awaiting dependencies (full screen); description collapsed and expanded, attached PR, dependencies collapsed, overview with base task (partial boards: details only) |
@@ -88,6 +90,8 @@ One page per section; PenPot only draws the open page, so a page of about 1,000 
 | Rejected | Boards that are not built and not planned |
 
 Colours are tokens in the sets `light` and `dark` (theme `Mode`). Light boards bound to tokens preview in dark by switching the theme; there are no separate dark boards. Tokens are not shared with other files, so the components and tokens stay in this one file.
+
+Every element with a component on "Components" or "Components - Requests" is an instance on the boards, also inside a detached copy; a new element that repeats across boards gets a component there first. Detach only the part whose structure differs (for example a card body in a state no variant shows) and keep its buttons, tabs and badges as instances.
 
 ## Comparing a view
 
@@ -176,12 +180,14 @@ The rows with the route `/personas/<id>/edit` are the boards of the persona edit
 | Tasks - Subtasks / Desktop · subtasks tab | `/tasks/<id>` | task DF-12 `running` with direct subtasks DF-13 `completed`, DF-16 `in_review`, DF-17 `running` (two subtasks of its own, one `completed`), DF-18 `cancelled`; Subtasks tab open; DF-12 row chip 2/3 | 1440 |
 | Tasks - Queue / Desktop · many queued messages | `/tasks/<id>` | manual seed (not built): 7 queued messages | 1440 |
 | Tasks - Details Sidebar / Desktop · many runs | `/tasks/<id>` | manual seed (not built): task with 8 runs, description of 5 lines. Partial board: details only | 1440 |
-| Tasks - Conversation flow / Desktop · blocked question | `/tasks/<id>` | manual seed (not built): task `blocked` with a pending blocking question. Partial board: transcript only | 1440 |
-| Tasks - Conversation flow / Desktop · conversation flow · question pending | `/tasks/<key>` | task DF-12 with a pending blocking question and suggested answers; approved `conversation-flow` request-card styling | 1440 |
-| Tasks - Conversation flow / Desktop · conversation flow · question answered | `/tasks/<key>` | same task and question after Peter Kurfer answered; outcome on the card, no decision form. Partial board: transcript only | 1440 |
-| Tasks - Conversation flow / Desktop · conversation flow · approval pending | `/tasks/<key>` | same task with a pending registered network-access approval; scopes, optional comment, Approve and Deny. Partial board: transcript only | 1440 |
+| Tasks - Conversation flow / Desktop · conversation flow · approval pending | `/tasks/<key>` | task DF-12 with a pending registered network-access approval; scopes, optional comment, Approve and Deny. Partial board: transcript only | 1440 |
 | Tasks - Conversation flow / Desktop · conversation flow · approval approved | `/tasks/<key>` | same approval granted for this task; outcome and decider, no decision form. Partial board: transcript only | 1440 |
 | Tasks - Conversation flow / Desktop · conversation flow · approval denied | `/tasks/<key>` | same approval denied with a reason; outcome and decider, no decision form. Partial board: transcript only | 1440 |
+| Tasks - Conversation flow / Preview only · conversation flow · approval states · light | `/tasks/<key>` | as the approval boards: `network-access` approval pending, approved, denied. Partial board: cards only | 1440 |
+| Tasks - Questions / Question card · single choice | `/tasks/<key>`, `/requests` | demo seed: DF-7 with a blocking single-choice question (PostgreSQL 17 and 16 with descriptions, 18 beta, Other): pending (`Request card` instance), Other open and focused, error "Choose one option.", answered (`Request card` instance). Partial board: cards only | 1440 |
+| Tasks - Questions / Question card · multiple choice | `/tasks/<key>`, `/requests` | demo seed: DF-9 with a blocking multiple-choice question, `min_selected` 1, `max_selected` 3: pending, error "Choose at most 3 options." with four checked, answered with `api` and "Other: also the CLI". Partial board: cards only | 1440 |
+| Tasks - Questions / Question card · text | `/tasks/<key>`, `/requests` | demo seed: DF-7 with a blocking text question: Write tab with a Markdown draft, Preview tab, error "Write an answer.", answered. Partial board: cards only | 1440 |
+| Tasks - Questions / Phone · question cards (390) | `/requests` | as the question boards: single choice pending, multiple choice pending, text pending, single choice answered; scrolled page | 390 |
 | Request Inbox / Preview only · create-issue request states · light | `/chats/<key>`, `/requests` | manual seed (not built): chat DF-25-CHAT with `create-issue` requests (title, labels `bug`, `auth`, `ios`, Markdown body with a list, inline code and a link): pending with Preview (Markdown tab hovered), pending with Markdown selected and focused, pending with a long body (panel scrolls), approved (issue #57 created), denied with a note | 1440 |
 | Request Inbox / Phone · create-issue request card (390) | `/requests` | as above; pending request with a long body | 390 |
 | Tasks - Status / Desktop · stop and cancel | `/tasks/<id>` | manual seed (not built): task `running` with an active run, 2 queued messages, PR; Status menu open | 1440 |
@@ -192,7 +198,7 @@ The rows with the route `/personas/<id>/edit` are the boards of the persona edit
 | Tasks / Desktop · profile menu | `/tasks/<id>` | as Desktop · light; avatar on the rail clicked (component `Profile menu`, main in Tasks - Phone / Phone · profile menu; entries name and role, Docs, Log out, version). Partial board: rail and menu only | 1440 |
 | Tasks - Phone / Phone · profile menu | `/tasks` | avatar clicked | 390 |
 | Tasks - Transcript / Desktop · rate limited, resumes | `/tasks/<id>` | manual seed (not built): task `rate_limited` with resume time 04:30, resume count 2 of `runs.maxAutoResumes` 3, run #2 `rate_limited`. Partial board: transcript and details | 1440 |
-| Request Inbox / Requests · inbox | `/requests` | manual seed (not built): pending `push-check-exception` request (DF-17, two findings), pending `network-access` approval, blocking question with suggested answers | 1440 |
+| Request Inbox / Requests · inbox | `/requests` | manual seed (not built): pending `push-check-exception` request (DF-17, two findings), pending `network-access` approval, blocking single-choice question | 1440 |
 | Request Inbox / Requests · deny always | `/requests` | manual seed (not built): pending `network-access` request of DF-7 for `http-intake.logs.us5.datadoghq.com:443` | 1440 |
 | Tasks - Phone / Phone · task list | `/tasks` | fixture tasks (not built) | 390 |
 | Tasks - Phone, run control / Phone · stop and cancel | `/tasks/<id>` | as Desktop · stop and cancel; details sheet and Status menu open | 390 |

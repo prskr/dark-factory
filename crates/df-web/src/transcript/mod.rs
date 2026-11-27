@@ -714,6 +714,7 @@ pub fn render_transcript(items: &[Item], cards: &[(Timestamp, Markup)]) -> Marku
     let mut cards = cards.iter().peekable();
     html! {
         div id="transcript" class="flex min-w-0 flex-col gap-3" {
+            (crate::requests::updates_sink())
             @for chunk in chunks(items) {
                 @if let Some(first) = chunk.first() {
                     @while let Some((_, card)) = cards.next_if(|(at, _)| card_goes_before(*at, first.at)) { (card) }

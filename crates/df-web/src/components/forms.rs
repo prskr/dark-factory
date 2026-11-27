@@ -4,6 +4,7 @@ use maud::{Markup, html};
 
 use super::actions::{ButtonKind, ICON_BUTTON_CLASS, action_class};
 use super::icons::{Icon, icon};
+use super::tabs::{MarkerInset, TAB_CLASS, tab_marker};
 
 /// Validation errors by field name; the empty name is a message for the whole form.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -225,6 +226,9 @@ pub enum Preview {
     /// "Editor", "Split" and "Preview" from 1280 px, "Editor" and "Preview" below; opens on
     /// "Split" where it is offered. The page holds the rendered preview of `value` (design D2a).
     Split,
+    /// The label with the tabs "Write" and "Preview" at the right end of its row, no view switch,
+    /// never the highlighting editor (`markdown-editor`, "Plain tabs layout"). Opens on "Write".
+    PlainTabs,
 }
 
 /// A Markdown field (`markdown-editor` spec): a monospace text field with a view switch and the
@@ -233,7 +237,12 @@ pub enum Preview {
 #[derive(Debug, Clone, Copy)]
 pub struct MarkdownField<'a> {
     pub label: &'a str,
+    /// The base of the DOM ids and the key of the field's error; also the name of the form value
+    /// unless `submit_name` is set.
     pub name: &'a str,
+    /// The name of the form value when it differs from `name`: several fields of one page, such
+    /// as the answers of the question cards of the inbox, need ids of their own.
+    pub submit_name: Option<&'a str>,
     pub value: &'a str,
     pub hint: Option<&'a str>,
     /// The minimum height in text rows.
@@ -247,38 +256,61 @@ pub struct MarkdownField<'a> {
 pub fn markdown_field(field: &MarkdownField<'_>, errors: &FormErrors) -> Markup {
     let name = field.name;
     let split = field.preview == Preview::Split;
-    let options = serde_json::json!({ "split": split });
+    let plain = field.preview == Preview::PlainTabs;
+    // The marked field never attaches the highlighting editor.
+    let options = if plain {
+        serde_json::json!({ "plain": true })
+    } else {
+        serde_json::json!({ "split": split })
+    };
+    let label = html! {
+        label for=(name) id={(name) "-label"} class=(if field.label_hidden { "sr-only" } else { "block text-sm font-medium text-muted" }) { (field.label) }
+    };
     html! {
         div class="space-y-3" style={"--md-rows: " (field.rows)} x-data={"markdownField(" (options) ")"} {
-            label for=(name) id={(name) "-label"} class=(if field.label_hidden { "sr-only" } else { "block text-sm font-medium text-muted" }) { (field.label) }
-            // Without the component Alpine cannot evaluate `enhanced`, so the row stays hidden.
-            div class="relative flex min-h-8 items-center justify-center" x-cloak "x-show"="enhanced" {
-                div role="radiogroup" aria-label="View" "x-on:keydown"="move($event)"
-                    class="inline-flex gap-0.5 rounded-lg border border-line-strong bg-panel p-0.5" {
-                    (view_segment("editor", Icon::Pencil, "Editor", ""))
-                    @if split { (view_segment("split", Icon::Columns, "Split", "max-xl:hidden")) }
-                    (view_segment("preview", Icon::Eye, "Preview", ""))
+            @if plain {
+                div class="flex items-center justify-between gap-4" {
+                    (label)
+                    // Without the component Alpine cannot evaluate `enhanced`, so the tabs stay hidden.
+                    div role="tablist" aria-label="View" x-cloak "x-show"="enhanced" "x-on:keydown"="move($event)"
+                        class="flex gap-4" {
+                        (plain_tab(name, "editor", "Write", true))
+                        (plain_tab(name, "preview", "Preview", false))
+                    }
                 }
-                // Only where the highlighting editor can attach (bundle embedded, from 768 px).
-                button type="button" role="switch" aria-checked="true" ":aria-checked"="highlighting"
-                    x-cloak "x-show"="canEdit" "x-on:click"="toggle()"
-                    class="absolute right-0 inline-flex min-h-8 items-center gap-2 text-[13px] font-medium text-muted" {
-                    "Highlighting"
-                    span aria-hidden="true" class="relative inline-block h-4 w-7 rounded-full" ":class"="highlighting ? 'bg-accent-text' : 'bg-muted'" {
-                        span class="absolute top-0.5 size-3 rounded-full bg-panel" ":class"="highlighting ? 'left-3.5' : 'left-0.5'" {}
+            } @else {
+                (label)
+                // Without the component Alpine cannot evaluate `enhanced`, so the row stays hidden.
+                div class="relative flex min-h-8 items-center justify-center" x-cloak "x-show"="enhanced" {
+                    div role="radiogroup" aria-label="View" "x-on:keydown"="move($event)"
+                        class="inline-flex gap-0.5 rounded-lg border border-line-strong bg-panel p-0.5" {
+                        (view_segment("editor", Icon::Pencil, "Editor", ""))
+                        @if split { (view_segment("split", Icon::Columns, "Split", "max-xl:hidden")) }
+                        (view_segment("preview", Icon::Eye, "Preview", ""))
+                    }
+                    // Only where the highlighting editor can attach (bundle embedded, from 768 px).
+                    button type="button" role="switch" aria-checked="true" ":aria-checked"="highlighting"
+                        x-cloak "x-show"="canEdit" "x-on:click"="toggle()"
+                        class="absolute right-0 inline-flex min-h-8 items-center gap-2 text-[13px] font-medium text-muted" {
+                        "Highlighting"
+                        span aria-hidden="true" class="relative inline-block h-4 w-7 rounded-full" ":class"="highlighting ? 'bg-accent-text' : 'bg-muted'" {
+                            span class="absolute top-0.5 size-3 rounded-full bg-panel" ":class"="highlighting ? 'left-3.5' : 'left-0.5'" {}
+                        }
                     }
                 }
             }
             div class="grid gap-4" ":class"="view === 'split' && 'md-split xl:grid-cols-2'" {
                 // `:hidden`, not `x-show`: an expression Alpine cannot evaluate (the component did
                 // not load) must leave the text field shown.
-                div id={(name) "-write"} class="md-write min-w-0" ":hidden"="view === 'preview'" {
-                    textarea id=(name) name=(name) rows=(field.rows)
+                div id={(name) "-write"} class="md-write min-w-0" ":hidden"="view === 'preview'"
+                    role=[plain.then_some("tabpanel")] aria-labelledby=[plain.then(|| format!("{name}-tab-editor"))] {
+                    textarea id=(name) name=(field.submit_name.unwrap_or(name)) rows=(field.rows)
                         class=(MARKDOWN_INPUT_CLASS)
                         aria-invalid=[invalid(name, errors)]
                         aria-describedby=[described_by(name, field.hint.is_some(), errors)] { (field.value) }
                 }
                 div id={(name) "-preview"} class="md-preview-panel min-w-0 rounded-lg border border-line bg-panel px-4 py-3.5 text-sm"
+                    role=[plain.then_some("tabpanel")] aria-labelledby=[plain.then(|| format!("{name}-tab-preview"))]
                     aria-live="polite" x-cloak "x-show"="view !== 'editor'" {
                     // The status lines: above the preview and sticky, because in Split the panel
                     // scrolls and the last preview stays: a message at the top of the content
@@ -298,13 +330,31 @@ pub fn markdown_field(field: &MarkdownField<'_>, errors: &FormErrors) -> Markup 
                 }
             }
             // While the highlighting editor is attached: Tab leaves it, so indenting has keys.
-            p id={(name) "-indent"} data-indent-hint x-cloak "x-show"="editing" "x-text"="indentHint" class="text-xs text-faint" {
-                "Tab moves to the next field. Indent with Ctrl+] and Ctrl+[."
+            @if !plain {
+                p id={(name) "-indent"} data-indent-hint x-cloak "x-show"="editing" "x-text"="indentHint" class="text-xs text-faint" {
+                    "Tab moves to the next field. Indent with Ctrl+] and Ctrl+[."
+                }
             }
             @if let Some(hint) = field.hint { p id={(name) "-hint"} class="text-xs text-faint" { (hint) } }
             @if let Some(error) = errors.get(name) {
                 p id={(name) "-error"} class="text-sm text-danger" role="alert" { (error) }
             }
+        }
+    }
+}
+
+/// One tab of the plain tabs layout: `view` is `editor` ("Write") or `preview`. The selected tab
+/// is medium weight with a 2 px accent line, like the tabs of the settings pages.
+fn plain_tab(name: &str, view: &str, label: &str, selected: bool) -> Markup {
+    let panel = if view == "editor" { "write" } else { "preview" };
+    html! {
+        button type="button" role="tab" id={(name) "-tab-" (view)} data-view=(view)
+            aria-controls={(name) "-" (panel)} aria-selected=(selected) tabindex=(if selected { "0" } else { "-1" })
+            ":aria-selected"={"view === '" (view) "'"} ":tabindex"={"view === '" (view) "' ? 0 : -1"}
+            "x-on:click"={"select('" (view) "')"}
+            class={(TAB_CLASS) " px-1 text-[13px] lg:min-h-8"} {
+            (tab_marker(MarkerInset::None))
+            (label)
         }
     }
 }
@@ -615,6 +665,7 @@ mod tests {
             &MarkdownField {
                 label: "System prompt",
                 name: "system_prompt",
+                submit_name: None,
                 value: "## Rules\n\n- one <b>",
                 hint: Some("Markdown."),
                 rows: 20,
@@ -769,6 +820,95 @@ mod tests {
                 "{html}"
             );
         }
+    }
+
+    #[test]
+    fn plain_tabs_put_the_label_and_the_write_and_preview_tabs_in_one_row() {
+        let html = markdown(Preview::PlainTabs, false, &FormErrors::default());
+
+        let row_at = html.find("role=\"tablist\"").unwrap();
+        let (label_at, row) = (html.find("<label").unwrap(), &html[..row_at]);
+        assert!(label_at < row_at, "{html}");
+        // The label and the tablist share one flex row, the label on the left.
+        assert!(
+            row.rsplit("<div")
+                .nth(1)
+                .unwrap()
+                .contains("justify-between"),
+            "{row}"
+        );
+        let tabs = &html[row_at..html.find("</div>").unwrap()];
+        assert_eq!(tabs.matches("role=\"tab\"").count(), 2, "{tabs}");
+        assert!(
+            tabs.contains(">Write<") && tabs.contains(">Preview<"),
+            "{tabs}"
+        );
+        let write = tag_around(tabs, "data-view=\"editor\"");
+        assert!(
+            write.contains("aria-selected=\"true\"") && write.contains("tabindex=\"0\""),
+            "{write}"
+        );
+        let preview = tag_around(tabs, "data-view=\"preview\"");
+        assert!(
+            preview.contains("aria-selected=\"false\"") && preview.contains("tabindex=\"-1\""),
+            "{preview}"
+        );
+        assert!(
+            write.contains("aria-controls=\"system_prompt-write\"")
+                && preview.contains("aria-controls=\"system_prompt-preview\""),
+            "{write} {preview}"
+        );
+        assert!(html.contains("x-on:keydown=\"move($event)\""), "{html}");
+    }
+
+    #[test]
+    fn plain_tabs_have_no_view_switch_no_highlighting_and_no_editor() {
+        let html = markdown(Preview::PlainTabs, false, &FormErrors::default());
+
+        for absent in [
+            "role=\"radiogroup\"",
+            "role=\"radio\"",
+            "role=\"switch\"",
+            "Highlighting",
+            "data-indent-hint",
+            "Indent with",
+            "Split",
+            "editor.js",
+            "data-editor-src",
+        ] {
+            assert!(!html.contains(absent), "{absent}: {html}");
+        }
+        // The field is marked so the component never attaches the highlighting editor.
+        assert!(
+            html.contains("x-data=\"markdownField({&quot;plain&quot;:true})\""),
+            "{html}"
+        );
+        // The text is 16 px, so the browser does not zoom on focus.
+        assert!(
+            tag_around(&html, "rows=\"20\"").contains("text-base"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn plain_tabs_without_the_component_are_the_labelled_text_field() {
+        let html = markdown(Preview::PlainTabs, false, &FormErrors::default());
+
+        let tablist = tag_around(&html, "role=\"tablist\"");
+        assert!(
+            tablist.contains("x-cloak") && tablist.contains("x-show=\"enhanced\""),
+            "{tablist}"
+        );
+        let write = tag_around(&html, "id=\"system_prompt-write\"");
+        assert!(
+            write.contains(":hidden=\"view === 'preview'\"") && !write.contains("x-show"),
+            "{write}"
+        );
+        assert!(html.contains("<label for=\"system_prompt\""), "{html}");
+        assert!(
+            !html.contains("<h2>Rules</h2>"),
+            "no preview before the first request: {html}"
+        );
     }
 
     #[test]

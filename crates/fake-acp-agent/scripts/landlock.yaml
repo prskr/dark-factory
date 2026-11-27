@@ -15,6 +15,7 @@ sessions:
           tool: ask_question
           args:
             text: "Landlock probe finished?"
+            kind: text
             blocking: false
       - say: "Probe finished."
       - end: end_turn

@@ -57,7 +57,7 @@ fn a_chat_in_a_run_or_with_an_open_request_is_not_archived() {
         assert_eq!(result, Err(Rejected::ArchiveBusy(status)), "{status}");
     }
     let open = TaskSnapshot {
-        pending_requests: true,
+        pending_approvals: true,
         ..chat(Waiting)
     };
     assert_eq!(

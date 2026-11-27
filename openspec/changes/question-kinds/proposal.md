@@ -17,10 +17,11 @@ A question today is free text with up to five suggested answers (issue #334). Th
 - **Drafts survive live updates:** the inbox sends only changed cards instead of the whole list, as the task timeline already does, so a new request does not reset an answer being written.
 - **BREAKING (UI):** suggested answers as one-tap buttons go away; a single-choice answer is picked with a radio and sent with "Answer" (design D6, Q3).
 - **Answered questions** show the question, the kind, all options with the chosen ones marked (or the rendered text answer) and who answered when.
-- **Markdown field without highlighting:** a new layout `Preview::TabsPlain` of `markdown_field` (Write and Preview tabs, never the highlighting editor), as `iter6-agent-memory` added `Preview::SourceOnly`.
+- **Markdown field without highlighting:** a new layout `Preview::PlainTabs` of `markdown_field` ("Write" and "Preview" tabs beside the label, never the highlighting editor), as `iter6-agent-memory` added `Preview::SourceOnly`.
 - **Migration** of stored questions and answers to the new payload and decision shape (design D4).
 - **Questions in chats:** chat runs are offered `ask_question` (decided by Peter). The card appears on the chat timeline, a chat with a pending question needs you, and archiving a chat closes its pending questions instead of being rejected (design D9).
 - **PenPot first:** the question card boards for all kinds and states, desktop and phone, are drawn and approved before the UI work.
+- **Selected details tab marked:** found in the PenPot cleanup of this change. The details tabs (task and chat) get the accent line under the selected tab and plain counts, as the boards and the settings page tabs show; today only the text colour changes (decided by Peter).
 
 ## Out of scope
 
@@ -42,7 +43,8 @@ None.
 - `request-inbox`: one question card for all kinds; the input per kind; field errors; answered questions in history; 44 px targets on phones.
 - `chats`: chat runs are offered `ask_question`; archiving closes the chat's pending questions.
 - `chat-ui`: a chat with a pending question needs you.
-- `markdown-editor` (from the merged change `markdown-editor`, not yet archived): the `Preview::TabsPlain` layout without highlighting.
+- `task-ui`: the selected details tab is marked by an accent line (task and chat details).
+- `markdown-editor`: the `Preview::PlainTabs` layout without highlighting.
 
 ## Impact
 
@@ -51,10 +53,10 @@ None.
 - **`df-db`** (`requests.rs`): `raise_question` and `Decision::Answer` take the typed values; `RequestRow` accessors; `decision_message`. One migration rewriting `payload` and `decision` of existing questions; `.sqlx/` regenerated where queries change.
 - **`df-agent-channel`** (`tools.rs`, `assign.rs`): argument parsing of `ask_question` into `QuestionSpec`, error results for invalid specs, the `blocking` default, `ask_question` in `CHAT_TOOLS`.
 - **Chats** (`df-db` chat archiving, `df-web` chat list): archiving closes pending questions with reason `chat-archived`; a pending question marks the chat as needing you.
-- **`df-web`** (`requests.rs`, new `requests/question.rs`, `components/forms.rs`): the question card body and inputs per kind, the answer form and its field errors, `Preview::TabsPlain`, per-card live updates of the inbox (`events`).
+- **`df-web`** (`requests.rs`, new `requests/question.rs`, `components/forms.rs`): the question card body and inputs per kind, the answer form and its field errors, `Preview::PlainTabs`, per-card live updates of the inbox (`events`); `artifacts/view.rs`: the marker of the selected details tab.
 - **Docs and tests besides:** `docs/demo.md` (suggested answers), `crates/df-e2e/tests/flow.rs` (answers through the old input).
 - **Fake agent, seed and e2e:** `crates/fake-acp-agent` scripts, `crates/df-e2e` demo seed (`seed/demo/*`, `tests/demo_seed.rs`) and a new e2e test per kind.
 - **PenPot:** page "Tasks - Conversation flow" and "Request Inbox": question card boards per kind and state.
 - **Docs:** `docs/content/using/requests.md`, `docs/content/using/chats.md`, `docs/content/architecture/agent-runs.md`, `product/agent-playbook.md` (which kind when), `docs/design-system.md` (request card), `docs/design-workflow.md` (board mapping).
 - **Domain model:** glossary term **Question** changed (it has a kind and a structured answer), new terms **Question kind** and **Option**. ADR-0038 amended (questions are typed: choice or text; they block by default) and ADR-0043 amended (chats can ask questions). No new ADR.
-- **Interacts with** `iter3-parent-questions`: both modify "ask_question" and "Decisions", and its `answer_question`, `question.asked` message and one inbox scenario assumed suggested answers and text answers. This change is implemented first (decided by Peter); this PR updates the `iter3-parent-questions` artifacts to build on it (design D11). **And** `markdown-editor`: this change adds a layout and modifies three of its requirements, so `markdown-editor` (both steps, one PR) is built and archived first.
+- **Interacts with** `iter3-parent-questions`: both modify "ask_question" and "Decisions", and its `answer_question`, `question.asked` message and one inbox scenario assumed suggested answers and text answers. This change is implemented first (decided by Peter); this PR updates the `iter3-parent-questions` artifacts to build on it (design D11). **And** `markdown-editor` (archived): this change adds a layout and modifies three of its requirements.

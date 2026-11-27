@@ -1,8 +1,11 @@
 ---
 source: crates/df-web/src/transcript/tests.rs
+assertion_line: 141
 expression: render_all(&folder)
 ---
 <div id="transcript" class="flex min-w-0 flex-col gap-3">
+<div id="request-updates" hidden x-data="requestCards">
+</div>
 <div id="run-1" role="separator" class="flex items-center gap-3 py-2 text-xs text-faint">
 <span class="h-px flex-1 bg-line">
 </span>
@@ -51,7 +54,7 @@ expression: render_all(&folder)
 </div>
 </details>
 <div id="msg-r1-m1" data-author="agent" class="flex items-end gap-2">
-<span role="img" aria-label="Agent" class="avatar persona-avatar inline-flex shrink-0 items-center justify-center rounded-full font-semibold size-8 text-xs bg-sunk text-muted">A</span>
+<span role="img" aria-label="Agent" class="avatar persona-avatar no-underline hover:no-underline inline-flex shrink-0 items-center justify-center rounded-full font-semibold size-8 text-xs bg-sunk text-muted">A</span>
 <div class="min-w-0 max-w-[85%] md:max-w-[75%]">
 <div class="break-words rounded-2xl rounded-bl-md bg-bubble-agent px-3 py-2 text-on-bubble-agent">
 <div class="whitespace-pre-wrap">Looking at **the code**</div>

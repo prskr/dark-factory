@@ -40,7 +40,7 @@ The question text SHALL be rendered as Markdown under "Agent text is untrusted".
 - **THEN** the card shows the label exactly as written
 
 ### Requirement: Answer input by kind
-A single-choice question SHALL offer its options as radio buttons, a multiple-choice question as checkboxes with a hint naming the limits; both SHALL offer "Other" with a text input when allowed, and preselect nothing. A text question SHALL offer a Markdown field with "Write" and "Preview" tabs and no syntax highlighting.
+A single-choice question SHALL offer its options as radio buttons, a multiple-choice question as checkboxes with a hint naming the limits above the options; both SHALL offer "Other" as the last option, with a text input (placeholder "Your Other answer") when allowed, and preselect nothing. A text question SHALL offer a Markdown field labelled "Your answer" with "Write" and "Preview" tabs and no syntax highlighting.
 
 #### Scenario: Multiple choice with a limit
 - **WHEN** a board member opens a multiple-choice question with `min_selected: 1` and `max_selected: 3`
@@ -56,7 +56,7 @@ A single-choice question SHALL offer its options as radio buttons, a multiple-ch
 
 #### Scenario: Other chosen
 - **WHEN** a board member checks "Other" on a single-choice question
-- **THEN** a text input for the Other answer is shown and focused
+- **THEN** a text input for the Other answer is shown below "Other" and focused
 
 #### Scenario: Other text without Other chosen
 - **WHEN** the card's script is not running and a board member checks `pg16`, types "maybe 15" into the Other input and answers
@@ -78,11 +78,11 @@ An answer the server rejects SHALL be shown again on its card with the submitted
 - **THEN** the card shows "Write your Other answer." below the input and the question stays pending
 
 ### Requirement: Answered question in history
-A decided question card SHALL show the question, its kind, every option in order with the chosen ones marked (icon and accessible text), the Other text when given, or the text answer rendered as Markdown under "Agent text is untrusted" (it may come from an agent), and who answered and when.
+A decided question card SHALL show the question, its kind, every option in order with the chosen ones marked (icon and accessible text), the Other text when given, or the text answer rendered as Markdown under "Agent text is untrusted" (it may come from an agent), and "Answered by <name> · <time>".
 
 #### Scenario: Answered multiple choice
 - **WHEN** a board member opens a task whose multiple-choice question was answered with `api` and Other "also the CLI"
-- **THEN** the card lists all options with `api` marked chosen, shows "Other: also the CLI" and who answered
+- **THEN** the card lists all options with `api` marked chosen, shows "Other: also the CLI" and "Answered by Peter Kurfer · <time>"
 
 ### Requirement: Answer drafts survive live updates
 A live update of the inbox, the task timeline or the chat timeline SHALL keep the choices and text typed into a pending card while its question stays pending and unchanged, also when the card is sent again (a reconnect) or other parts of it change. A card whose question was decided or closed elsewhere SHALL show that on the timeline and leave the inbox.

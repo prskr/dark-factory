@@ -17,8 +17,7 @@ async fn needs_you(app: &TestApp, chat: &df_db::TaskRow) {
             actor: &actor,
             blocking: false,
         },
-        "Which Helm version?",
-        &[],
+        df_core::QuestionSpec::text_question("Which Helm version?"),
     )
     .await
     .unwrap();

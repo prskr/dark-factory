@@ -180,6 +180,57 @@ async fn a_message_to_a_chat_is_queued_from_the_board_member() {
     );
 }
 
+// Scenario "Reply instead of answer".
+#[tokio::test]
+async fn a_message_on_a_chat_with_a_pending_question_leaves_the_question_answerable() {
+    let app = TestApp::new().await;
+    let cookie = app.login().await;
+    let (_, chat) = idle_chat(&app).await;
+    let actor = crate::testkit::actor().0;
+    let (question, _) = df_db::requests::raise_question(
+        &app.pool,
+        df_db::requests::Raise {
+            task_id: chat.id,
+            run_id: None,
+            actor: &actor,
+            blocking: true,
+        },
+        df_core::QuestionSpec::text_question("Which one?"),
+    )
+    .await
+    .unwrap();
+
+    let response = app
+        .post(
+            "/chats/DF-1-CHAT/messages",
+            &form(&[("message", "Let me think about it")]),
+            &cookie,
+        )
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let row = df_db::requests::get_request(&app.pool, question.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.state, df_db::requests::RequestState::Pending);
+    let page = text(app.get("/chats/DF-1-CHAT", &cookie).await).await;
+    assert!(page.contains("data-question="), "{page}");
+    let list = text(app.get("/chats", &cookie).await).await;
+    assert!(list.contains("aria-label=\"Needs you\""), "{list}");
+
+    let answered = app
+        .post(
+            &format!("/requests/{}/answer", question.id),
+            &form(&[("text", "Postgres")]),
+            &cookie,
+        )
+        .await;
+    assert_eq!(answered.status(), StatusCode::OK);
+    let list = text(app.get("/chats", &cookie).await).await;
+    assert!(!list.contains("aria-label=\"Needs you\""), "{list}");
+}
+
 // Scenario "Message to an archived chat".
 #[tokio::test]
 async fn a_message_to_an_archived_chat_is_rejected_and_nothing_is_queued() {

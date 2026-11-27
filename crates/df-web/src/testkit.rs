@@ -1104,7 +1104,7 @@ pub(crate) fn task_detail(key: &str) -> df_db::task_views::TaskDetail {
         pr_title: None,
         pr_attached: false,
         archived_at: None,
-        has_pending_request: false,
+        has_pending_approval: false,
         branch: format!("factory/task/{key}"),
         resume_at: None,
         auto_resumes: 0,

@@ -8,6 +8,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::audit::{NewAuditEntry, write_audit_entry};
 use crate::pool::DbError;
+use crate::requests::close_pending_questions;
 use crate::task_events::{apply_task_event, execute_effects};
 use crate::tasks::{
     NewTask, TaskMessageRow, TaskPlacement, TaskRow, allocate_task_key, ask_for_title,
@@ -109,11 +110,13 @@ async fn insert_first_message(
     insert_message(tx, chat.id, author.clone(), content, None).await
 }
 
-/// A board member archives a chat: the chat keeps its status and records when and by whom. A
-/// chat that is `queued` or `running` or has a pending request is [`DbError::Conflict`], as is a
-/// task or an archived chat.
+/// A board member archives a chat: the chat keeps its status and records when and by whom, and
+/// its pending questions are closed with reason `chat-archived`. A chat that is `queued` or
+/// `running` or has a pending approval request is [`DbError::Conflict`] (nothing is closed), as
+/// is a task or an archived chat.
 pub async fn archive_chat(pool: &PgPool, chat: TaskId, actor: Principal) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
+    close_pending_questions(&mut tx, chat, "chat-archived", &actor).await?;
     apply_task_event(
         &mut tx,
         chat,
