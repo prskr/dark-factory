@@ -43,7 +43,7 @@ Every run of a chat SHALL receive the persona's system prompt followed by fixed 
 - **THEN** its system prompt contains no chat instructions
 
 ### Requirement: Tools of a chat run
-A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `send_message`, `report_progress`, `request_approval`, `write_artifact`, `list_artifacts`, `read_artifact`, `list_issues` and `create_issue`, and SHALL NOT be offered `complete_task`, `ask_question`, `update_pull_request` or `comment_on_issue`. A call to a tool not offered SHALL be answered with a tool error and change nothing.
+A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `send_message`, `report_progress`, `ask_question`, `request_approval`, `write_artifact`, `list_artifacts`, `read_artifact`, `list_issues` and `create_issue`, and SHALL NOT be offered `complete_task`, `update_pull_request` or `comment_on_issue`. A call to a tool not offered SHALL be answered with a tool error and change nothing.
 
 #### Scenario: Delegation from a chat
 - **WHEN** the agent of `DF-12-CHAT` calls `create_task` for persona Linus
@@ -56,6 +56,10 @@ A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `s
 #### Scenario: Issues from a chat
 - **WHEN** the agent of `DF-12-CHAT` calls `list_issues`
 - **THEN** the call returns the open issues of the project's repository
+
+#### Scenario: Question from a chat
+- **WHEN** the agent of `DF-12-CHAT` calls `ask_question` with kind `single_choice` and two options
+- **THEN** a pending question of `DF-12-CHAT` exists, its card is on the chat timeline and the inbox lists it with a link to `/chats/DF-12-CHAT`
 
 ### Requirement: Read-only checkout
 A chat run SHALL work in a checkout of the project's base branch, reset to the remote base branch at the start of every run, discarding local changes. A chat SHALL have no task branch, no WIP branch and no pull request, and SHALL NOT be the base task of another task.
@@ -84,7 +88,7 @@ A board member SHALL be able to stop a chat's run and to archive and unarchive a
 - **THEN** the request is rejected and nothing changes
 
 ### Requirement: Archiving a chat
-Archiving SHALL record when and by whom a chat was archived, keep its status, and be rejected while the chat is `queued` or `running` or has an open approval request. Archiving SHALL release a run of the chat that waits in its keep-alive window. Archiving SHALL NOT change the chat's subtasks.
+Archiving SHALL record when and by whom a chat was archived, keep its status, and be rejected while the chat is `queued` or `running` or has an open approval request. It SHALL close the chat's own pending questions with reason `chat-archived`. Archiving SHALL release a run of the chat that waits in its keep-alive window. Archiving SHALL NOT change the chat's subtasks.
 
 #### Scenario: Archive an idle chat
 - **WHEN** a board member archives `DF-12-CHAT` in status `waiting`
@@ -101,6 +105,10 @@ Archiving SHALL record when and by whom a chat was archived, keep its status, an
 #### Scenario: Archive with an open approval request
 - **WHEN** `DF-12-CHAT` has a pending approval request and a board member archives it
 - **THEN** the request is rejected with a reason naming the open request
+
+#### Scenario: Archive with a pending question
+- **WHEN** `DF-12-CHAT` has a pending question and a board member archives it
+- **THEN** the chat is archived, the question is `closed` with reason `chat-archived` and the inbox no longer lists it
 
 #### Scenario: Running subtask
 - **WHEN** a board member archives `DF-12-CHAT` while its subtask `DF-20` is running
@@ -163,3 +171,10 @@ Starting a chat SHALL write an audit entry `chat.create` with the board member, 
 #### Scenario: Audit on start
 - **WHEN** a board member starts `DF-25-CHAT`
 - **THEN** an audit entry `chat.create` names the board member, `DF`, the persona and `DF-25-CHAT`
+
+### Requirement: A message leaves a chat question open
+A board member's message on a chat with a pending question SHALL be delivered as usual and SHALL NOT answer or close the question; the question SHALL stay answerable.
+
+#### Scenario: Reply instead of answer
+- **WHEN** `DF-12-CHAT` has a pending single-choice question and the board member writes "Let me think about it" in the message box
+- **THEN** the message is delivered to the agent and the question card still offers its options and "Answer"

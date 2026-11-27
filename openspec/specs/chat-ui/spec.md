@@ -32,11 +32,15 @@ At desktop widths the left column SHALL list the projects with their number of c
 - **THEN** the entry shows the start of the first message in italics and "<persona> sets the topic when the run starts"
 
 ### Requirement: Chats that need you
-A chat SHALL need you while it has an open approval request. Chats that need you SHALL be listed first and marked, the other chats SHALL follow by last activity, newest first, and a project SHALL be marked while one of its chats needs you.
+A chat SHALL need you while it has an open approval request or a pending question. Chats that need you SHALL be listed first and marked, the other chats SHALL follow by last activity, newest first, and a project SHALL be marked while one of its chats needs you.
 
 #### Scenario: Open approval request
 - **WHEN** `DF-16-CHAT` has a pending approval request and `DF-12-CHAT` had activity more recently
 - **THEN** `DF-16-CHAT` is listed first with the marker and project `DF` carries the marker
+
+#### Scenario: Pending question
+- **WHEN** `DF-16-CHAT` has a pending question and `DF-12-CHAT` had activity more recently
+- **THEN** `DF-16-CHAT` is listed first with the marker, and loses it once the question is answered
 
 ### Requirement: Collapsible chat list
 At desktop widths a board member SHALL be able to collapse the left column to a narrow strip with one avatar per persona that has a chat in the project. Selecting an avatar SHALL open that persona's chat that needs you, or otherwise its most recently active chat.
