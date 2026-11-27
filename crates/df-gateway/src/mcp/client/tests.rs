@@ -206,8 +206,16 @@ async fn call_returns_the_json_answer_with_the_arguments_unchanged() {
         .await
         .unwrap();
 
-    // The echo prints the arguments in the order of the JSON library; the request has them.
-    assert!(text_of(&reply).starts_with("called search "));
+    // The echo prints the arguments as JSON after its prefix; compare the parsed value, which
+    // does not depend on the order of the object's keys.
+    let text = text_of(&reply);
+    let echoed = text
+        .strip_prefix("called search ")
+        .expect("the echo's prefix");
+    assert_eq!(
+        serde_json::from_str::<Value>(echoed).unwrap(),
+        json!({"q": "tokio", "n": 2})
+    );
     let call = fake.requests().pop().unwrap().json();
     assert_eq!(
         call["params"],
@@ -1025,13 +1033,16 @@ async fn concurrent_first_calls_of_a_run_and_server_share_one_upstream_session()
 }
 
 #[tokio::test]
-async fn a_slow_end_of_a_stale_session_does_not_hold_back_a_concurrent_call() {
+async fn a_stale_session_whose_end_is_held_up_does_not_hold_back_a_concurrent_call() {
     let standard = Arc::new(Standard::new(vec![tool("search")]));
     let inner = standard.handler();
+    // The upstream answers the DELETE only when the test says so.
+    let gate = Arc::new(Notify::new());
+    let held = gate.clone();
     let fake = FakeMcp::start_with(Arc::new(move |seen: &Seen| {
         let answer = inner(seen);
         if seen.method == Method::DELETE {
-            Answer::After(Duration::from_millis(600), Box::new(answer))
+            Answer::Gated(held.clone(), Box::new(answer))
         } else {
             answer
         }
@@ -1043,17 +1054,22 @@ async fn a_slow_end_of_a_stale_session_does_not_hold_back_a_concurrent_call() {
         .await
         .unwrap();
     let current = target_version(&fake.url(), "tok", 2);
-    // The first call with the new configuration version ends the old session: its DELETE is slow.
+    // The first call with the new configuration version ends the old session: its DELETE is held.
     let opener = tokio::spawn({
         let (client, current) = (client.clone(), current.clone());
         async move { client.list_tools(&key("r1"), &current).await }
     });
-    while !fake.methods().contains(&"DELETE".to_owned()) {
-        tokio::task::yield_now().await;
-    }
+    // The bound only keeps a broken test from hanging.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !fake.methods().contains(&"DELETE".to_owned()) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the DELETE never reached the upstream");
 
     let concurrent = tokio::time::timeout(
-        Duration::from_millis(400),
+        Duration::from_secs(10),
         client.list_tools(&key("r1"), &current),
     )
     .await;
@@ -1063,10 +1079,77 @@ async fn a_slow_end_of_a_stale_session_does_not_hold_back_a_concurrent_call() {
             .expect("the concurrent call waited for the DELETE")
             .is_ok()
     );
-    assert!(!opener.is_finished(), "the DELETE was still pending");
+    assert!(!opener.is_finished(), "the DELETE is still held");
+    gate.notify_one();
     opener.await.unwrap().unwrap();
     assert_eq!(
         fake.methods().iter().filter(|m| *m == "initialize").count(),
         2
     );
+}
+
+#[tokio::test]
+async fn a_credential_with_a_percent_sign_is_redacted_in_results_and_errors_in_every_form_it_is_echoed()
+ {
+    for (secret, echoes) in [
+        (
+            "tok%!",
+            ["tok%25%21", "tok%25%21".to_lowercase().leak(), "tok%!"],
+        ),
+        ("a%2Fb", ["a%252Fb", "a%252fb", "a%2Fb"]),
+    ] {
+        for echoed in echoes {
+            let fake = FakeMcp::start_with(Arc::new(move |seen: &Seen| {
+                let m = seen.json();
+                match m.get("method").and_then(Value::as_str) {
+                    Some("initialize") => Answer::Json(json!({"jsonrpc": "2.0", "id": m["id"],
+                        "result": {"protocolVersion": "2025-06-18", "capabilities": {}}})),
+                    Some("tools/call") if m["params"]["name"] == "fail" => Answer::Json(json!({
+                        "jsonrpc": "2.0", "id": m["id"],
+                        "error": {"code": -1, "message": format!("bad https://x/mcp?token={echoed}")}})),
+                    Some("tools/call") => Answer::Json(json!({"jsonrpc": "2.0", "id": m["id"],
+                        "result": {"content": [{"type": "text", "text": format!("url ?token={echoed}")}]}})),
+                    _ => Answer::Accepted,
+                }
+            }))
+            .await;
+            let scheme = pb::mcp_server::CredentialScheme::Query(pb::McpQueryScheme {
+                parameter: "token".into(),
+            });
+            let target = target_at(&fake.url(), scheme, secret);
+            let client = client();
+
+            let ok = client
+                .call_tool(
+                    &key("r1"),
+                    &target,
+                    "t",
+                    json!({}),
+                    &CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            let failed = client
+                .call_tool(
+                    &key("r1"),
+                    &target,
+                    "fail",
+                    json!({}),
+                    &CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(
+                text_of(&ok),
+                "url ?token=[redacted]",
+                "{secret} echoed as {echoed}"
+            );
+            assert_eq!(
+                text_of(&failed),
+                "bad https://x/mcp?token=[redacted]",
+                "{secret} echoed as {echoed}"
+            );
+        }
+    }
 }

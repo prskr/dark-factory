@@ -74,6 +74,8 @@ pub(crate) enum Answer {
     Stall,
     /// The answer after a delay.
     After(Duration, Box<Answer>),
+    /// The answer once the test calls `notify_one` on the gate.
+    Gated(Arc<tokio::sync::Notify>, Box<Answer>),
 }
 
 pub(crate) type Handler = Arc<dyn Fn(&Seen) -> Answer + Send + Sync>;
@@ -193,6 +195,10 @@ async fn render(answer: Answer) -> Reply {
         ),
         Answer::Raw(content_type, body) => build(200, &[], content_type, body),
         Answer::Stall => std::future::pending().await,
+        Answer::Gated(gate, inner) => {
+            gate.notified().await;
+            Box::pin(render(*inner)).await
+        }
         Answer::After(delay, inner) => {
             tokio::time::sleep(delay).await;
             Box::pin(render(*inner)).await

@@ -207,23 +207,42 @@ impl Redactor {
     }
 }
 
-/// The end of a match of `secret` in `haystack` that starts at `start`, if there is one.
+/// The end of a match of `secret` in `haystack` that starts at `start`, if there is one. A byte
+/// of the credential may appear literally or as `%XX`; a `%` of the credential can be read both
+/// ways (`%` and `%25`), so the readings are tried one after the other. The two hex digits that
+/// follow a `%` of the credential look like an escape, so their case does not matter either.
 fn match_secret(haystack: &[u8], start: usize, secret: &[u8]) -> Option<usize> {
-    let mut at = start;
-    for byte in secret {
-        let here = *haystack.get(at)?;
-        if here == *byte || (*byte == b' ' && here == b'+') {
-            at += 1;
-            continue;
-        }
-        let (high, low) = (*haystack.get(at + 1)?, *haystack.get(at + 2)?);
-        let escaped = here == b'%' && (hex_value(high)? << 4 | hex_value(low)?) == *byte;
-        if !escaped {
-            return None;
-        }
-        at += 3;
+    match_from(haystack, start, secret, 0)
+}
+
+/// [`match_secret`] with `fold` bytes of `secret` left whose ASCII case is ignored.
+fn match_from(haystack: &[u8], start: usize, secret: &[u8], fold: u8) -> Option<usize> {
+    let Some((byte, rest)) = secret.split_first() else {
+        return Some(start);
+    };
+    let looks_like_escape = *byte == b'%'
+        && rest
+            .get(..2)
+            .is_some_and(|pair| pair.iter().all(u8::is_ascii_hexdigit));
+    let next_fold = if looks_like_escape {
+        2
+    } else {
+        fold.saturating_sub(1)
+    };
+    let here = *haystack.get(start)?;
+    let same = here == *byte || (fold > 0 && here.eq_ignore_ascii_case(byte));
+    if (same || (*byte == b' ' && here == b'+'))
+        && let Some(end) = match_from(haystack, start + 1, rest, next_fold)
+    {
+        return Some(end);
     }
-    Some(at)
+    let (high, low) = (*haystack.get(start + 1)?, *haystack.get(start + 2)?);
+    let escaped = here == b'%' && (hex_value(high)? << 4 | hex_value(low)?) == *byte;
+    if escaped {
+        match_from(haystack, start + 3, rest, next_fold)
+    } else {
+        None
+    }
 }
 
 const fn hex_value(digit: u8) -> Option<u8> {
@@ -390,6 +409,29 @@ mod tests {
             "an incomplete escape is no match"
         );
         assert_eq!(redactor.text("a%20b%2gc?\u{e9}"), "a%20b%2gc?\u{e9}");
+    }
+
+    #[test]
+    fn a_credential_with_a_percent_sign_is_redacted_in_the_form_it_is_sent_and_in_other_escapings()
+    {
+        // `tok%!` is sent as `tok%25%21`; `a%2Fb` as `a%252Fb`.
+        for (secret, echoed) in [
+            ("tok%!", "tok%25%21"),
+            ("tok%!", "tok%25%21".to_lowercase().as_str()),
+            ("tok%!", "tok%!"),
+            ("tok%!", "tok%25!"),
+            ("a%2Fb", "a%252Fb"),
+            ("a%2Fb", "a%252fb"),
+            ("a%2Fb", "a%2Fb"),
+            ("a%2Fb", "a%252F%62"),
+        ] {
+            let redactor = Redactor::new(secret);
+            assert_eq!(
+                redactor.text(&format!("url ?t={echoed}&x=1")),
+                "url ?t=[redacted]&x=1",
+                "{secret} as {echoed}"
+            );
+        }
     }
 
     #[test]
