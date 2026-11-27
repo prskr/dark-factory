@@ -14,7 +14,7 @@ The control plane and the gateway SHALL each serve `GET /healthz` and `GET /read
 - **THEN** the response is `200`
 
 #### Scenario: No UI on the health port
-- **WHEN** a client sends `GET /tasks` or `POST /webhooks/forgejo` to the control plane's health port
+- **WHEN** a client sends `GET /tasks` or `POST /webhooks/forgejo` to the control plane's health port, or `GET /tasks` to the gateway's health port
 - **THEN** the response is `404`
 
 ### Requirement: No probes on the UI port
@@ -22,11 +22,11 @@ The control plane's UI port SHALL NOT serve `/healthz` or `/readyz`, with or wit
 
 #### Scenario: Probe paths through the ingress
 - **WHEN** a client sends `GET /readyz` to the control plane's UI port
-- **THEN** the response is `404` and the control plane does not ping the database
+- **THEN** the response is `404`
 
 #### Scenario: Instance without auth
 - **WHEN** the control plane runs without `auth` and a client sends `GET /healthz` to the UI port
-- **THEN** the response is `404`, and `GET /assets/…` and `POST /webhooks/{plugin}` still answer as before
+- **THEN** the response is `404`, while `GET /assets/logo.svg` answers `200` and a correctly signed `POST /webhooks/{plugin}` answers `202`
 
 ### Requirement: Liveness
 `/healthz` SHALL answer `200` whenever the process serves the health port. It SHALL check no dependency, so that an outage of the database or of the control plane never restarts a pod.
@@ -59,3 +59,10 @@ The control plane SHALL start serving its health port only after its startup che
 #### Scenario: Startup fails
 - **WHEN** `serve` fails while loading the agent TLS material
 - **THEN** the health port never answers and the process exits with an error
+
+### Requirement: Port bind errors name the port
+When the control plane or the gateway cannot bind one of its listeners, the error SHALL name the configuration key and the port, for example `server.healthPort` and `8081`.
+
+#### Scenario: Health port already in use
+- **WHEN** another process holds the port set as `server.healthPort` and `serve` starts
+- **THEN** `serve` fails with an error that names `server.healthPort` and the port number

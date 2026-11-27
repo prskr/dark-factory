@@ -14,8 +14,8 @@ The chart SHALL restrict the instance namespace: control plane ingress only from
 - **THEN** the connection is accepted
 
 #### Scenario: Health ports closed to pods
-- **WHEN** the chart is rendered with `networkPolicy.ingressController.allowAll: true`
-- **THEN** no ingress rule of the control plane or gateway NetworkPolicy names `controlPlane.ports.health` or `gateway.ports.health`
+- **WHEN** the chart is rendered with defaults, and again with `networkPolicy.ingressController.allowAll: true`
+- **THEN** every ingress rule of both NetworkPolicies has a `ports` list, no rule of the control plane policy names `controlPlane.ports.health`, and no rule of the gateway policy names `gateway.ports.health`
 
 ## ADDED Requirements
 
@@ -26,12 +26,16 @@ The chart SHALL offer `controlPlane.ports.health` (default `8081`) and `gateway.
 - **WHEN** the chart is rendered with defaults
 - **THEN** the control plane container declares port `health` 8081, and its liveness and readiness probes call `/healthz` and `/readyz` on port `health`
 
+#### Scenario: Gateway probes
+- **WHEN** the chart is rendered with defaults
+- **THEN** the gateway container declares port `health` 8080, and its liveness and readiness probes call `/healthz` and `/readyz` on port `health`
+
 #### Scenario: Health port not published
 - **WHEN** the chart is rendered with `httpRoute.enabled: true`
 - **THEN** the control plane and gateway Services have no port named `health`, and the HTTPRoute's backend port is `controlPlane.ports.http`
 
 #### Scenario: Health port is required
-- **WHEN** the chart is rendered with `controlPlane.ports.health` removed
+- **WHEN** the chart is rendered with `controlPlane.ports.health: null`
 - **THEN** rendering fails schema validation
 
 ### Requirement: Readiness probe timeout
