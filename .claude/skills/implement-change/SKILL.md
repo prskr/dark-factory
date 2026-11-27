@@ -21,7 +21,7 @@ Change: `$ARGUMENTS`
    - the change's proposal, specs or `tasks.md` changed in a commit after the last one that changed the file (`git log --format=%h <that commit>..HEAD -- openspec/changes/<name>/proposal.md openspec/changes/<name>/specs openspec/changes/<name>/tasks.md` is not empty): the UI scope may have grown since the design was recorded.
 6. Ledger: `openspec/changes/<name>/review-log.md`.
    - If it exists, this is a resumed run. Read it and take `BASE`, the round number and the open findings from it. Continue at the step the ledger records.
-   - Otherwise create it with the template below. `BASE` is the parent of the oldest `wip(<name>)` commit on the branch (the design commits of `/prepare-change`: `git log --reverse --format=%H --grep='^wip(<name>)' origin/main..HEAD | head -1`), or `HEAD` if there is none.
+   - Otherwise create it with the template below. `BASE` is the parent of the oldest `wip(<name>)` commit on the branch (the design commits of `/prepare-change`): `git rev-parse "$(git log --reverse --format=%H --grep='^wip(<name>)' origin/main..HEAD | head -1)^"`, or `HEAD` if there is no such commit.
 7. Container socket: probe for one, as described in `AGENTS.md` ("Containers and integration tests in a sandbox"): `$XDG_RUNTIME_DIR/podman/podman.sock` and `/var/run/docker.sock`, each with `curl -sf --max-time 3 --unix-socket <socket> http://d/_ping`. Remember the answering socket as `DOCKER_HOST=unix://<socket>` (`DOCKER_HOST` is none if nothing answers). Never start or install Docker or Podman.
 8. Announce: change, store, BASE, progress (`n/m tasks`), `DESIGN` (number of boards, or none), `DOCKER_HOST` (or none), resumed or fresh.
 

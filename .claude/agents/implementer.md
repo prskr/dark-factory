@@ -65,6 +65,8 @@ fi
 
 If a socket answers, run the tests with `DOCKER_HOST=unix://<socket>` set (testcontainers reads it). Only if none answers, skip those tests and list them in the report. Without a socket, run only tests you have identified as needing no containers, not broad targets such as `bazel --bazelrc=.bazelrc.agents test //crates/<crate>/...` or `cargo test -p <crate> --lib`, which may include container-backed tests (anything using `df_test_postgres` or testcontainers; find them with `grep -rl "df_test_postgres\|testcontainers" crates/<crate>`). Select them explicitly: `cargo test -p <crate> <filter>` / `--test <name>`, `cargo test -p <crate> -- --skip <container test>`, or specific Bazel test targets. State in your report which container-backed tests you could not run.
 
+A socket that answers also runs the e2e suite: `kind` and `helm` come from `.bazel_env/bin`, so `just e2e-local` works here and e2e tasks are implemented and run like any other task.
+
 ## Commit
 
 Commit the round with all hooks enabled (never `--no-verify`):
@@ -86,6 +88,8 @@ CONTAINER TESTS: ran with <socket> | skipped (no socket): <test list>
 BLOCKED: <question or design problem, with options>   (only when BLOCKED)
 NOTES: <deviations from the spec or the fix list, and why>
 ```
+
+`STATUS: DONE` means `remaining: 0` for the tasks of this round. A task you could not finish makes the status `BLOCKED`, with the exact error that stopped it.
 
 Every behavior claim in the report (a status code, a message text, what is stored, sent or audited) names the test that asserts it, or says "untested".
 
