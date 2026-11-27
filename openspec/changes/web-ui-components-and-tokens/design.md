@@ -1,0 +1,191 @@
+# Design
+
+## Context
+
+See proposal.md, "Why". Current state in `crates/df-web`:
+
+- **Tokens.** `styles/input.css` defines the colours as CSS variables in `:root` and in `@media (prefers-color-scheme: dark)`, and exposes them through `@theme inline` (`--color-ink: var(--ink)` → `text-ink`). `@theme` has no font-size or radius tokens, only `--font-sans` / `--font-mono`. Tailwind scans `../src` (`@source`), so every class-like string in a `.rs` file becomes a rule in `app.css`: markup, Alpine `:class` strings, tests and comments.
+- **Arbitrary values** (count in `src/` and `styles/`, tests and snapshots included): `text-[13px]` 42, `rounded-[10px]` 22, `text-[15px]` 18, `text-[11px]` 8, `text-[17px]` 2, `text-[10px]` 2, `text-[9px]` 1, `rounded-t-[18px]` 1 (`.ws-details`), `text-[0.9em]` 1 (`.md-body code`). There are no arbitrary colours (`-[#…]`, `-[var(…)]`).
+- **Doc and contrast tests** (`components/mod.rs`): `every_token_of_the_stylesheet_is_documented` reads the variable names of the light `:root` block, `every_text_pair_meets_the_minimum_contrast_in_both_themes` reads `TEXT_PAIRS` by token name, and `every_component_is_documented` holds a list of names that must appear in `docs/design-system.md`.
+- **Palette guard.** `palette_classes` in `task_pages/tests/layout.rs` checks the rendered HTML of 11 routes (tasks, projects, personas, credentials) for `<palette>-<number>` classes. It needs PostgreSQL (`TestApp`).
+- **Copies found:**
+  - Confirmations: `reset_dialog` and `cancel_dialog` (`task_pages/view.rs`) and `rotate_dialog` (`config_pages/signing_key.rs`) are each `dialog x-ref=… class=(DIALOG_CLASS)` > `rounded-2xl border border-line bg-panel p-5 shadow-lg` card > `h2` > paragraphs > a `mt-5 flex flex-col-reverse gap-2 md:flex-row md:justify-end` button row. `verify_dialog` uses the same frame for a form.
+  - Tab rows: `tabbed_form` (`config_pages.rs`, styles `Page` and `Dialog`), `details_heading` and `chat_details_heading` with `tab_button` (`artifacts/view.rs`), `tab` in `requests/create_issue.rs`, and the link tabs of `chat_pages/archive.rs`. All but the archive use the Alpine component `tabs` (`scripts/tabs.ts`, `move()` for arrow keys). The archive tabs are `hx-get` links with `role="tab"` and no arrow keys, and mark the open tab with the bright `border-accent`.
+  - Status dots: `Tone::dot_class()` exists (`components/badges.rs`). The markup around it is repeated in `config_pages.rs` (2), `task_pages/view.rs` (2: `size-3` with `role="img"` in the strip, `size-2` decorative), `task_pages/dependencies.rs`, `chat_pages/view.rs` (2: `size-2.5` "Needs you" and `size-3`), and the `size-1.5` live dot of `egress/log/page.rs`.
+  - Count pills: `rounded-full bg-sunk px-1.5 text-xs` after tab labels (`artifacts/view.rs`, 4 times), `… font-mono` for the archived count (`chat_pages/view.rs`), `… px-2 py-0.5 font-mono text-xs text-muted` for the subtask `done/total` chip (`task_pages/subtasks.rs`).
+  - Labels: 11 `block text-sm font-medium text-muted` labels and legends outside `field()` (`project_webhook.rs` 2, `project_subscriptions.rs` 1, `egress/log/allow.rs` 1, `config_pages/signing_key.rs` 4, `config_pages/providers.rs` 2, `config_pages/push_policy.rs` 1). Uppercase `text-xs font-medium uppercase tracking-wide text-faint` headings: `section()` and 11 more in `egress/log/`, `task_pages/` and `components/`.
+- **PenPot names.** The PenPot MCP was not connected while this was planned. Known PenPot names come from `.agents/skills/penpot/helpers.js` (the colour-to-token rules), `docs/design-workflow.md` (page table: variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button`, `Button`, `Task row`, `Request card`, `Icon button`; main component `Profile menu`) and `openspec/changes/archive/2026-10-30-ui-design-alignment/design.md` (`Button` variants `Primary`, `Secondary`, `Ink`, `Danger`; `Icon button` properties Icon, Size, State). The full token list, the variant names of every set and any typography or radius tokens are (unverified). Task 1.1 reads them first.
+- **Parallel change.** `task-list-tree` rewrites `task_rows` and shares the chat list's `needs_you_dot` with the task list.
+
+## Goals / Non-Goals
+
+**Goals:**
+- Pages render the same as before, apart from the small unifications listed in D3 and D4.
+- Each new component has an HTML unit test and an entry in `docs/design-system.md`, and every copy it replaces is gone.
+- A CSS token and its PenPot token have the same name, so `docs/design-system.md` holds the mapping in one place and skill `penpot` needs no exception table.
+
+**Non-Goals:**
+- New behaviour in dialogs or tabs (focus handling, animations): rejected. The components keep today's behaviour.
+- Changing token values or contrast: rejected. Renames only.
+- Guarding arbitrary spacing and size values: backlog (see proposal).
+
+## Decisions
+
+### D1: One change, delivered in ordered steps
+
+The three parts depend on each other. The mapping table (part 2) names the CSS tokens after the rename. The guard (part 3) can only go green once the components (part 1) have replaced the copies that hold most of the arbitrary values. The work stays one change on one branch, as commits in this order, each with green tests:
+
+1. Verify the PenPot inventory (tokens, variant sets, typography and radius tokens). No code.
+2. Type and radius tokens, then the guard (TDD: the guard fails first, the replacement makes it pass).
+3. New components, each replacing its copies.
+4. Moves into `components/` (`task_row`, `request_card`, `count_badge`).
+5. The token rename: one mechanical commit, last, so it touches the fewest lines and can be redone after a rebase.
+6. The mapping table and the doc test that keeps it honest.
+
+If `task-list-tree` hasn't landed when step 4 starts, steps 5 and 6 go first and the `task_row` move waits for it (D9).
+
+Alternative: three changes (components, tokens, rename). Rejected. Each one would leave `docs/design-system.md` half-updated, and the rename would run twice over the same files.
+
+### D2: `confirm_dialog` and its frame
+
+`components/dialog.rs` (re-exported from `components`):
+
+```rust
+/// A native modal `<dialog>` opened by `$refs.<x_ref>.showModal()`; backdrop click closes it.
+pub fn ref_dialog(x_ref: &str, title_id: &str, title: Markup, open_on_load: bool, body: Markup) -> Markup;
+
+pub struct Confirm<'a> {
+    pub x_ref: &'a str,
+    pub title_id: &'a str,
+    pub title: Markup,
+    pub body: Markup,          // paragraphs, error
+    pub keep_label: &'a str,   // "Keep task", "Cancel"
+    pub confirm: Markup,       // the danger button with its hx-* attributes
+}
+pub fn confirm_dialog(c: &Confirm) -> Markup;
+pub const DIALOG_TEXT_CLASS: &str; // "mt-3 text-sm max-md:text-lead"
+```
+
+`ref_dialog` is the frame (`DIALOG_CLASS`, card, `h2`). `confirm_dialog` adds the button row (Keep first in the DOM, so it stacks below the danger button on a phone). `verify_dialog` uses `ref_dialog` alone. `open_on_load` covers `rotate_dialog` after a failed rotation. The confirm button stays with the caller, because its `hx-*` attributes differ per use. `DIALOG_CLASS` moves from `actions.rs` to `dialog.rs`.
+
+Alternative: extend `overlay::dialog`. Rejected. That dialog opens itself on insertion and removes itself on close (htmx fragments). These dialogs live in the page and are opened from a menu.
+
+### D3: `tabs` renders the tab row; panels and Alpine state stay with the caller
+
+`components/tabs.rs`:
+
+```rust
+pub enum TabsStyle { Underline, Side, Inline, Folder }
+pub struct TabItem<'a> { pub id: &'a str, pub panel_id: &'a str, pub label: &'a str, pub count: Option<usize>, pub no_save: bool }
+pub fn tabs(label: &str, style: TabsStyle, items: &[TabItem], selected: &str) -> Markup;
+pub fn tab_class(style: TabsStyle, selected: bool) -> &'static str;
+```
+
+- `Underline`: the project and persona settings pages (`TabsStyle::Page` today). `Side`: `tabbed_form` in a dialog. `Inline`: the details heading of tasks and chats, with counts. `Folder`: the Preview / Markdown tabs of a create-issue card.
+- Every row gets `role="tablist"`, `aria-label`, `aria-selected`, roving `tabindex`, `aria-controls` and `x-on:keydown="move($event)"`, and works with the existing Alpine component `tabs`. Tab ids become `tab-<id>` everywhere. Today `create_issue` uses `<panel>-tab`, and its test changes with it.
+- `tabbed_form` keeps its job (form, panels, footer) and calls `tabs`. `config_pages::TabsStyle` is removed and its callers pass `components::TabsStyle`.
+- The archive's link tabs keep their links (the server loads the tab's content) and take their classes from `tab_class(TabsStyle::Underline, …)`. That replaces the bright `border-accent` marker with the `accent-strong` underline of the settings pages. The bright accent is only 1.4:1 on the light panel, so it fails the 3:1 a selection marker needs. Arrow keys for these link tabs: backlog.
+
+Alternative: one component that also renders the panels. Rejected. The panels differ too much (a form with a footer, fragments loaded by htmx, a column of the details panel).
+
+### D4: `status_dot`, `count_pill`, labels and the small heading
+
+- `status_dot(tone: Tone) -> Markup`: 8 px, `aria-hidden`. `StatusDot { tone, size: DotSize, label: Option<&str> }.render()` covers the rest: `DotSize::{Small (6 px, inside a badge), Regular (8 px), Large (12 px, details strip and chat header)}`. A label gives `role="img"`, `aria-label` and `title`. The 10 px "Needs you" dot becomes `Regular` unless task 1.1 finds a 10 px dot on the PenPot boards. In that case `DotSize` gets that size. The hollow "waiting" dot of a dependency and the subtask `status_ring` aren't status dots and stay as they are.
+- `count_pill(label: &str) -> Markup` (`components/badges.rs`): `rounded-full bg-sunk px-1.5 font-mono text-xs text-muted`. It's used for the tab counts, the archived count and the subtask `done/total` chip. Unifying them changes the padding of the `done/total` chip (`px-2` → `px-1.5`) and makes tab counts mono. Task 1.1 checks this against the `Task row` board. If PenPot draws one of them differently, that one wins.
+- `field_label(for_id: &str, text: &str)` and `legend_label(text: &str)` (`components/forms.rs`) replace the 11 labels and legends. `field()` and `markdown_field()` use `field_label` too.
+- `SMALL_HEADING_CLASS` (`components/lists.rs`): `text-xs font-medium uppercase tracking-wide text-faint`. It's a class, not a function, because the element varies (`h2`, `h3`, a `tr` of a `thead`, a `summary`). `section()` uses it.
+
+### D5: CSS tokens take the PenPot names
+
+Rule: a PenPot token `color.<path>` is the CSS token `<path>` with dots as hyphens (`color.status.running.bg` → `status-running-bg`). Known renames:
+
+| CSS today | PenPot | CSS after |
+|---|---|---|
+| `line` | `color.border` | `border` |
+| `line-strong` | `color.border-strong` | `border-strong` |
+| `ink` (text, focus ring) | `color.text` | `text` |
+| `ink` (fills: the Interrupt button) | `color.ink` | `ink` |
+| `accent-text` | `color.accent-strong` | `accent-strong` |
+| `danger` | `color.failed` | `failed` |
+| `bubble-agent` | `color.agent-bg` | `agent-bg` |
+| `on-bubble-agent` | `color.agent-fg` | `agent-fg` |
+
+Tokens whose PenPot names are (unverified): `raised`, `on-accent`, `fab-shadow`, `danger-soft`, `bubble-me`, `code-on-agent`, `rail-ink`, `rail-hover`. Task 1.1 reads them and adds their rows. A token with no PenPot counterpart keeps its name and is marked "code only" in the mapping table. `ink` splits into two tokens only if PenPot's `color.ink` has the same light value (`#1c1917`, known from `helpers.js`) and a dark value (unverified). Otherwise the fills use `text` as well.
+
+Consequences: utilities such as `border-border`, `text-text` and `divide-border` read oddly. The raw variable `--text` sits next to font-size tokens like `--text-meta` in `@theme`. That is harmless, because the colour variables live only in `:root` and the doc and contrast tests read only `:root`. `TEXT_PAIRS`, `editor/markdown-editor.ts` (`var(--ink)`, `--line-strong`, `--accent-text`), `layout.rs` and `assets.rs` change with the rename.
+
+Alternative: rename the PenPot tokens to the CSS names. Rejected. PenPot is the master of the design (`docs/design-workflow.md`), every board binds to the token names, and renaming tokens through the plugin API rebinds thousands of shapes on pages that already hit the page budget.
+
+No ADR: a rename is undone by one revert, so the decision is not hard to reverse.
+
+### D6: Type and radius tokens
+
+`@theme` (not `inline`: the values are constants) in `styles/input.css`:
+
+| Token | Value | Use (today's arbitrary value) |
+|---|---|---|
+| `--text-4xs` | 9px | initials of the 20 px persona avatar |
+| `--text-3xs` | 10px | monogram of the 24 px host icon tile |
+| `--text-2xs` | 11px | time raised of a request card, tool row metadata, monogram of the 28 px tile |
+| `--text-meta` | 13px | mono values, details lines, definition-list labels, compact fields |
+| `--text-lead` | 15px | task row title, card and group titles, dialog text on phones |
+| `--text-lead-lg` | 17px | the empty-panel title on phones |
+| `--text-code` | 0.9em | inline code in rendered Markdown (`.md-body code`) |
+| `--radius-control` | 10px | text buttons, composer chips, queued message rows |
+| `--radius-sheet` | 18px | top corners of the phone details sheet (`rounded-t-sheet`) |
+
+The small sizes extend Tailwind's scale downwards (`2xs`, `3xs`, `4xs`). The in-between sizes are named by role, because "13 px" is a role ("metadata") that sits between Tailwind's `xs` and `sm`. If task 1.1 finds typography or radius tokens in PenPot, their names replace these (rule of D5). Values stay identical, so nothing moves on screen. `docs/design-system.md` "Type" and "Spacing, radius, breakpoints" list the tokens instead of pixel values. A new test checks that every `--text-*` and `--radius-*` of `@theme` is documented.
+
+Alternative: value names (`text-13`, `rounded-10`). Rejected. A token named after its value is renamed whenever the value changes, which defeats the point of a token.
+
+### D7: The guard reads the compiled stylesheet
+
+A unit test in `components/mod.rs` (`no_page_uses_a_palette_colour_or_an_arbitrary_type_or_radius_value`) reads `crate::assets::app_css()` and rejects every selector whose utility part (the part after the last escaped `:` variant separator) is:
+
+- a palette colour: `<utility>-<palette>-<number>` for the 22 Tailwind palettes (the 17 of today's list plus `violet`, `purple`, `fuchsia`, `pink`, `rose`);
+- an arbitrary type value: `text-[…]`, `leading-[…]`, `tracking-[…]`;
+- an arbitrary radius: `rounded-[…]` and `rounded-<side>-[…]`;
+- an arbitrary colour in any colour utility: `-[#…]`, `-[rgb(…)]`, `-[var(…)]`.
+
+Arbitrary variants (`[&_svg]:size-4`) and arbitrary spacing (`pl-[17px]`) pass. Because Tailwind turns every class-like string in `src/` into a rule, the compiled stylesheet covers every page and every state, including pages without a seeded route, Alpine `:class` strings and `@apply` in `input.css`. It needs no database. Like every test that reads `app_css()`, it carries `#[cfg_attr(not(df_web_styles), ignore = "…")]`. CI and Bazel build the stylesheet, so it never passes silently there.
+
+`palette_classes` moves to a shared test helper (`testkit::forbidden_classes`) with the same rules. The rendered-page test in `task_pages/tests/layout.rs` keeps its routes and also covers `/requests`, `/egress/log`, `/egress/allowlist`, `/chats` and `/model-providers`. That catches a class assembled at run time, which the stylesheet scan can't see. Today none is assembled (`format!` builds no colour class).
+
+Side effect: a test that asserts the absence of a forbidden class, or a comment that names one, also trips the guard. Such strings are rewritten (the guard's own tests build them with `concat!`).
+
+Alternative: walk the source files at test time. Rejected. It needs the sources as Bazel `data`, misses `@apply`, and re-implements Tailwind's class detection.
+
+### D8: The two hand-built tables stay
+
+- **Egress events table** (`egress/log/page.rs`): it sits inside the events panel (no card of its own), has a sticky header, a container-query column (`@[680px]:table-cell`), a live `tbody` with `data-limit` and rows built in `rows.rs`. `data_table` is a bordered card with static rows. It would need three options used by this table alone.
+- **Token table of a run card** (`task_pages/view.rs`): three centred mono columns in `text-xs` inside a card in the details column. That's a compact definition grid, not a list of entries.
+
+Both keep their markup. `docs/design-system.md` "Tables" names them as the two deliberate exceptions. Their headers use `SMALL_HEADING_CLASS` where they show one (the events table).
+
+### D9: Moves into `components/`
+
+- `components/task_row.rs`: `task_row(item: &TaskListItem, href: &str, current: bool) -> Markup` renders one `li` of the PenPot `Task row`, together with the `done/total` chip (`count_pill`) and `shown_resume_time`. `task_pages::view::task_rows` keeps the `#task-rows` list, the empty state and the `Filters` query. `df_db` types in components have precedent (`host_icon`, `project_host` use `df_db::catalog`). This waits for `task-list-tree`, which rewrites the row. Its `needs_you_dot` becomes a `StatusDot` with a label.
+- `components/request_card.rs` (+ `request_card/create_issue.rs`): `request_card`, `CardData`, `card_id`, `finding_list`, `actions`, `outcome` move as they are. `requests.rs` keeps routes, loading and the SSE stream. `request_list` stays in `requests.rs`.
+- `count_badge` moves to `components/shell.rs`, its only renderer apart from the SSE partials, so `components` no longer imports from `requests`.
+
+### D10: The PenPot mapping in `docs/design-system.md`
+
+A new section "PenPot mapping" with two tables:
+
+- Components: PenPot variant set → variant → Rust function and enum value. For example `Status badge` / `Cancelled` → `status_badge(TaskStatus::Cancelled)` / `Tone::Cancelled`; `Button` / `Ink` → "designed, not built"; `Icon button` → `ICON_BUTTON_CLASS`; `Profile menu` → `profile_menu`. Code components without a PenPot component (`confirm_dialog`, `tabs`, `status_dot`, `count_pill`) are listed as "code only".
+- Tokens: PenPot token → CSS token, one row per token. After D5 every row reads `color.x` → `x`, apart from rows marked "code only".
+
+A test (`every_penpot_token_maps_to_a_stylesheet_token`) parses the token table and checks that each named CSS token exists in `:root` and that each `:root` token is in the table. The "Token names that differ" table of skill `penpot` (`.agents/skills/penpot/SKILL.md`, "Binding colours") is replaced by a pointer to the mapping. `helpers.js` doesn't change: it already uses the PenPot names.
+
+## Risks / Trade-offs
+
+- [The PenPot MCP is not available when the change is implemented] → Task 1.1 needs it (user-scope MCP with a personal token, `docs/design-workflow.md`, "Check the setup"). Without it, the implementer asks Steve Wozniak to have the owner connect it. The known renames (D5 table) go ahead. Unknown tokens keep their names and their mapping rows say "(unverified)" until checked. The change isn't archived with "(unverified)" rows left.
+- [The rename conflicts with every open change that edits `df-web` markup] → It is the last commit, a pure word replacement over `src/`, `styles/`, `editor/` and the docs. On a conflict it is dropped and run again after the rebase.
+- [Snapshot and class-string test churn] → Snapshots are regenerated with `cargo insta` in the commit that changes the markup (review the diff, not just accept it). Tests that assert class strings change in the same commit as the class.
+- [Small visual changes from unifying (count pill padding, tab count font, archive tab marker, the 10 px needs-you dot)] → Listed in D3 and D4 and checked against PenPot in task 1.1. Each is also checked in a browser (`just serve-local`, which needs a container socket). If no socket is available, the check is reported as not done.
+- [`border-border` and `text-text` read oddly] → Accepted for the one name per token across PenPot and code (D5).
+- [Without `tailwindcss` the guard is ignored locally] → The same rule as every `app_css()` test. `bazel_env` provides the binary, and CI runs it.
+
+## Migration Plan
+
+None at run time: no data, route or configuration changes. A rollback is a revert of the change's commits. The rename commit reverts on its own.
