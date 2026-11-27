@@ -22,7 +22,7 @@ Every run of a chat SHALL receive the persona's system prompt followed by fixed 
 - **THEN** the chat instructions do not name `remember`, also when memory is switched on before a reconnect of that run
 
 ### Requirement: Tools of a chat run
-A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `send_message`, `report_progress`, `request_approval`, `write_artifact`, `list_artifacts`, `read_artifact`, `list_issues`, `create_issue` and `search_history`, plus `remember`, `recall` and `forget` if the project had memory on at the run's first `Assign`, and SHALL NOT be offered `complete_task`, `ask_question`, `update_pull_request` or `comment_on_issue`. Other tool calls SHALL get a tool error and change nothing.
+A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `send_message`, `report_progress`, `ask_question`, `request_approval`, `write_artifact`, `list_artifacts`, `read_artifact`, `list_issues`, `create_issue` and `search_history`, plus `remember`, `recall` and `forget` if the project had memory on at the run's first `Assign`, and SHALL NOT be offered `complete_task`, `update_pull_request` or `comment_on_issue`. Other tool calls SHALL get a tool error and change nothing.
 
 #### Scenario: Delegation from a chat
 - **WHEN** the agent of `DF-12-CHAT` calls `create_task` for persona Linus
@@ -35,6 +35,10 @@ A chat run SHALL be offered `set_task_title`, `create_task`, `list_personas`, `s
 #### Scenario: Issues from a chat
 - **WHEN** the agent of `DF-12-CHAT` calls `list_issues`
 - **THEN** the call returns the open issues of the project's repository
+
+#### Scenario: Question from a chat
+- **WHEN** the agent of `DF-12-CHAT` calls `ask_question` with kind `single_choice` and two options
+- **THEN** a pending question of `DF-12-CHAT` exists, its card is on the chat timeline and the inbox lists it with a link to `/chats/DF-12-CHAT`
 
 #### Scenario: Memory in a chat
 - **WHEN** memory is on for `DF` both at the run's first `Assign` and at the call, and the agent of `DF-12-CHAT` calls `remember` with scope `project`
