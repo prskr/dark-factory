@@ -1,0 +1,33 @@
+# Tasks
+
+## 1. Control plane health listener (TDD)
+
+- [ ] 1.1 `crates/df-core`: write the failing tests first in `src/config/tests.rs` (default `server.healthPort` is `8081`, `healthPort: 9000` parses), then add `ServerConfig::health_port` (`healthPort`, default `8081`) to `src/config.rs`.
+- [ ] 1.2 `crates/df-web`: write the failing tests first: the UI router (with and without `auth`) answers `404` for `/healthz` and `/readyz`, `200` for `/assets/logo.svg`; `health_router` answers `200` on `/healthz` and `/readyz` with a reachable database, and, with a `PgPool::connect_lazy` aimed at a TCP listener that accepts and stays silent (no container needed), `503` on `/readyz` once the ping exceeds `READY_TIMEOUT` and still `200` on `/healthz`; `404` for `GET /tasks` and `POST /webhooks/forgejo`. Then move the probe routes out of `base_routes` into `pub fn health_router(pool: PgPool) -> Router`, drop the unused `pool` parameter of `base_router` (callers: `src/lib.rs` tests, `src/lifecycle_events.rs`, `dark-factory/src/main.rs`), and update `health_and_assets_need_no_login` in `src/auth/tests.rs` and the doc comments of `base_router` and the crate.
+- [ ] 1.3 `crates/dark-factory/src/main.rs`, tests first:
+  - `ui_port_requires_login_when_auth_is_configured` and `ui_is_disabled_without_auth_but_health_stays_up` (they call `web_router` through `ui_response`, no listener): assert `404` for `/healthz` and `/readyz` on the web router, keep assets `200` and webhook `202`, and check the probes on `df_web::health_router`. Rename the second test, for example `ui_is_disabled_without_auth_but_public_routes_stay_up`.
+  - `serve_runs_the_agent_port_next_to_the_ui_port` and `serve_starts_with_the_charts_rbac`: call `/healthz` on the new health listener.
+  - `serve_requires_agent_tls_configuration` (and `bind_three`, which becomes `bind_four`): pass a health listener and assert that `serve` fails and the health port gives no HTTP response.
+  - Bind errors: tests that hold a port first and assert that `run_serve_command` fails with an error naming `server.healthPort` and the port, and that `run_gateway_command` fails with an error naming `gateway.healthPort` and the port. Set every other port of the test config to `0`, so the test does not collide with ports in use on the host.
+- [ ] 1.4 Then implement: bind `server.healthPort` in `run_serve_command`, pass the listener into `serve`, spawn `serve_health` (with the `request_span` layer) after the startup checks under `until_stopped`, and log the port in "starting control plane listeners". Wrap every `bind_listener` call of `run_serve_command` and `run_gateway_command` with context naming the key and port (for example `failed to bind server.healthPort 8081`).
+- [ ] 1.5 Gateway, test first: a test in `crates/df-gateway/src/gateway/tests.rs` that `GET /tasks` on the health listener answers `404` (no code change expected).
+- [ ] 1.6 Run `cargo nextest run -p df-core -p df-web -p df-gateway -p dark-factory` (database-backed tests need a container socket, see AGENTS.md; list the ones you could not run), `cargo clippy --all-targets --all-features -- -D warnings`, `cargo fmt --all`.
+
+## 2. Helm chart
+
+- [ ] 2.1 Write the failing Helm unit tests first: in `deploy/helm/dark-factory/tests/control_plane_test.yaml` the control plane container port `health` 8081, liveness `/healthz` and readiness `/readyz` on port `health`, readiness `timeoutSeconds: 3`; in `gateway_test.yaml` the gateway probes `/healthz` and `/readyz` on port `health` (8080); no port named `health` in either Service; HTTPRoute backend port stays `controlPlane.ports.http`; with defaults and with `networkPolicy.ingressController.allowAll: true` every ingress rule of both NetworkPolicies has a `ports` list, the control plane policy names no `controlPlane.ports.health` and the gateway policy no `gateway.ports.health`; the schema rejects `controlPlane.ports.health: null`.
+- [ ] 2.2 Then change `values.yaml` (`controlPlane.ports.health: 8081` with comment; fix the `publicUrl` comment that names `/healthz`, `/readyz`), `values.schema.json` (`health` required in `controlPlane.ports`), `templates/configmap.yaml` (`server.healthPort` in the control plane config block; the migrate block needs none, `ServerConfig` has defaults), `templates/control-plane-deployment.yaml` (port `health`, probes, `timeoutSeconds: 3`).
+- [ ] 2.3 Run the Helm unit tests and `helm lint` (the lefthook pre-commit checks).
+
+## 3. Specs
+
+- [ ] 3.1 Check that `openspec validate private-health-port --strict` passes.
+
+## 4. Docs
+
+- [ ] 4.1 Published docs, verified with `just docs-build`: `docs/content/architecture/_index.md` (connections table: kubelet → health ports, plain HTTP, node traffic only), `docs/content/authentication/_index.md` (what the UI port serves without `auth`), `docs/content/observability/telemetry.md` (span table: "UI and health listeners"), `docs/content/security/_index.md` (health ports closed to pods, reachable from the node incl. `hostNetwork` pods; Cilium `allow-localhost: policy` needs `fromEntities: [host]`, design D4; check that the Cilium release the docs name still behaves as D4 says; `networkPolicy.enabled: false` opens them to every pod), `docs/content/operations/upgrades.md` (probes gone from the UI port, new port `8081`, no values change needed, uptime checks use `/assets/logo.svg` or the metrics), `docs/content/operations/troubleshooting.md` (row: pods never ready, probe timeouts → the CNI filters node traffic).
+- [ ] 4.2 `deploy/helm/dark-factory/README.md`: rows `controlPlane.ports.http` (UI only), new `controlPlane.ports.health`, `gateway.ports.health` (not in a Service, no NetworkPolicy rule), `publicUrl`, `networkPolicy.ingressController.allowAll` (public routes without the probes).
+- [ ] 4.3 Crate READMEs: `crates/df-web/README.md` (route table: probes on the health router served on `server.healthPort`, not on the UI port), `crates/df-gateway/README.md` (`gateway.healthPort`: private, node traffic only).
+- [ ] 4.4 `docs/development.md`, section of `just serve-local`: the health port `8081` next to the agent and internal ports.
+- [ ] 4.5 `docs/authorization.md`: remove `/healthz`, `/readyz` from the "Anyone" row and remove their row (with its note about a separate probe port) from the "Routes without login" table; add the health ports to the paragraph about the other ports (plain HTTP, no Service, reachable from the node only).
+- [ ] 4.6 ADR-0065: set the status to Accepted (and the index row in `docs/adr/README.md`) when the change is implemented.
