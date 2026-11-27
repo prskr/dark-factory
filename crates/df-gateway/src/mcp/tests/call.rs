@@ -68,10 +68,9 @@ async fn the_upstream_gets_only_the_servers_credential_never_the_sandboxs() {
     for seen in fake.requests() {
         assert_eq!(seen.header("authorization"), Some("Bearer tok-s1"));
         assert_eq!(seen.header("context7_api_key"), None);
-        assert_eq!(
+        assert!(
             seen.header("mcp-session-id")
-                .map_or(true, |id| !id.starts_with("df-")),
-            true
+                .is_none_or(|id| !id.starts_with("df-"))
         );
     }
 }

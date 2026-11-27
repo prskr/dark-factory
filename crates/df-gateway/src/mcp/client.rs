@@ -497,10 +497,7 @@ impl Client {
                     continue;
                 };
                 if message.get("method").is_some() {
-                    if let Some(request_id) = message.get("id") {
-                        self.refuse_server_request(session, request_id.clone())
-                            .await;
-                    }
+                    self.refuse_server_request(session, message.get("id")).await;
                     continue;
                 }
                 if is_response_to(&message, id) {
@@ -511,7 +508,11 @@ impl Client {
         Err(ClientError::NotMcp)
     }
 
-    async fn refuse_server_request(&self, session: &Session, id: Value) {
+    /// Answers a request of the upstream with `-32601`; a notification (no `id`) is dropped.
+    async fn refuse_server_request(&self, session: &Session, id: Option<&Value>) {
+        let Some(id) = id else {
+            return;
+        };
         let body = json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "Method not found" } });
         if let Err(error) = self.post_discard(session, &body).await {
             tracing::debug!(server = %session.target.name, ?error, "refusing an upstream request failed");

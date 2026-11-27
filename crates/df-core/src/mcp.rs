@@ -198,7 +198,7 @@ pub fn validate_scheme(scheme: &McpCredentialScheme, url: &Url) -> Result<(), Mc
             if GATEWAY_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
                 return Err(McpError::ReservedHeader(name.clone()));
             }
-            if prefix.chars().any(|c| c.is_control()) {
+            if prefix.chars().any(char::is_control) {
                 return Err(McpError::InvalidPrefix);
             }
             Ok(())

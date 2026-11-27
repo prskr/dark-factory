@@ -40,6 +40,7 @@ use self::jsonrpc::{
     negotiated_version, rpc_error, rpc_result,
 };
 use self::report::CallSink;
+use crate::gateway::{Outside, Settings};
 use crate::policy::{Policy, Sandbox};
 use crate::resolve::{BlockedRanges, Resolver};
 use crate::upstream::{Body, BodyLimit, BoxError, LimitedBody, UpstreamConnector, text};
@@ -60,6 +61,31 @@ const NO_SNAPSHOT: &str = "df: no policy snapshot yet";
 const UNKNOWN_SOURCE: &str = "df: unknown source";
 
 type Response = hyper::Response<Body>;
+
+/// Builds the MCP endpoint of a gateway pod and the reporter that sends its call records. Public
+/// servers are checked against the built-in blocked ranges and `settings.blocked_cidrs`; an
+/// invalid CIDR is an error.
+pub fn start(
+    outside: &Outside,
+    settings: &Settings,
+    connector: UpstreamConnector,
+) -> Result<(Arc<Mcp>, Arc<report::CallReporter>), ipnet::AddrParseError> {
+    let calls = Arc::new(report::CallReporter::new(
+        outside.connector.clone(),
+        settings.control_plane.clone(),
+        settings.pod.clone(),
+        settings.metrics.clone(),
+        crate::inference::report::Timing::default(),
+    ));
+    let blocked = BlockedRanges::new(settings.blocked_cidrs.iter().map(String::as_str))?;
+    let mcp = Arc::new(Mcp::new(
+        connector,
+        outside.resolver.clone(),
+        blocked,
+        calls.clone(),
+    ));
+    Ok((mcp, calls))
+}
 
 /// Whether `path` belongs to the MCP endpoint.
 pub fn is_mcp_path(path: &str) -> bool {
@@ -168,7 +194,7 @@ impl Mcp {
         }
         let bytes = match read_body(headers, body).await {
             Ok(bytes) => bytes,
-            Err(response) => return response,
+            Err(response) => return *response,
         };
         let message = match serde_json::from_slice::<Value>(&bytes) {
             Ok(message) if message.is_object() => message,
@@ -330,7 +356,7 @@ fn session_state(headers: &HeaderMap, run_id: &str) -> Session {
 }
 
 /// The request body, at most [`MAX_REQUEST_BYTES`].
-async fn read_body<B>(headers: &HeaderMap, body: B) -> Result<Bytes, Response>
+async fn read_body<B>(headers: &HeaderMap, body: B) -> Result<Bytes, Box<Response>>
 where
     B: hyper::body::Body<Data = Bytes> + Send + 'static,
     B::Error: Into<BoxError>,
@@ -339,7 +365,12 @@ where
         .get(CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok());
-    let too_large = || text(StatusCode::PAYLOAD_TOO_LARGE, "df: request body too large");
+    let too_large = || {
+        Box::new(text(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "df: request body too large",
+        ))
+    };
     if declared.is_some_and(|length| length > MAX_REQUEST_BYTES) {
         return Err(too_large());
     }
@@ -351,12 +382,12 @@ where
     let limit = limited.limit();
     match limited.collect().await {
         Ok(collected) => Ok(collected.to_bytes()),
-        Err(_error) => Err(match limit.get() {
-            Some(BodyLimit::TooLarge(_)) => too_large(),
+        Err(_error) => Err(Box::new(match limit.get() {
+            Some(BodyLimit::TooLarge(_)) => *too_large(),
             Some(BodyLimit::TimedOut) => {
                 text(StatusCode::REQUEST_TIMEOUT, "df: request body timed out")
             }
             None => text(StatusCode::BAD_REQUEST, "df: request body unreadable"),
-        }),
+        })),
     }
 }

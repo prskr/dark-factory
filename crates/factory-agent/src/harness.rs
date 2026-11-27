@@ -177,6 +177,22 @@ pub struct ExtRelay<'a> {
     pub ca_file: &'a Path,
 }
 
+impl<'a> ExtRelay<'a> {
+    /// The relay of a run whose `Assign` carries a gateway MCP endpoint; `None` without one. It
+    /// trusts the copy of the instance CA the control plane names for the harness.
+    pub fn of(assign: &'a Assign) -> Option<Self> {
+        let Some(df_proto::agent::v1::harness::Kind::Acp(acp)) =
+            assign.harness.as_ref()?.kind.as_ref()
+        else {
+            return None;
+        };
+        (!acp.mcp_endpoint.is_empty()).then_some(Self {
+            endpoint: &acp.mcp_endpoint,
+            ca_file: Path::new(df_sandbox_contract::paths::INSTANCE_CA_PATH),
+        })
+    }
+}
+
 /// Initializes connection and establishes ACP session (`session/load` or `session/new`).
 ///
 /// The factory MCP server is registered in every session, and `ext` (`factory-agent mcp-relay`)

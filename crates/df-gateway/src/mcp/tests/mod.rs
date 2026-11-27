@@ -168,22 +168,7 @@ impl Env {
         let task = tokio::spawn(async move {
             while let Ok((stream, _peer)) = listener.accept().await {
                 let (mcp, policy) = (mcp_in.clone(), policy_in.clone());
-                tokio::spawn(async move {
-                    let service = service_fn(move |request: Request<Incoming>| {
-                        let (mcp, policy) = (mcp.clone(), policy.clone());
-                        async move {
-                            let current = policy.lock().unwrap().clone();
-                            let source = POD.parse().unwrap();
-                            Ok::<_, Infallible>(
-                                mcp.handle(current.as_deref(), source, request).await,
-                            )
-                        }
-                    });
-                    http1::Builder::new()
-                        .serve_connection(TokioIo::new(stream), service)
-                        .await
-                        .ok();
-                });
+                tokio::spawn(serve_front_connection(stream, mcp, policy));
             }
         });
         Self {
@@ -281,6 +266,26 @@ impl Env {
             .map(|t| t["name"].as_str().unwrap().to_owned())
             .collect()
     }
+}
+
+/// Serves one connection of the front: every request is the endpoint's, from [`POD`].
+async fn serve_front_connection(
+    stream: tokio::net::TcpStream,
+    mcp: Arc<Mcp>,
+    policy: Arc<Mutex<Option<Arc<Policy>>>>,
+) {
+    let service = service_fn(move |request: Request<Incoming>| {
+        let (mcp, policy) = (mcp.clone(), policy.clone());
+        async move {
+            let current = policy.lock().unwrap().clone();
+            let source = POD.parse().unwrap();
+            Ok::<_, Infallible>(mcp.handle(current.as_deref(), source, request).await)
+        }
+    });
+    http1::Builder::new()
+        .serve_connection(TokioIo::new(stream), service)
+        .await
+        .ok();
 }
 
 impl Drop for Env {

@@ -532,16 +532,7 @@ async fn run_gateway_command(
         "starting gateway listeners"
     );
 
-    let settings = df_gateway::gateway::Settings {
-        pod,
-        control_plane: format!("{control_plane_name}:{}", cfg.server.internal_grpc_port),
-        buffer_size: cfg.gateway.buffer_size,
-        buffer_max_age: cfg.gateway.buffer_max_age(),
-        blocked_cidrs: cfg.gateway.blocked_cidrs.clone(),
-        retry: df_gateway::watch::RETRY_INTERVAL,
-        control_plane_name: Some(control_plane_name.clone()),
-        metrics: Arc::default(),
-    };
+    let settings = gateway_settings(&cfg, pod, &control_plane_name);
     let outside = df_gateway::gateway::Outside {
         connector: Arc::new(df_gateway::link::MtlsConnector::new(
             tls_paths(&tls),
@@ -578,12 +569,8 @@ async fn run_gateway_command(
         .with_checks(checks)
         .with_recorder(recorder.clone());
     let (inference, usage) = inference_endpoint(&outside, &settings, upstream_connector.clone());
-    let (mcp, calls) = mcp_endpoint(
-        &outside,
-        &settings,
-        upstream_connector,
-        &cfg.gateway.blocked_cidrs,
-    )?;
+    let (mcp, calls) = df_gateway::mcp::start(&outside, &settings, upstream_connector)
+        .context("invalid `gateway.blockedCidrs`")?;
     let janitor = tokio::spawn(mcp.clone().run_janitor(policy_rx.clone(), shutdown.clone()));
     let git = Arc::new(
         df_gateway::git::server::GitEndpoint::new(policy_rx, Arc::new(upstream), Arc::new(push))
@@ -618,6 +605,24 @@ async fn run_gateway_command(
     Ok(result?)
 }
 
+/// The settings of a gateway pod called `pod`.
+fn gateway_settings(
+    cfg: &InstanceConfig,
+    pod: String,
+    control_plane_name: &str,
+) -> df_gateway::gateway::Settings {
+    df_gateway::gateway::Settings {
+        pod,
+        control_plane: format!("{control_plane_name}:{}", cfg.server.internal_grpc_port),
+        buffer_size: cfg.gateway.buffer_size,
+        buffer_max_age: cfg.gateway.buffer_max_age(),
+        blocked_cidrs: cfg.gateway.blocked_cidrs.clone(),
+        retry: df_gateway::watch::RETRY_INTERVAL,
+        control_plane_name: Some(control_plane_name.to_owned()),
+        metrics: Arc::default(),
+    }
+}
+
 /// The inference endpoint of a gateway pod and the reporter that sends its usage records.
 fn inference_endpoint(
     outside: &df_gateway::gateway::Outside,
@@ -640,35 +645,6 @@ fn inference_endpoint(
         settings.metrics.clone(),
     ));
     (inference, usage)
-}
-
-/// The MCP endpoint of a gateway pod and the reporter that sends its call records. Public
-/// servers are checked against the built-in blocked ranges and `blocked_cidrs`.
-fn mcp_endpoint(
-    outside: &df_gateway::gateway::Outside,
-    settings: &df_gateway::gateway::Settings,
-    connector: df_gateway::upstream::UpstreamConnector,
-    blocked_cidrs: &[String],
-) -> anyhow::Result<(
-    Arc<df_gateway::mcp::Mcp>,
-    Arc<df_gateway::mcp::report::CallReporter>,
-)> {
-    let calls = Arc::new(df_gateway::mcp::report::CallReporter::new(
-        outside.connector.clone(),
-        settings.control_plane.clone(),
-        settings.pod.clone(),
-        settings.metrics.clone(),
-        df_gateway::inference::report::Timing::default(),
-    ));
-    let blocked = df_gateway::resolve::BlockedRanges::new(blocked_cidrs.iter().map(String::as_str))
-        .context("invalid `gateway.blockedCidrs`")?;
-    let mcp = Arc::new(df_gateway::mcp::Mcp::new(
-        connector,
-        outside.resolver.clone(),
-        blocked,
-        calls.clone(),
-    ));
-    Ok((mcp, calls))
 }
 
 /// The gateway's connection settings for upstreams (forges for Git, model providers for inference),

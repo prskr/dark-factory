@@ -97,7 +97,7 @@ pub(crate) fn project_input(
 
 /// The projects of the suite that run a script on `factory/demo` with the default settings: key,
 /// name and script.
-const PLAIN_PROJECTS: [(&str, &str, &str); 16] = [
+const PLAIN_PROJECTS: [(&str, &str, &str); 17] = [
     (data::PROJECT_KEY, data::PROJECT_NAME, data::DEMO_SCRIPT),
     (
         data::RATE_LIMIT_PROJECT_KEY,
@@ -163,6 +163,11 @@ const PLAIN_PROJECTS: [(&str, &str, &str); 16] = [
         data::LANDLOCK_PROJECT_KEY,
         data::LANDLOCK_PROJECT_NAME,
         data::LANDLOCK_SCRIPT,
+    ),
+    (
+        data::MCP_PROJECT_KEY,
+        data::MCP_PROJECT_NAME,
+        data::MCP_SCRIPT,
     ),
     (
         data::EGRESS_PROJECT_KEY,
@@ -239,6 +244,16 @@ async fn ensure_credentials_and_persona(pool: &PgPool, actor: Actor<'_>) -> Resu
             name: data::MODEL_CREDENTIAL_NAME.into(),
             secret_name: data::MODEL_CREDENTIAL_SECRET.into(),
             secret_key: data::MODEL_CREDENTIAL_KEY.into(),
+        },
+    )
+    .await?;
+    ensure_credential(
+        pool,
+        actor,
+        &CredentialRefInput {
+            name: data::MCP_CREDENTIAL_NAME.into(),
+            secret_name: data::MCP_CREDENTIAL_SECRET.into(),
+            secret_key: data::MCP_CREDENTIAL_KEY.into(),
         },
     )
     .await?;

@@ -307,11 +307,15 @@ install_playwright() {
 # same key); the sandboxes never see it.
 create_model_secret() {
   apply_secret fake-llm-key --from-literal=key=e2e-model-api-key
+  # The credential reference of the MCP servers the e2e test registers (the fake MCP server expects
+  # the same token).
+  apply_secret fake-mcp-key --from-literal=key=e2e-mcp-token
 }
 
 # The fake upstream runs from the test project image, which is imported by `load_images`.
 wait_for_fake_upstream() {
   kc -n fake-upstream wait --for=condition=Available deployment/fake-anthropic --timeout=300s
+  kc -n fake-upstream wait --for=condition=Available deployment/fake-mcp --timeout=300s
 }
 
 # Stops the run before a new cluster is created when a host port of its NodePort mappings is taken

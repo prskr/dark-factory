@@ -1087,11 +1087,11 @@ async fn a_resumed_run_is_prompted_with_the_system_resume_prompt() -> anyhow::Re
 }
 
 /// Registers an MCP server and enables it for the project of `env`.
-async fn enable_mcp_server(pool: &sqlx::PgPool, env: &Env) -> anyhow::Result<()> {
+async fn enable_mcp_server(pool: &PgPool, env: &Env) -> anyhow::Result<()> {
     use df_db::catalog::{Actor, CredentialRefInput, save_credential_ref};
     use df_db::mcp_servers::{McpServerInput, save_mcp_server, set_project_mcp_servers};
 
-    let principal = df_core::Principal::human(df_core::UserId::new(), "Peter");
+    let principal = Principal::human(df_core::UserId::new(), "Peter");
     let roles = vec!["admin".to_string()];
     let actor = Actor {
         principal: &principal,
@@ -1125,7 +1125,7 @@ async fn enable_mcp_server(pool: &sqlx::PgPool, env: &Env) -> anyhow::Result<()>
     Ok(())
 }
 
-async fn mcp_endpoint_of(env: &Env, task: df_core::TaskId) -> anyhow::Result<String> {
+async fn mcp_endpoint_of(env: &Env, task: TaskId) -> anyhow::Result<String> {
     let pool = env.ctx.pool.clone();
     let run_id = env.insert_run(task, 1, "connecting").await;
     let rc = load_run_context(&pool, get_run(&pool, run_id).await?.expect("run")).await?;

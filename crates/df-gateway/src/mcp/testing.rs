@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
+use std::fmt::Write as _;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -158,15 +159,13 @@ async fn respond(
     let body = body
         .collect()
         .await
-        .map(http_body_util::Collected::to_bytes)
-        .unwrap_or_default();
+        .map_or_default(http_body_util::Collected::to_bytes);
     let record = Seen {
         method: parts.method,
         path_and_query: parts
             .uri
             .path_and_query()
-            .map(ToString::to_string)
-            .unwrap_or_default(),
+            .map_or_default(ToString::to_string),
         headers: parts.headers,
         body,
     };
@@ -202,10 +201,10 @@ async fn render(answer: Answer) -> Reply {
 }
 
 fn sse(headers: &[(&'static str, String)], events: &[String]) -> Reply {
-    let body: String = events
-        .iter()
-        .map(|data| format!("event: message\ndata: {data}\n\n"))
-        .collect();
+    let body = events.iter().fold(String::new(), |mut body, data| {
+        write!(body, "event: message\ndata: {data}\n\n").unwrap();
+        body
+    });
     build(200, headers, "text/event-stream", body)
 }
 

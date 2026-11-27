@@ -18,6 +18,45 @@ stringData:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: fake-mcp
+  namespace: fake-upstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fake-mcp}
+  template:
+    metadata:
+      labels: {app: fake-mcp}
+    spec:
+      containers:
+        - name: fake-mcp
+          image: ghcr.io/prskr/dark-factory/test-project:e2e
+          imagePullPolicy: IfNotPresent
+          command: [/opt/harness/bin/fake-acp-agent, --serve-fake-mcp, "0.0.0.0:8081"]
+          env:
+            - name: FAKE_MCP_TOKEN
+              value: e2e-mcp-token
+          ports:
+            - containerPort: 8081
+          readinessProbe:
+            tcpSocket: {port: 8081}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-mcp
+  namespace: fake-upstream
+spec:
+  selector: {app: fake-mcp}
+  ports:
+    - {port: 8081, targetPort: 8081}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: fake-anthropic
   namespace: fake-upstream
 spec:

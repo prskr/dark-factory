@@ -97,17 +97,17 @@ fn row(server: &McpServerRecord, checked: bool) -> Markup {
 async fn load(
     state: &WebState,
     key: &str,
-) -> Result<(ProjectRecord, Vec<McpServerRecord>, Vec<Uuid>), Response> {
+) -> Result<(ProjectRecord, Vec<McpServerRecord>, Vec<Uuid>), Box<Response>> {
     let project = match df_db::catalog::get_project_by_key(&state.pool, key).await {
         Ok(Some(project)) => project,
-        Ok(None) => return Err(not_found("The project")),
-        Err(e) => return Err(internal_error(&e)),
+        Ok(None) => return Err(Box::new(not_found("The project"))),
+        Err(e) => return Err(Box::new(internal_error(&e))),
     };
     let (servers, enabled) = tokio::try_join!(
         df_db::mcp_servers::list_mcp_servers(&state.pool),
         df_db::mcp_servers::project_mcp_server_ids(&state.pool, project.id)
     )
-    .map_err(|e| internal_error(&e))?;
+    .map_err(|e| Box::new(internal_error(&e)))?;
     Ok((project, servers, enabled))
 }
 
@@ -122,7 +122,7 @@ async fn region(
     }
     match load(&state, &key).await {
         Ok((_project, servers, enabled)) => content(&servers, &enabled, false).into_response(),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -135,7 +135,7 @@ async fn save(
 ) -> Response {
     let (project, _servers, _enabled) = match load(&state, &key).await {
         Ok(loaded) => loaded,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     let chosen: Vec<Uuid> = url::form_urlencoded::parse(&body)
         .filter(|(name, _value)| name == "server")
@@ -154,6 +154,6 @@ async fn save(
     }
     match load(&state, &key).await {
         Ok((_project, servers, enabled)) => content(&servers, &enabled, true).into_response(),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }

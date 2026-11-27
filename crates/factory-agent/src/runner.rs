@@ -29,7 +29,7 @@ use tokio::sync::{Mutex, Notify, broadcast, mpsc};
 
 use crate::git::Git;
 use crate::harness::{
-    BudgetTracker, PromptQueue, RateLimitInfo, RunOutcomeDecision, SessionSetupResult,
+    BudgetTracker, ExtRelay, PromptQueue, RateLimitInfo, RunOutcomeDecision, SessionSetupResult,
     TokioAsyncReadCompat, TokioAsyncWriteCompat, TurnOutcomeInput, approve_permission,
     build_acp_prompt_blocks, determine_run_outcome, parse_rate_limit, prepare_harness_environment,
     setup_session,
@@ -960,24 +960,13 @@ async fn setup_harness_session(
     session_ready: &AtomicBool,
     harness_started: Instant,
 ) -> Result<SessionSetupResult, agent_client_protocol::Error> {
-    let ca_file = std::path::Path::new(df_sandbox_contract::paths::INSTANCE_CA_PATH);
-    let endpoint = match ctx
-        .assign
-        .harness
-        .as_ref()
-        .and_then(|harness| harness.kind.as_ref())
-    {
-        Some(df_proto::agent::v1::harness::Kind::Acp(acp)) => acp.mcp_endpoint.as_str(),
-        None => "",
-    };
-    let ext = (!endpoint.is_empty()).then_some(crate::harness::ExtRelay { endpoint, ca_file });
     let result = setup_session(
         cx,
         &ctx.repo_dir,
         ctx.assign.continuation.as_ref(),
         &ctx.runtime_exe,
         &ctx.runtime_sock_path,
-        ext,
+        ExtRelay::of(&ctx.assign),
     )
     .await;
     send_timing(

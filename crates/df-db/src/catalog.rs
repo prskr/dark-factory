@@ -543,7 +543,7 @@ async fn save_project_in(
             .map_err(|error| DbError::InvalidData(format!("agent branch `{glob}`: {error}")))?;
     }
     if let Some(credential) = input.forge_credential_id {
-        crate::mcp_servers::check_credential_not_used_by_a_server(&mut **tx, credential).await?;
+        crate::mcp_servers::check_credential_not_used_by_a_server(tx, credential).await?;
     }
     // The key is set at creation and never changes: task keys (DF-1) and branches derive from it.
     if let Some(b) = &before

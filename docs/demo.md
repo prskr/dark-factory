@@ -253,6 +253,7 @@ The `seed` program has two profiles. Both are idempotent, write into the databas
 | Project `TT` | "Task Tree", same repository, script `/opt/harness/scripts/task-tree.yaml`; its `subtask_merge` setting is `parent-agent` |
 | Project `IN` | "Interrupt", same repository, script `/opt/harness/scripts/interrupt.yaml` |
 | Project `LL` | "Landlock", same repository, script `/opt/harness/scripts/landlock.yaml` |
+| Project `MC` | "MCP tools", same repository, script `/opt/harness/scripts/mcp.yaml`: calls a tool of the registered MCP server `e2e-docs` (enabled for `MC` by the test) and one of `e2e-other` (registered, not enabled) through the `ext` relay. The fake MCP server (`deploy/e2e/fake-upstream.yaml`, `fake-acp-agent --serve-fake-mcp`) answers only to the bearer token `e2e-mcp-token`, which the credential reference `fake-mcp` (Secret `fake-mcp-key`) holds and only the gateway knows |
 
 All projects wake tasks on reviews and mentions of members (`webhook_wake` `members`).
 

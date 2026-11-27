@@ -42,9 +42,9 @@ fn binary() -> PathBuf {
 
 /// A private CA and a server certificate for `localhost`.
 struct Pki {
-    ca_pem: String,
-    cert_pem: String,
-    key_pem: String,
+    ca: String,
+    cert: String,
+    key: String,
 }
 
 fn pki() -> Pki {
@@ -58,9 +58,9 @@ fn pki() -> Pki {
     let key = KeyPair::generate().unwrap();
     let cert = server.signed_by(&key, &issuer).unwrap();
     Pki {
-        ca_pem: ca_cert.pem(),
-        cert_pem: cert.pem(),
-        key_pem: key.serialize_pem(),
+        ca: ca_cert.pem(),
+        cert: cert.pem(),
+        key: key.serialize_pem(),
     }
 }
 
@@ -100,10 +100,10 @@ struct Gateway {
 impl Gateway {
     async fn start(pki: &Pki, handler: Handler) -> Self {
         let certs: Vec<CertificateDer<'static>> =
-            CertificateDer::pem_slice_iter(pki.cert_pem.as_bytes())
+            CertificateDer::pem_slice_iter(pki.cert.as_bytes())
                 .map(Result::unwrap)
                 .collect();
-        let key = PrivateKeyDer::from_pem_slice(pki.key_pem.as_bytes()).unwrap();
+        let key = PrivateKeyDer::from_pem_slice(pki.key.as_bytes()).unwrap();
         let config = rustls::ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
         ))
@@ -121,19 +121,7 @@ impl Gateway {
             while let Ok((stream, _peer)) = listener.accept().await {
                 let (acceptor, handler, seen) =
                     (acceptor.clone(), handler.clone(), seen_in.clone());
-                tokio::spawn(async move {
-                    let Ok(stream) = acceptor.accept(stream).await else {
-                        return;
-                    };
-                    let service = service_fn(move |request: Request<Incoming>| {
-                        let (handler, seen) = (handler.clone(), seen.clone());
-                        async move { Ok::<_, Infallible>(answer(&handler, &seen, request).await) }
-                    });
-                    http1::Builder::new()
-                        .serve_connection(TokioIo::new(stream), service)
-                        .await
-                        .ok();
-                });
+                tokio::spawn(serve_connection(stream, acceptor, handler, seen));
             }
         });
         Self { addr, seen, task }
@@ -152,6 +140,26 @@ impl Drop for Gateway {
     fn drop(&mut self) {
         self.task.abort();
     }
+}
+
+/// Serves one connection of the relay: the TLS handshake, then HTTP/1.1 requests.
+async fn serve_connection(
+    stream: tokio::net::TcpStream,
+    acceptor: TlsAcceptor,
+    handler: Handler,
+    seen: Arc<Mutex<Vec<Seen>>>,
+) {
+    let Ok(stream) = acceptor.accept(stream).await else {
+        return;
+    };
+    let service = service_fn(move |request: Request<Incoming>| {
+        let (handler, seen) = (handler.clone(), seen.clone());
+        async move { Ok::<_, Infallible>(answer(&handler, &seen, request).await) }
+    });
+    http1::Builder::new()
+        .serve_connection(TokioIo::new(stream), service)
+        .await
+        .ok();
 }
 
 async fn answer(
@@ -269,7 +277,7 @@ impl RelayProcess {
 
 fn ca_file(dir: &tempfile::TempDir, pki: &Pki) -> PathBuf {
     let path = dir.path().join("ca.crt");
-    std::fs::write(&path, &pki.ca_pem).unwrap();
+    std::fs::write(&path, &pki.ca).unwrap();
     path
 }
 

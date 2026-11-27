@@ -44,22 +44,21 @@ impl Mcp {
         id: &Value,
     ) -> Response {
         let signature = policy.mcp_signature(source);
-        let tools = match self.cached_list(&sandbox.run_id, &signature) {
-            Some(tools) => tools,
-            None => {
-                let tools = Arc::new(self.collect_tools(policy, source, &sandbox.run_id).await);
-                if let Ok(mut lists) = self.lists.lock() {
-                    lists.insert(
-                        sandbox.run_id.clone(),
-                        CachedList {
-                            signature,
-                            at: Instant::now(),
-                            tools: tools.clone(),
-                        },
-                    );
-                }
-                tools
+        let tools = if let Some(tools) = self.cached_list(&sandbox.run_id, &signature) {
+            tools
+        } else {
+            let tools = Arc::new(self.collect_tools(policy, source, &sandbox.run_id).await);
+            if let Ok(mut lists) = self.lists.lock() {
+                lists.insert(
+                    sandbox.run_id.clone(),
+                    CachedList {
+                        signature,
+                        at: Instant::now(),
+                        tools: tools.clone(),
+                    },
+                );
             }
+            tools
         };
         json_response(
             StatusCode::OK,

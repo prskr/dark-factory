@@ -95,7 +95,7 @@ impl Relay {
             target: uri
                 .path_and_query()
                 .map_or_else(|| "/".into(), ToString::to_string),
-            authority: uri.authority().map(ToString::to_string).unwrap_or_default(),
+            authority: uri.authority().map_or_default(ToString::to_string),
             tls: TlsConnector::from(Arc::new(config)),
             session: Mutex::new(Session::default()),
         })
@@ -162,21 +162,20 @@ impl Relay {
         let is_initialize = message.get("method").and_then(Value::as_str) == Some("initialize");
         match tokio::time::timeout(REQUEST_TIMEOUT, self.post(line, is_initialize)).await {
             Ok(Ok(answer)) => answer.filter(|_| id.is_some()),
-            Ok(Err(error)) => self.failed(id, &error),
-            Err(_elapsed) => self.failed(id, "gateway did not answer in time"),
+            Ok(Err(error)) => Self::failed(id, &error),
+            Err(_elapsed) => Self::failed(id, "gateway did not answer in time"),
         }
     }
 
     /// The error line for request `id`; a notification only logs.
-    fn failed(&self, id: Option<Value>, cause: &str) -> Option<String> {
-        match id {
-            Some(id) => Some(
+    fn failed(id: Option<Value>, cause: &str) -> Option<String> {
+        if let Some(id) = id {
+            Some(
                 json!({ "jsonrpc": "2.0", "id": id, "error": { "code": RELAY_ERROR, "message": cause } }).to_string(),
-            ),
-            None => {
-                log(&format!("notification not delivered: {cause}"));
-                None
-            }
+            )
+        } else {
+            log(&format!("notification not delivered: {cause}"));
+            None
         }
     }
 

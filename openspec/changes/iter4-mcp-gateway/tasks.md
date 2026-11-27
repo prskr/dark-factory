@@ -47,9 +47,9 @@
 
 ## 8. Integration
 
-- [ ] 8.1 End-to-end test in `crates/df-e2e` with the fake ACP agent and a fake MCP server: register, enable for the project, the agent lists and calls a tool through `ext` (succeeds, record shown in the run view), a call to a registered server not enabled for the project is rejected without reaching it, and the sandbox holds no credential. Verify: `just e2e-local` (skill `e2e`).
+- [x] 8.1 End-to-end test in `crates/df-e2e` with the fake ACP agent and a fake MCP server: register, enable for the project, the agent lists and calls a tool through `ext` (succeeds, record shown in the run view), a call to a registered server not enabled for the project is rejected without reaching it, and the sandbox holds no credential. Verify: `just e2e-local` (skill `e2e`).
 - [ ] 8.2 Manual runs against Claude Code and OpenCode with Context7 (acp-harness scenarios "Claude Code with Context7" and "OpenCode"), and one internal server with "Private network", checking in the egress log that the relay made no `CONNECT`. Verify: a note in the PR with the transcript excerpt, the egress log and the run view.
-- [ ] 8.3 `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete`, `cargo xtask check-crates`, `openspec validate iter4-mcp-gateway --strict`. Verify: all pass.
+- [x] 8.3 `cargo clippy --all-targets --all-features -- -D warnings`, `cargo machete`, `cargo xtask check-crates`, `openspec validate iter4-mcp-gateway --strict`. Verify: all pass.
 
 ## Workflow follow-up
 

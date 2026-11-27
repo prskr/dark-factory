@@ -169,7 +169,7 @@ pub async fn save_mcp_server(
     input: &McpServerInput,
 ) -> Result<McpServerRecord, DbError> {
     let mut tx = pool.begin().await?;
-    check_credential_free_of_factory_use(&mut *tx, input.credential_ref_id).await?;
+    check_credential_free_of_factory_use(&mut tx, input.credential_ref_id).await?;
     let before = match id {
         Some(id) => {
             sqlx::query_scalar::<_, i32>("SELECT 1 FROM mcp_servers WHERE id = $1 FOR UPDATE")

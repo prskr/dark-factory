@@ -71,7 +71,7 @@ impl Pending {
         self.sink.record(pb::McpCallRecord {
             call_id: uuid::Uuid::now_v7().to_string(),
             run_id: self.run_id.clone(),
-            started_at: Some(self.started_at.clone()),
+            started_at: Some(self.started_at),
             server_name: self.server.clone(),
             tool: self.tool.clone(),
             outcome: mcp_outcome_to_proto(outcome).into(),

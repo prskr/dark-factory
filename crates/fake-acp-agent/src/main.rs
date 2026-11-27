@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 pub mod agent;
+pub mod mcp_upstream;
 pub mod mock_mcp;
 pub mod model;
 pub mod script;
@@ -38,6 +39,20 @@ pub struct Cli {
         hide_env_values = true
     )]
     pub fake_upstream_key: String,
+
+    /// Serve a fake third-party MCP server on this address (end-to-end cluster); requests need
+    /// `Authorization: Bearer <FAKE_MCP_TOKEN>`.
+    #[arg(long, value_name = "ADDRESS", env = "FAKE_MCP_ADDRESS")]
+    pub serve_fake_mcp: Option<String>,
+
+    /// The bearer token the fake MCP server expects.
+    #[arg(
+        long,
+        env = "FAKE_MCP_TOKEN",
+        default_value = "fake-mcp-token",
+        hide_env_values = true
+    )]
+    pub fake_mcp_token: String,
 }
 
 #[tokio::main]
@@ -56,6 +71,14 @@ async fn main() -> ExitCode {
     if let Some(address) = &cli.serve_fake_anthropic {
         if let Err(err) = upstream::serve(address, cli.fake_upstream_key.clone()).await {
             eprintln!("fake-acp-agent: fake upstream: {err:#}");
+            return ExitCode::FAILURE;
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    if let Some(address) = &cli.serve_fake_mcp {
+        if let Err(err) = mcp_upstream::serve(address, cli.fake_mcp_token.clone()).await {
+            eprintln!("fake-acp-agent: fake MCP server: {err:#}");
             return ExitCode::FAILURE;
         }
         return ExitCode::SUCCESS;
