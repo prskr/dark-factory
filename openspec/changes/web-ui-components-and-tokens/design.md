@@ -15,18 +15,22 @@ See proposal.md, "Why". Current state in `crates/df-web`:
   - Count pills: `rounded-full bg-sunk px-1.5 text-xs` after tab labels (`artifacts/view.rs`, 4 times), `… font-mono` for the archived count (`chat_pages/view.rs`), `… px-2 py-0.5 font-mono text-xs text-muted` for the subtask `done/total` chip (`task_pages/subtasks.rs`).
   - Labels: 11 `block text-sm font-medium text-muted` labels and legends outside `field()` (`project_webhook.rs` 2, `project_subscriptions.rs` 1, `egress/log/allow.rs` 1, `config_pages/signing_key.rs` 4, `config_pages/providers.rs` 2, `config_pages/push_policy.rs` 1). Uppercase `text-xs font-medium uppercase tracking-wide text-faint` headings: `section()` and 11 more in `egress/log/`, `task_pages/` and `components/`.
 - **PenPot names.** The PenPot MCP was not connected while this was planned. Known PenPot names come from `.agents/skills/penpot/helpers.js` (the colour-to-token rules), `docs/design-workflow.md` (page table: variant sets `Status badge`, `Rail`, `Bottom bar`, `Create button`, `Button`, `Task row`, `Request card`, `Icon button`; main component `Profile menu`) and `openspec/changes/archive/2026-10-30-ui-design-alignment/design.md` (`Button` variants `Primary`, `Secondary`, `Ink`, `Danger`; `Icon button` properties Icon, Size, State). The full token list, the variant names of every set and any typography or radius tokens are (unverified). Task 1.1 reads them first.
+- **Markdown styles** (`styles/input.css`, `@layer components`): `.md-body { overflow-wrap: anywhere }` lets the browser break a table cell's text at any character, so auto table layout shrinks a column to its narrowest letter and breaks words. `.md-body table` is only `block overflow-x-auto`: there's no cell padding and no row or header line. `.md-body :not(pre) > code` defaults to `bg-code-on-agent`, the agent bubble's colour. `md-user`, `md-tool` and `md-request` override it with `bg-panel`, and `.md-preview-panel` with `bg-sunk text-ink`. A plain `md-body` outside a bubble keeps the agent colour: the artifact view (`artifacts/view.rs`, `x-show="!source"`) and others. The agent bubble itself is a plain `md-body` too (`components/transcript.rs`, `agent_message`).
+- **E2e suite** (`crates/df-e2e`, skill `e2e`): Playwright through `playwright-rs` 0.21 against a browser server in the cluster (`deploy/images/playwright-server`). Tests run in `fixture::run` with their own `Session` and create what they check. No session uses a dark colour scheme today, and no page script is injected. axe-core is in no lockfile. The control plane sends no `Content-Security-Policy`.
 - **Parallel change.** `task-list-tree` rewrites `task_rows` and shares the chat list's `needs_you_dot` with the task list.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Pages render the same as before, apart from the small unifications listed in D3 and D4.
+- Pages render the same as before, apart from the small unifications listed in D3 and D4, the Markdown tables (D11) and the contrast fixes the check calls for (D12).
+- The contrast of every main page is checked automatically in both themes, so the token rename and later changes can't lower it unnoticed.
 - Each new component has an HTML unit test and an entry in `docs/design-system.md`, and every copy it replaces is gone.
 - A CSS token and its PenPot token have the same name, so `docs/design-system.md` holds the mapping in one place and skill `penpot` needs no exception table.
 
 **Non-Goals:**
 - New behaviour in dialogs or tabs (focus handling, animations): rejected. The components keep today's behaviour.
-- Changing token values or contrast: rejected. Renames only.
+- Changing token values: rejected, renames only. The one exception is a value the contrast check (D12) proves to be below 4.5:1. Such a change also updates the contrast tables of `docs/design-system.md` and `TEXT_PAIRS`.
+- Other axe rules (labels, landmarks, ARIA): backlog. The check runs `color-contrast` only.
 - Guarding arbitrary spacing and size values: backlog (see proposal).
 
 ## Decisions
@@ -39,10 +43,12 @@ The three parts depend on each other. The mapping table (part 2) names the CSS t
 2. Type and radius tokens, then the guard (TDD: the guard fails first, the replacement makes it pass).
 3. New components, each replacing its copies.
 4. Moves into `components/` (`task_row`, `request_card`, `count_badge`).
-5. The token rename: one mechanical commit, last, so it touches the fewest lines and can be redone after a rebase.
-6. The mapping table and the doc test that keeps it honest.
+5. Markdown tables and inline code (D11): the PenPot board first, then the CSS.
+6. The contrast check (D12), and the fixes for every violation it reports.
+7. The token rename: one mechanical commit, late, so it touches the fewest lines and can be redone after a rebase. The contrast check from step 6 must stay green across it.
+8. The mapping table and the doc test that keeps it honest.
 
-If `task-list-tree` hasn't landed when step 4 starts, steps 5 and 6 go first and the `task_row` move waits for it (D9).
+If `task-list-tree` hasn't landed when step 4 starts, steps 5 to 8 go first and the `task_row` move waits for it (D9).
 
 Alternative: three changes (components, tokens, rename). Rejected. Each one would leave `docs/design-system.md` half-updated, and the rename would run twice over the same files.
 
@@ -177,7 +183,50 @@ A new section "PenPot mapping" with two tables:
 
 A test (`every_penpot_token_maps_to_a_stylesheet_token`) parses the token table and checks that each named CSS token exists in `:root` and that each `:root` token is in the table. The "Token names that differ" table of skill `penpot` (`.agents/skills/penpot/SKILL.md`, "Binding colours") is replaced by a pointer to the mapping. `helpers.js` doesn't change: it already uses the PenPot names.
 
+### D11: Markdown tables and inline code
+
+Design first: a PenPot board "Markdown · table" (page `Tasks - Transcript`, a partial board) shows one table in an agent bubble, a user bubble and an artifact preview, in light and dark. The owner approves it before the CSS changes. The CSS in `@layer components` of `styles/input.css`:
+
+- `.md-body table`: keeps `block overflow-x-auto max-w-full` (its own scroll box, `web-ui-shell` "No page-level horizontal scrolling"), plus `border-collapse` and `text-left`.
+- `.md-body :is(th, td)`: `overflow-wrap: normal` (words break only at spaces; a long token widens the table, which then scrolls), `px-3 py-1.5 align-top`, and a bottom border in `currentColor` at low opacity (`border-current/20`).
+- `.md-body th`: `font-semibold` and a stronger bottom line (`border-current/40`).
+- Inline code turns around: `.md-body :not(pre) > code` gets `bg-sunk` by default, and the agent bubble marks itself with a new class `md-agent` that keeps `code-on-agent`. The overrides of `md-user`, `md-tool`, `md-request` and `.md-preview-panel` stay. A new Markdown place is then right by default, instead of inheriting the inverted bubble's colour.
+
+`currentColor` makes one rule work on all four surfaces: the inverted agent bubble, the user bubble, request cards and panels. A line between rows is non-text and identifies nothing alone (the text does), so it needs no 3:1. The guard (D7) allows `border-current/20`: it is no palette colour and no arbitrary value.
+
+Alternatives:
+- A filled header row or zebra rows: rejected. A fill has to be picked per surface, which means four rules for the same table.
+- Fixed `table-layout`: rejected. It cuts columns to equal widths regardless of content.
+
+Tests: a unit test reads `app_css()` and checks that the cell rule resets `overflow-wrap` and that `code-on-agent` appears only in the `md-agent` rule. A test of `agent_message` checks the `md-agent` class. The look is checked in a browser and by the contrast check (D12, Markdown preview with a table and inline code).
+
+### D12: The contrast check
+
+`crates/df-e2e/tests/contrast.rs` holds one test per page group, each in `fixture::run`, creating what it checks (skill `e2e`):
+
+- **Requests and task:** a task scripted with the fake agent (an agent message with a table, inline code and a link, a `write_artifact` of a `.md` file with a table, an `ask_question`). The test visits the inbox, the task timeline with the details (Overview, Artifacts tab), and the artifact page.
+- **Chat:** a chat with a message.
+- **Markdown preview:** the persona page's System prompt tab in the Split view (the field's preview), on a persona the test creates.
+- **Settings:** Projects, Personas, Credentials, Model providers and Egress rules, read only.
+
+Each page is visited once in a light and once in a dark session. A dark session is a browser context with the dark colour scheme: playwright-rs support for the context option or `emulate_media` is (unverified), see task 6.1. The helper `browser::contrast_violations(page)` sends the source of `axe.min.js` with `page.evaluate`. That isn't subject to a page CSP, and there is no CSP anyway. It then runs `axe.run(document, { runOnly: ['color-contrast'] })` and returns the violations. The test fails with page, theme, selector, ratio and colours per violation. axe's `incomplete` results (text on images or gradients) are written to the test's diagnostics and don't fail the test. Before axe runs, the test waits for the page's state (`expect` on the content it seeded), so live regions don't change underneath it.
+
+axe-core source: pinned in `crates/df-e2e/package.json` with `pnpm-lock.yaml`, installed by `e2e-local.sh` and the e2e workflow (`pnpm install --frozen-lockfile`). The helper reads `crates/df-e2e/node_modules/axe-core/axe.min.js` and fails with an error naming the install command when it is missing. The browser runs in the cluster, but the test host reads the file and sends its text, so the browser server image doesn't change.
+
+Fixes: every violation the first run reports is fixed in this change, through a token's role or, as a last resort, a token value (Goals). Known ones:
+- Inline code in non-bubble Markdown (D11).
+- The avatar link underline (location (unverified)).
+- The details tab marker. That one is non-text, which axe doesn't check, so D3 fixes it: the `tabs` underline uses `accent-strong`.
+
+Alternatives:
+- A unit test over `TEXT_PAIRS` only: it already exists, and it only knows the pairs someone listed, while the three defects were pairs nobody listed.
+- Pa11y or Lighthouse in CI: rejected. A second browser stack, while the suite already has Playwright.
+
 ## Risks / Trade-offs
+
+- [playwright-rs 0.21 has no colour scheme option] → Task 6.1 checks it first. Fallbacks in order: `emulate_media`, then a CDP session (`Emulation.setEmulatedMedia`), then an upgrade of playwright-rs, which `setup playwright-versions` ties to the browser server image (one Renovate group).
+- [axe run on a live page is flaky] → Wait for the seeded content before the run, and run axe once per page and theme, not in a retry loop. A flaky violation is a real finding about a live region, not a reason to retry.
+- [The `package.json` of `crates/df-e2e` isn't covered by Renovate] → Task 6.2 checks `renovate.json` (unverified) and adds the path if needed.
 
 - [The PenPot MCP is not available when the change is implemented] → Task 1.1 needs it (user-scope MCP with a personal token, `docs/design-workflow.md`, "Check the setup"). Without it, the implementer asks Steve Wozniak to have the owner connect it. The known renames (D5 table) go ahead. Unknown tokens keep their names and their mapping rows say "(unverified)" until checked. The change isn't archived with "(unverified)" rows left.
 - [The rename conflicts with every open change that edits `df-web` markup] → It is the last commit, a pure word replacement over `src/`, `styles/`, `editor/` and the docs. On a conflict it is dropped and run again after the rebase.

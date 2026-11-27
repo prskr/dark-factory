@@ -13,6 +13,8 @@
 - **BREAKING (internal): CSS tokens renamed to their PenPot names:** `line` → `border`, `line-strong` → `border-strong`, `ink` → `text` (text) and `ink` (fills, as PenPot `color.ink`), `accent-text` → `accent-strong`, `danger` → `failed`, `bubble-agent` / `on-bubble-agent` → `agent-bg` / `agent-fg`, plus the renames task 1.1 finds for the tokens whose PenPot names are not yet known (unverified). Utilities change with them (`border-line` → `border-border`, `text-ink` → `text-text`). The rendered UI looks the same.
 - **Type and radius tokens:** `@theme` tokens in `styles/input.css` for every arbitrary font size (`text-meta` 13 px, `text-lead` 15 px, `text-lead-lg` 17 px, `text-2xs` 11 px, `text-3xs` 10 px, `text-4xs` 9 px, `text-code` 0.9 em) and radius (`rounded-control` 10 px, `rounded-t-sheet` 18 px). The arbitrary values are removed.
 - **Styling guard for every page:** a test over the compiled stylesheet fails on any Tailwind palette colour utility and any arbitrary font-size, line-height, letter-spacing or radius utility anywhere in the crate. The rendered-page check of the task pages stays and uses the same rules.
+- **Markdown tables:** cells wrap only between words (today `overflow-wrap: anywhere` on `.md-body` breaks words mid-word inside a narrow column). Rows are separated by a faint line, the header row is bold, and a wide table scrolls in its own box, everywhere Markdown is rendered. Inline code outside an agent bubble gets the background of its own surface. Today a plain Markdown body, such as the artifact view, inherits the agent bubble's `code-on-agent`.
+- **Contrast check in the e2e suite:** axe-core's `color-contrast` rule runs over the main pages (inbox, task timeline and details, chat, artifact view, Markdown preview, settings) in light and dark mode and fails on text below 4.5:1 (3:1 for large text). The defects the `question-kinds` review found by eye are fixed: the avatar link underline (location (unverified), the check finds it), the details tab marker (non-text, which axe doesn't check; the `tabs` component fixes it) and inline code in non-bubble Markdown.
 
 ## Capabilities
 
@@ -23,11 +25,14 @@ None.
 ### Modified Capabilities
 
 - `web-ui-shell`: "Controls follow the design system" names the renamed tokens (`border`, `accent-strong`). A new requirement says every page uses only design tokens for colour, type size and radius.
+- `markdown-rendering`: new requirement "Table layout" (wrapping, row and header lines, own scroll box, inline code background per surface).
+- `e2e-runner`: new requirement "Contrast check of the main pages" (light and dark, 4.5:1, failure names page, theme, element and ratio).
 
 ## Impact
 
 - **Code:** `crates/df-web` only: `styles/input.css`, `src/components/` (new modules `dialog`, `tabs`, `task_row`, `request_card`; additions to `badges`, `forms`, `lists`), the page modules that used the copies (`task_pages`, `config_pages`, `chat_pages`, `requests`, `artifacts`, `egress`, `project_webhook`, `project_subscriptions`), `editor/markdown-editor.ts` (CSS variables by name), the tests that assert class strings, and the snapshots under `src/**/snapshots/`. No route, no database, no configuration key, no protobuf message changes.
-- **Docs:** `docs/design-system.md` (mapping table, token and type tables, new components), `docs/design-workflow.md` and skill `penpot` (the token-name exception table goes away). The published docs (`docs/content/`) don't describe the UI's tokens or components, so they don't change.
+- **E2e suite:** `crates/df-e2e` gets the contrast test (`tests/contrast.rs`) and its browser helpers. A new pinned npm dependency, `axe-core` (MPL-2.0), goes into `crates/df-e2e/package.json` with a `pnpm-lock.yaml`. `deploy/e2e/e2e-local.sh` and `.github/workflows/e2e.yaml` install it.
+- **Docs:** `docs/design-system.md` (mapping table, token and type tables, new components), `docs/design-workflow.md` and skill `penpot` (the token-name exception table goes away). The published docs (`docs/content/`) don't describe the UI's tokens or components, so they don't change. `docs/content/using/artifacts.md` says Markdown supports GitHub tables, which stays true. `docs/demo.md` (contributor docs) names the axe-core install of the e2e run. The backlog row for an automated contrast check isn't needed: this change covers it.
 - **Parallel work:** `task-list-tree` rewrites the task rows. This change moves the row after `task-list-tree` has landed (design D9). Every open change that edits `df-web` markup rebases over the token rename. The rename is one mechanical commit, so redoing it is cheap.
 - **Domain model:** unchanged. No glossary term and no ADR is added. The token rename is easy to revert, so it isn't an ADR (design D5).
 - **Out of scope:**
@@ -37,3 +42,4 @@ None.
   - Arbitrary spacing and size values (`pl-[17px]`, `w-[3px]`, `grid-cols-[76px_…]`): backlog.
   - Drawing PenPot main components for the new code components (confirmation dialog, tabs, status dot, count pill): backlog.
   - Arrow-key navigation for the archive's link tabs: backlog (D3).
+  - axe rules other than `color-contrast` (labels, landmarks, ARIA): backlog.
