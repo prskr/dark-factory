@@ -61,15 +61,15 @@ An MCP server SHALL have one credential scheme: `bearer` (`Authorization: Bearer
 - **THEN** the form rejects it, because `tok%65n` decodes to `token`
 
 ### Requirement: Credentials stay write-only
-An MCP server SHALL reference an existing credential reference (Secret name and key) and SHALL never hold or display a secret value. The credential SHALL never be sent to a sandbox. A credential reference used by a server SHALL NOT be deletable.
+An MCP server SHALL reference an existing credential reference (Secret name and key) and SHALL never hold or display a secret value. The credential SHALL never be sent to a sandbox. A credential reference used by a server SHALL NOT be deletable. Deleting credential references is not offered yet; the database refuses to delete one that a server references.
 
 #### Scenario: Server page
 - **WHEN** an admin opens server `context7`
 - **THEN** the page shows the credential reference's name, Secret and key but no value
 
 #### Scenario: Delete a used credential reference
-- **WHEN** an admin deletes credential reference `context7-key` while `context7` uses it
-- **THEN** the deletion is refused with a message naming `context7`
+- **WHEN** credential reference `context7-key` is deleted while `context7` uses it
+- **THEN** the database refuses the deletion and `context7` keeps its credential reference
 
 ### Requirement: No factory credentials for MCP servers
 An MCP server SHALL NOT use a credential reference that a project uses as its forge credential or that a model provider uses, and a project or model provider SHALL NOT be saved with a credential reference an MCP server uses. The refusal SHALL name the other user of the reference.
