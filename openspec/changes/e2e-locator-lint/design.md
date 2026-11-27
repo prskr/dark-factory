@@ -56,9 +56,9 @@ The old "`.first()`: …" comments go away. The scope or the helper name replace
 
 ### Decision 5: the named helpers are the permanent test of the ban
 
-A lint cannot have a test that fails in the tree. But `#[expect(clippy::disallowed_methods)]` fails as unfulfilled when the lint does not fire. So each named helper fails `cargo clippy` when the ban stops reaching it: a wrong path in `clippy.toml`, a removed entry, or an opt-out that hides it. At least one named helper sits in `src/browser.rs` and one in a test file. If the fixes leave none in one of the two places, a probe takes its place: a `#[cfg(test)]` function there that calls `.first()` on a `Locator`, with `#[expect(clippy::disallowed_methods, reason = "probe: the locator ban reaches this module")]`.
+A lint cannot have a test that fails in the tree. But `#[expect(clippy::disallowed_methods)]` fails as unfulfilled when the lint does not fire. So each named helper fails `cargo clippy` when the ban stops reaching it: a wrong path in `clippy.toml`, a removed entry, or an opt-out that hides it. Each of the three methods is checked on its own, because one `.first()` call still fulfills its `expect` when the `last` or `nth` entry is gone. So `src/browser.rs` and one test file each hold an `expect`-carrying call of `first`, of `last` and of `nth`, each in its own function. A named helper counts. Where the fixes leave a method without one, a probe takes its place: a `#[cfg(test)]` function that calls only that method on a `Locator`, with `#[expect(clippy::disallowed_methods, reason = "probe: the ban on Locator::<method> reaches this module")]`.
 
-- The scenario "Slice method with the same name" is tested by the same clippy run: `src/seed/demo/write.rs` calls `Vec::first` and `last`, so clippy fails if the ban matches slice methods.
+- The scenario "Slice method with the same name" needs calls outside every opt-out, or a false match would be hidden. The calls in `src/seed/demo/write.rs` sit under that module's SQL opt-out, so they prove nothing. A unit test in `src/browser.rs`, outside any `expect`, calls `first`, `last` and `nth` on a slice and an iterator and asserts the results. Clippy fails on it if the ban matches these methods.
 - The scenario "Control rendered for two layouts" is tested by the e2e tests of `tests/chat_questions.rs`. They call `Session::create_chat`, which clicks the "New chat" button. The chat list renders that button once in the header and once for phones. After task 2.2, the helper finds it by role and name, without a pick.
 - Rejected: a separate lint probe crate that is expected to fail. It needs its own CI step that inverts the exit code, for what the `expect` attributes already prove.
 
@@ -66,7 +66,8 @@ A lint cannot have a test that fails in the tree. But `#[expect(clippy::disallow
 
 - [Strict mode fails a test that passed before] → This is the purpose. Scope further (Decision 4) and do not bring the pick back.
 - [Clippy does not resolve the configured path and only warns] → Task 1.1 adds one deliberate call in a test file and checks that clippy reports it before any call site is fixed.
-- [`expect` on a module that later uses a locator hides the ban again] → Each module's reason names SQL. The standards reviewer checks new `disallowed_methods` opt-outs against `AGENTS.md`, "Database access".
+- [A file-wide SQL opt-out also hides a locator pick in that file] → This holds for `db.rs`, `seed/demo/write.rs` and the three SQL integration tests (`tests/seed.rs`, `tests/demo_seed.rs`, `tests/unlanded_lookup.rs`). None of them uses Playwright today. Skill `e2e` already keeps browser code in `browser.rs` and SQL in `db.rs`. Task 3.1 adds one sentence: a file with a SQL opt-out does not use a `Locator`. Each opt-out's reason names SQL, and the standards reviewer checks new `disallowed_methods` opt-outs against `AGENTS.md`, "Database access".
+  - Rejected: one opt-out per SQL function. `db.rs` alone has 26 queries in many functions, so it would need dozens of attributes to guard against a case that the file layout already rules out.
 - [A named helper becomes a new escape hatch] → The skill rule asks for a name that says what the position means. The reviewer rejects generic helpers such as `first_of`.
 
 ## Migration Plan
