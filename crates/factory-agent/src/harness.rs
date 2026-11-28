@@ -168,15 +168,42 @@ pub struct SessionSetupResult {
     pub notices: Vec<Notice>,
 }
 
+/// The gateway's MCP endpoint, registered next to the factory server as the stdio server `ext`.
+#[derive(Debug, Clone, Copy)]
+pub struct ExtRelay<'a> {
+    /// `Assign.harness.acp.mcp_endpoint`.
+    pub endpoint: &'a str,
+    /// The instance CA file the relay trusts.
+    pub ca_file: &'a Path,
+}
+
+impl<'a> ExtRelay<'a> {
+    /// The relay of a run whose `Assign` carries a gateway MCP endpoint; `None` without one. It
+    /// trusts the copy of the instance CA the control plane names for the harness.
+    pub fn of(assign: &'a Assign) -> Option<Self> {
+        let Some(df_proto::agent::v1::harness::Kind::Acp(acp)) =
+            assign.harness.as_ref()?.kind.as_ref()
+        else {
+            return None;
+        };
+        (!acp.mcp_endpoint.is_empty()).then_some(Self {
+            endpoint: &acp.mcp_endpoint,
+            ca_file: Path::new(df_sandbox_contract::paths::INSTANCE_CA_PATH),
+        })
+    }
+}
+
 /// Initializes connection and establishes ACP session (`session/load` or `session/new`).
 ///
-/// The factory MCP server is registered in every session.
+/// The factory MCP server is registered in every session, and `ext` (`factory-agent mcp-relay`)
+/// next to it when the run has a gateway MCP endpoint.
 pub async fn setup_session(
     cx: &ConnectionTo<agent_client_protocol::role::acp::Agent>,
     repo_dir: &Path,
     continuation: Option<&Continuation>,
     mcp_command: &Path,
     mcp_socket_path: &Path,
+    ext: Option<ExtRelay<'_>>,
 ) -> Result<SessionSetupResult, agent_client_protocol::Error> {
     // 1. Initialize with empty client capabilities (no filesystem, no terminal)
     let _init_res = cx
@@ -195,6 +222,18 @@ pub async fn setup_session(
             mcp_socket_path.to_string_lossy().to_string(),
         ]),
     );
+    let mut mcp_servers = vec![factory_mcp];
+    if let Some(ext) = ext {
+        mcp_servers.push(McpServer::Stdio(
+            McpServerStdio::new("ext", mcp_command.to_path_buf()).args(vec![
+                "mcp-relay".to_string(),
+                "--url".to_string(),
+                ext.endpoint.to_string(),
+                "--ca".to_string(),
+                ext.ca_file.to_string_lossy().to_string(),
+            ]),
+        ));
+    }
 
     let mut notices = Vec::new();
 
@@ -208,7 +247,7 @@ pub async fn setup_session(
                     SessionId::new(cont.harness_session_id.clone()),
                     repo_dir.to_path_buf(),
                 )
-                .mcp_servers(vec![factory_mcp.clone()]),
+                .mcp_servers(mcp_servers.clone()),
             )
             .block_task()
             .await;
@@ -243,7 +282,7 @@ pub async fn setup_session(
         });
     }
     let new_res = cx
-        .send_request(NewSessionRequest::new(repo_dir.to_path_buf()).mcp_servers(vec![factory_mcp]))
+        .send_request(NewSessionRequest::new(repo_dir.to_path_buf()).mcp_servers(mcp_servers))
         .block_task()
         .await?;
 

@@ -26,7 +26,8 @@ A missing required variable makes `run` log `invalid configuration` and exit wit
 
 | Input | Source | Effect |
 |-------|--------|--------|
-| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (and lowercase) | environment | Forwarded to git and the harness. |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (and lowercase) | environment | Forwarded to git and the harness. The `mcp-relay` subcommand ignores them: it connects directly to the gateway. |
+| `factory-agent mcp-relay --url <endpoint> --ca <file>` | command line | Started by the harness as the stdio MCP server `ext` when `Assign` carries a gateway MCP endpoint (`AcpHarness.mcp_endpoint`): forwards every JSON-RPC line to `<endpoint>` and writes the answers back, trusting only the CA in `<file>` (`/run/factory/ca/ca.crt`, the copy of the instance CA). Exits `0` when stdin ends and non-zero, naming the path, when the CA file cannot be read. See [MCP endpoint](../../security/mcp-endpoint.md). |
 
 ## Fixed settings
 

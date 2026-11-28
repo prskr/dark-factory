@@ -4,8 +4,10 @@
 use std::sync::LazyLock;
 
 use df_core::harness::{self, ConfigInput, HarnessProfile, INFERENCE_PATH, PLACEHOLDER_KEY};
+use df_core::mcp::MCP_PATH;
 use df_core::model_provider::ProviderModel;
 use df_core::{Principal, RewritePolicy, TaskId};
+use df_db::mcp_servers::project_mcp_server_ids;
 use df_db::model_providers::ModelProviderRecord;
 use df_db::push_checks::push_policy;
 use df_db::runs::previous_harness_session_id;
@@ -167,6 +169,9 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
         .await?
         .hidden_globs;
     env.extend(inference_env(ctx, profile, &provider, &model));
+    let has_mcp_servers = !project_mcp_server_ids(&ctx.pool, rc.project.id.as_uuid())
+        .await?
+        .is_empty();
     if rc.project.mounts_harness() {
         // Paths into the harness image: absent with the project's own adapter.
         env.extend(
@@ -212,6 +217,11 @@ pub async fn build_assign(ctx: &ChannelContext, rc: &RunContext) -> Result<Assig
                 env,
                 model: Some(rc.persona.model.clone()),
                 files: harness_files(ctx, rc, profile, &hidden_paths),
+                mcp_endpoint: if has_mcp_servers {
+                    mcp_endpoint_url(&config.git_proxy)
+                } else {
+                    String::new()
+                },
             })),
         }),
         tools: tool_descriptors_for(rc.kind()),
@@ -358,23 +368,29 @@ fn inference_env(
     env
 }
 
+/// `https://<host>[:<port>]<path>` on the gateway's Git port; the default port 443 is left out.
+fn gateway_url(proxy: &GitProxy, path: &str) -> String {
+    if proxy.port == 443 {
+        format!("https://{}{path}", proxy.host)
+    } else {
+        format!("https://{}:{}{path}", proxy.host, proxy.port)
+    }
+}
+
 /// `https://<host>:<port>/inference` on the gateway's Git port.
 pub fn inference_base_url(proxy: &GitProxy) -> String {
-    if proxy.port == 443 {
-        format!("https://{}{INFERENCE_PATH}", proxy.host)
-    } else {
-        format!("https://{}:{}{INFERENCE_PATH}", proxy.host, proxy.port)
-    }
+    gateway_url(proxy, INFERENCE_PATH)
+}
+
+/// `https://<host>:<port>/mcp` on the gateway's Git port.
+pub fn mcp_endpoint_url(proxy: &GitProxy) -> String {
+    gateway_url(proxy, MCP_PATH)
 }
 
 /// The task's repository URL on the Git proxy, `https://<host>:<port>/git/<KEY>.git`; the
 /// project's real repository URL never reaches the sandbox.
 pub fn proxy_repo_url(proxy: &GitProxy, task_key: &str) -> String {
-    if proxy.port == 443 {
-        format!("https://{}/git/{task_key}.git", proxy.host)
-    } else {
-        format!("https://{}:{}/git/{task_key}.git", proxy.host, proxy.port)
-    }
+    gateway_url(proxy, &format!("/git/{task_key}.git"))
 }
 
 async fn continuation(

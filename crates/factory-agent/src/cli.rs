@@ -40,6 +40,17 @@ pub enum Command {
         )]
         socket: std::path::PathBuf,
     },
+    /// Stdio bridge between a harness's MCP client and the gateway's MCP endpoint: forwards
+    /// every JSON-RPC line to the endpoint and writes its answers back. Registered as `ext` next
+    /// to `factory`.
+    McpRelay {
+        /// The gateway's MCP endpoint, `https://<host>:<port>/mcp`.
+        #[arg(long)]
+        url: String,
+        /// The instance CA file; the only certificate authority the relay trusts.
+        #[arg(long)]
+        ca: std::path::PathBuf,
+    },
     /// The `gpg.ssh.program` of the workspace (started by `df-git-sign`): signs a commit through
     /// the runtime socket, called like `ssh-keygen -Y sign -n git -f <key> <file>`.
     GitSign {

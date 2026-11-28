@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 
 use df_proto::gateway::v1::{
-    ForgeCredential, GitRoute, InferenceRoute, PolicyUpdate, ProviderCredential, PushPolicy,
-    SandboxEntry,
+    ForgeCredential, GitRoute, InferenceRoute, McpServer, PolicyUpdate, ProviderCredential,
+    PushPolicy, SandboxEntry,
 };
 
 /// Reason of a denied request, as shown in the egress log.
@@ -112,6 +112,8 @@ pub struct Policy {
     exceptions: HashMap<IpAddr, Vec<String>>,
     inference_routes: HashMap<IpAddr, InferenceRoute>,
     provider_credentials: HashMap<String, ProviderCredential>,
+    mcp_servers: HashMap<String, McpServer>,
+    mcp_server_ids: HashMap<IpAddr, Vec<String>>,
 }
 
 impl Policy {
@@ -125,6 +127,8 @@ impl Policy {
             exceptions: HashMap::new(),
             inference_routes: HashMap::new(),
             provider_credentials: HashMap::new(),
+            mcp_servers: HashMap::new(),
+            mcp_server_ids: HashMap::new(),
         }
     }
 
@@ -171,6 +175,7 @@ impl Policy {
         let mut routes = Vec::new();
         let mut inference = Vec::new();
         let mut exceptions = Vec::new();
+        let mut mcp_ids = Vec::new();
         let sandboxes: Vec<_> = snapshot
             .sandboxes
             .into_iter()
@@ -178,10 +183,12 @@ impl Policy {
                 let route = entry.git.take();
                 let model = entry.inference.take();
                 let excepted = std::mem::take(&mut entry.exceptions);
+                let servers = std::mem::take(&mut entry.mcp_server_ids);
                 let (ip, sandbox) = sandbox_from_entry(entry)?;
                 routes.extend(route.map(|route| (ip, route)));
                 inference.extend(model.map(|route| (ip, route)));
                 exceptions.push((ip, excepted));
+                mcp_ids.push((ip, servers));
                 Some((ip, sandbox))
             })
             .collect();
@@ -189,6 +196,74 @@ impl Policy {
             .with_git(routes, snapshot.forge_credentials)
             .with_push_checks(snapshot.push_policies, exceptions)
             .with_inference(inference, snapshot.provider_credentials)
+            .with_mcp(snapshot.mcp_servers, mcp_ids)
+    }
+
+    /// Adds the MCP servers (by server id) and the ids of the servers enabled for each sandbox
+    /// (by pod IP). Their credentials are among the provider credentials
+    /// ([`Self::with_inference`]).
+    #[must_use]
+    pub fn with_mcp(
+        mut self,
+        servers: impl IntoIterator<Item = (String, McpServer)>,
+        enabled: impl IntoIterator<Item = (IpAddr, Vec<String>)>,
+    ) -> Self {
+        self.mcp_servers = servers.into_iter().collect();
+        self.mcp_server_ids = enabled.into_iter().collect();
+        self
+    }
+
+    /// The MCP servers enabled for the sandbox at `ip`, by name. A listed id the snapshot does
+    /// not carry is skipped.
+    pub fn mcp_servers(&self, ip: IpAddr) -> Vec<&McpServer> {
+        let mut servers: Vec<&McpServer> = self
+            .mcp_server_ids
+            .get(&ip)
+            .into_iter()
+            .flatten()
+            .filter_map(|id| self.mcp_servers.get(id))
+            .collect();
+        servers.sort_by(|a, b| a.name.cmp(&b.name));
+        servers
+    }
+
+    /// The MCP server with this id, whichever runs have it enabled.
+    pub fn mcp_server_by_id(&self, id: &str) -> Option<&McpServer> {
+        self.mcp_servers.get(id)
+    }
+
+    /// The MCP server `name` enabled for the sandbox at `ip`.
+    pub fn mcp_server(&self, ip: IpAddr, name: &str) -> Option<&McpServer> {
+        self.mcp_servers(ip)
+            .into_iter()
+            .find(|server| server.name == name)
+    }
+
+    /// What the aggregated tool list of the sandbox at `ip` depends on: its enabled servers with
+    /// their configuration versions. Changes when a server is enabled, disabled or edited.
+    pub fn mcp_signature(&self, ip: IpAddr) -> Vec<(String, u64)> {
+        self.mcp_servers(ip)
+            .into_iter()
+            .map(|server| (server.id.clone(), server.config_version))
+            .collect()
+    }
+
+    /// Whether the run `run_id` still has an entry in the snapshot.
+    pub fn has_run(&self, run_id: &str) -> bool {
+        self.sandboxes
+            .values()
+            .any(|sandbox| sandbox.run_id == run_id)
+    }
+
+    /// Whether the run `run_id` has the server `id` enabled with this configuration version.
+    pub fn enables_mcp_server(&self, run_id: &str, id: &str, config_version: u64) -> bool {
+        self.sandboxes.iter().any(|(ip, sandbox)| {
+            sandbox.run_id == run_id
+                && self
+                    .mcp_servers(*ip)
+                    .iter()
+                    .any(|server| server.id == id && server.config_version == config_version)
+        })
     }
 
     pub fn sandbox(&self, ip: IpAddr) -> Option<&Sandbox> {
@@ -555,5 +630,88 @@ mod tests {
                 .hosts
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn mcp_servers_of_a_sandbox_come_from_the_snapshot_by_name() {
+        use df_proto::gateway::v1::Snapshot;
+        let server = |id: &str, name: &str, version: u64| McpServer {
+            id: id.into(),
+            name: name.into(),
+            config_version: version,
+            credential_ref: format!("c-{id}"),
+            ..Default::default()
+        };
+        let entry = SandboxEntry {
+            pod_ip: POD.into(),
+            run_id: "run-1".into(),
+            project_key: "DF".into(),
+            mcp_server_ids: vec!["s2".into(), "s1".into(), "gone".into()],
+            ..Default::default()
+        };
+        let other = SandboxEntry {
+            pod_ip: "10.1.0.8".into(),
+            run_id: "run-2".into(),
+            ..Default::default()
+        };
+        let update = |version: u64| PolicyUpdate {
+            version: 1,
+            snapshot: Some(Snapshot {
+                sandboxes: vec![entry.clone(), other.clone()],
+                mcp_servers: [
+                    ("s1".to_owned(), server("s1", "wiki", 1)),
+                    ("s2".to_owned(), server("s2", "context7", version)),
+                    ("s3".to_owned(), server("s3", "billing", 1)),
+                ]
+                .into(),
+                provider_credentials: [(
+                    "c-s2".to_owned(),
+                    ProviderCredential {
+                        value: "key".into(),
+                    },
+                )]
+                .into(),
+                ..Default::default()
+            }),
+        };
+        let policy = Policy::from_update(update(1));
+        let ip = POD.parse().unwrap();
+
+        let names: Vec<_> = policy
+            .mcp_servers(ip)
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(names, ["context7", "wiki"]);
+        assert!(policy.mcp_servers("10.1.0.8".parse().unwrap()).is_empty());
+        assert!(
+            policy.mcp_server(ip, "billing").is_none(),
+            "not enabled for the run"
+        );
+        let context7 = policy.mcp_server(ip, "context7").unwrap();
+        assert_eq!(
+            policy
+                .provider_credential(&context7.credential_ref)
+                .unwrap()
+                .value,
+            "key"
+        );
+        let wiki = policy.mcp_server(ip, "wiki").unwrap();
+        assert!(
+            policy.provider_credential(&wiki.credential_ref).is_none(),
+            "server without credential"
+        );
+        assert!(policy.has_run("run-1") && !policy.has_run("run-9"));
+        assert!(policy.enables_mcp_server("run-1", "s2", 1));
+        assert!(!policy.enables_mcp_server("run-1", "s3", 1));
+        assert!(!policy.enables_mcp_server("run-2", "s2", 1));
+
+        let edited = Policy::from_update(update(2));
+        assert_ne!(policy.mcp_signature(ip), edited.mcp_signature(ip));
+        assert_eq!(
+            policy.mcp_signature(ip),
+            Policy::from_update(update(1)).mcp_signature(ip)
+        );
+        assert!(!edited.enables_mcp_server("run-1", "s2", 1));
     }
 }

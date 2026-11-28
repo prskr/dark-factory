@@ -130,6 +130,19 @@ pub async fn personas_using(pool: &PgPool, id: Uuid) -> Result<Vec<String>, DbEr
     .await?)
 }
 
+/// Names of the model providers that use credential reference `credential_ref_id`, sorted.
+pub(crate) async fn names_using_credential(
+    conn: &mut sqlx::PgConnection,
+    credential_ref_id: Uuid,
+) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT name FROM model_providers WHERE credential_ref_id = $1 ORDER BY name",
+        credential_ref_id
+    )
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
 /// Creates (`id` is `None`) or updates a provider with its APIs and audits the change.
 pub async fn save_model_provider(
     pool: &PgPool,
@@ -138,6 +151,8 @@ pub async fn save_model_provider(
     input: &ModelProviderInput,
 ) -> Result<ModelProviderRecord, DbError> {
     let mut tx = pool.begin().await?;
+    crate::mcp_servers::check_credential_not_used_by_a_server(&mut tx, input.credential_ref_id)
+        .await?;
     let before = match id {
         Some(id) => {
             let row: ProviderRow = sqlx::query_as(select_provider!("WHERE id = $1 FOR UPDATE"))

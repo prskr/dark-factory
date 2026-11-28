@@ -433,6 +433,56 @@ pub async fn save_credential_ref(
     Ok(row.into())
 }
 
+/// What uses a credential reference, as the guards of the MCP servers need it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CredentialUsers {
+    /// The name of the credential reference.
+    pub(crate) name: String,
+    /// Keys of the projects that use it as their forge credential, sorted.
+    pub(crate) projects: Vec<String>,
+    /// Names of the model providers that use it, sorted.
+    pub(crate) model_providers: Vec<String>,
+    /// Names of the MCP servers that use it, sorted.
+    pub(crate) mcp_servers: Vec<String>,
+}
+
+/// The users of credential reference `id`; the reference not existing is a
+/// [`DbError::NotFound`].
+pub(crate) async fn credential_users(
+    conn: &mut sqlx::PgConnection,
+    id: Uuid,
+) -> Result<CredentialUsers, DbError> {
+    let name = sqlx::query_scalar!("SELECT name FROM credential_refs WHERE id = $1", id)
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("credential reference `{id}`")))?;
+    let projects = sqlx::query_scalar!(
+        "SELECT key FROM projects WHERE forge_credential_id = $1 ORDER BY key",
+        id
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(CredentialUsers {
+        name,
+        projects,
+        model_providers: crate::model_providers::names_using_credential(&mut *conn, id).await?,
+        mcp_servers: crate::mcp_servers::servers_using_credential(&mut *conn, id).await?,
+    })
+}
+
+/// The key of project `id`, locking its row for the transaction; `None` if there is no such
+/// project.
+pub(crate) async fn lock_project_key(
+    conn: &mut sqlx::PgConnection,
+    id: Uuid,
+) -> Result<Option<String>, DbError> {
+    Ok(
+        sqlx::query_scalar!("SELECT key FROM projects WHERE id = $1 FOR UPDATE", id)
+            .fetch_optional(&mut *conn)
+            .await?,
+    )
+}
+
 /// Creates or updates a project and audits the change. Changing the key of an existing project
 /// is a [`DbError::Conflict`].
 pub async fn save_project(
@@ -486,6 +536,9 @@ async fn save_project_in(
     for glob in &input.agent_branch_globs {
         protected_glob(glob)
             .map_err(|error| DbError::InvalidData(format!("agent branch `{glob}`: {error}")))?;
+    }
+    if let Some(credential) = input.forge_credential_id {
+        crate::mcp_servers::check_credential_not_used_by_a_server(tx, credential).await?;
     }
     // The key is set at creation and never changes: task keys (DF-1) and branches derive from it.
     if let Some(b) = &before

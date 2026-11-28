@@ -22,8 +22,8 @@ flowchart LR
 On a desktop screen (768 px and wider), the navigation rail on the left holds Chats, Tasks,
 Requests and Network traffic. On a phone the bottom bar has Chats, Tasks, Requests and Projects.
 The **Settings** link (gear) at its bottom opens the projects page inside the
-settings area, whose sidebar lists **Projects**, **Personas**, **Credentials**, **Model providers**
-and **Egress rules**, in this order. A project is edited on its settings page at `/projects/<key>`.
+settings area, whose sidebar lists **Projects**, **Personas**, **Credentials**, **Model providers**,
+**MCP servers** and **Egress rules**, in this order. A project is edited on its settings page at `/projects/<key>`.
 On a phone the settings sidebar is not available; **Projects** is in the bottom bar.
 
 Set up in this order:

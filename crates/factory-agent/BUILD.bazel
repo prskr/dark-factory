@@ -80,6 +80,19 @@ rust_test(
 )
 
 rust_test(
+    name = "mcp_relay_test",
+    srcs = ["tests/mcp_relay.rs"],
+    data = [":factory-agent"],
+    edition = "2024",
+    env = {"DF_TEST_BIN": "$(rootpath :factory-agent)"},
+    lint_config = ":lints",
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)
+
+rust_test(
     name = "signing_integration_test",
     srcs = ["tests/signing_integration.rs"],
     data = [":factory-agent"],

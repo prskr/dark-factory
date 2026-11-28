@@ -1085,3 +1085,132 @@ async fn a_resumed_run_is_prompted_with_the_system_resume_prompt() -> anyhow::Re
     );
     Ok(())
 }
+
+/// Registers an MCP server and enables it for the project of `env`.
+async fn enable_mcp_server(pool: &PgPool, env: &Env) -> anyhow::Result<()> {
+    use df_db::catalog::{Actor, CredentialRefInput, save_credential_ref};
+    use df_db::mcp_servers::{McpServerInput, save_mcp_server, set_project_mcp_servers};
+
+    let principal = Principal::human(df_core::UserId::new(), "Peter");
+    let roles = vec!["admin".to_string()];
+    let actor = Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let credential = save_credential_ref(
+        pool,
+        actor,
+        None,
+        &CredentialRefInput {
+            name: "context7-key".into(),
+            secret_name: "mcp".into(),
+            secret_key: "key".into(),
+        },
+    )
+    .await?;
+    let server = save_mcp_server(
+        pool,
+        actor,
+        None,
+        &McpServerInput {
+            name: "context7".into(),
+            url: "https://mcp.context7.com/mcp".into(),
+            credential_ref_id: credential.id.as_uuid(),
+            scheme: df_core::mcp::McpCredentialScheme::Bearer,
+            private_network: false,
+        },
+    )
+    .await?;
+    set_project_mcp_servers(pool, actor, env.project_id.as_uuid(), &[server.id]).await?;
+    Ok(())
+}
+
+async fn mcp_endpoint_of(env: &Env, task: TaskId) -> anyhow::Result<String> {
+    let pool = env.ctx.pool.clone();
+    let run_id = env.insert_run(task, 1, "connecting").await;
+    let rc = load_run_context(&pool, get_run(&pool, run_id).await?.expect("run")).await?;
+    let Some(harness_kind::Kind::Acp(acp)) = build_assign(&env.ctx, &rc)
+        .await?
+        .harness
+        .expect("harness")
+        .kind
+    else {
+        anyhow::bail!("expected ACP harness");
+    };
+    Ok(acp.mcp_endpoint)
+}
+
+#[tokio::test]
+async fn assign_has_no_mcp_endpoint_for_a_project_without_enabled_servers() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool).await;
+
+    assert_eq!(mcp_endpoint_of(&env, env.task.id).await?, "");
+    Ok(())
+}
+
+#[tokio::test]
+async fn assign_carries_the_gateway_mcp_endpoint_for_tasks_and_chats_of_a_project_with_a_server()
+-> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let mut env = Env::new(pool.clone()).await;
+    env.ctx.config = std::sync::Arc::new(ChannelConfig {
+        git_proxy: GitProxy {
+            host: "df-gateway.df.svc".into(),
+            port: 8443,
+        },
+        ..ChannelConfig::default()
+    });
+    enable_mcp_server(&pool, &env).await?;
+    let chat = env.chat().await;
+
+    assert_eq!(
+        mcp_endpoint_of(&env, env.task.id).await?,
+        "https://df-gateway.df.svc:8443/mcp"
+    );
+    assert_eq!(
+        mcp_endpoint_of(&env, chat.id).await?,
+        "https://df-gateway.df.svc:8443/mcp"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_mcp_endpoint_omits_port_443() {
+    let proxy = GitProxy {
+        host: "gw.example.org".into(),
+        port: 443,
+    };
+    assert_eq!(mcp_endpoint_url(&proxy), "https://gw.example.org/mcp");
+}
+
+#[tokio::test]
+async fn a_server_enabled_after_assign_changes_only_the_next_assign() -> anyhow::Result<()> {
+    let pool = df_test_postgres::migrated_pool(&df_db::MIGRATOR).await;
+    let env = Env::new(pool.clone()).await;
+    let run_id = env.insert_run(env.task.id, 1, "succeeded").await;
+    let rc = load_run_context(&pool, get_run(&pool, run_id).await?.expect("run")).await?;
+    let first = build_assign(&env.ctx, &rc).await?;
+
+    enable_mcp_server(&pool, &env).await?;
+
+    let Some(harness_kind::Kind::Acp(first)) = first.harness.expect("harness").kind else {
+        anyhow::bail!("expected ACP harness");
+    };
+    assert_eq!(
+        first.mcp_endpoint, "",
+        "the Assign already sent stays without endpoint"
+    );
+    let second = env.insert_run(env.task.id, 2, "connecting").await;
+    let rc = load_run_context(&pool, get_run(&pool, second).await?.expect("run")).await?;
+    let Some(harness_kind::Kind::Acp(next)) = build_assign(&env.ctx, &rc)
+        .await?
+        .harness
+        .expect("harness")
+        .kind
+    else {
+        anyhow::bail!("expected ACP harness");
+    };
+    assert_ne!(next.mcp_endpoint, "");
+    Ok(())
+}

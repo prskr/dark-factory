@@ -52,6 +52,24 @@ pub const HIDDEN_PATH: &str = "secret/value.txt";
 pub const LANDLOCK_PROJECT_KEY: &str = "LL";
 pub const LANDLOCK_PROJECT_NAME: &str = "Landlock";
 
+/// Project whose fake agent calls tools of MCP servers through the `ext` relay (`mcp.yaml`); tasks
+/// are `MC-<n>`. The test registers its servers under unique names itself.
+pub const MCP_PROJECT_KEY: &str = "MC";
+pub const MCP_PROJECT_NAME: &str = "MCP tools";
+/// The credential reference of the MCP servers the test registers: Secret `fake-mcp-key` of the
+/// release namespace, whose value the fake MCP server expects as bearer token.
+pub const MCP_CREDENTIAL_NAME: &str = "fake-mcp";
+pub const MCP_CREDENTIAL_SECRET: &str = "fake-mcp-key";
+pub const MCP_CREDENTIAL_KEY: &str = "key";
+pub const MCP_TOKEN: &str = "e2e-mcp-token";
+pub const FAKE_MCP_PORT: u16 = 8081;
+
+/// URL of the fake MCP server for the registered server `name`, as the gateway addresses it (the
+/// path names the server, the fake answers with it).
+pub fn fake_mcp_url(name: &str) -> String {
+    format!("http://fake-mcp.{FAKE_UPSTREAM_NAMESPACE}.svc:{FAKE_MCP_PORT}/mcp/{name}")
+}
+
 /// What the script says about the private key and about `/opt/probe-writable` under Landlock, and
 /// the question its factory tool call asks.
 pub const LANDLOCK_KEY_DENIED: &str = "tls.key: EACCES";
@@ -257,6 +275,7 @@ pub const RESEARCH_SCRIPT: &str = "/opt/harness/scripts/research.yaml";
 pub const TASK_TREE_SCRIPT: &str = "/opt/harness/scripts/task-tree.yaml";
 pub const INTERRUPT_SCRIPT: &str = "/opt/harness/scripts/interrupt.yaml";
 pub const LANDLOCK_SCRIPT: &str = "/opt/harness/scripts/landlock.yaml";
+pub const MCP_SCRIPT: &str = "/opt/harness/scripts/mcp.yaml";
 
 /// The domain of the suite's Forgejo (its `DOMAIN` setting): the namespace of a key verification.
 pub fn forgejo_domain() -> String {

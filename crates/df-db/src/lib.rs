@@ -19,6 +19,7 @@ pub mod egress;
 pub mod event_subscriptions;
 pub mod git_pushes;
 pub mod lifecycle_events;
+pub mod mcp_servers;
 pub mod migrate;
 pub mod model_providers;
 pub mod model_usage;

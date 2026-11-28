@@ -46,7 +46,11 @@ async fn seed_writes_the_demo_data() -> Result<()> {
     seed::run(&pool).await?;
 
     let credentials = list_credential_refs(&pool).await?;
-    assert_eq!(credentials.len(), 2, "forge and model credential");
+    assert_eq!(
+        credentials.len(),
+        3,
+        "forge, model and MCP server credential"
+    );
     let forge = credentials
         .iter()
         .find(|c| c.name == data::CREDENTIAL_NAME)
@@ -130,6 +134,7 @@ async fn seed_writes_the_demo_data() -> Result<()> {
         (data::TASK_TREE_PROJECT_KEY, data::TASK_TREE_SCRIPT),
         (data::INTERRUPT_PROJECT_KEY, data::INTERRUPT_SCRIPT),
         (data::LANDLOCK_PROJECT_KEY, data::LANDLOCK_SCRIPT),
+        (data::MCP_PROJECT_KEY, data::MCP_SCRIPT),
     ] {
         let project = get_project_by_key(&pool, key)
             .await?

@@ -33,6 +33,7 @@ use super::spool::BODY_IDLE_TIMEOUT;
 use super::upstream::MAX_FETCH_REQUEST_BYTES;
 use crate::inference::Inference;
 use crate::inference::route::is_inference_path;
+use crate::mcp::{Mcp, is_mcp_path};
 use crate::policy::Policy;
 use crate::upstream::{Body, BodyLimit, BoxError, LimitedBody, text};
 
@@ -123,6 +124,7 @@ pub struct GitEndpoint {
     upstream: Arc<dyn Upstream>,
     push: Arc<Push>,
     inference: Option<Arc<Inference>>,
+    mcp: Option<Arc<Mcp>>,
     fetch_max_bytes: u64,
 }
 
@@ -137,8 +139,16 @@ impl GitEndpoint {
             upstream,
             push,
             inference: None,
+            mcp: None,
             fetch_max_bytes: MAX_FETCH_REQUEST_BYTES,
         }
+    }
+
+    /// Serves the MCP endpoint (`/mcp`) on the same port.
+    #[must_use]
+    pub fn with_mcp(mut self, mcp: Arc<Mcp>) -> Self {
+        self.mcp = Some(mcp);
+        self
     }
 
     /// Serves the inference endpoint (`/inference/…`) on the same port.
@@ -162,6 +172,11 @@ impl GitEndpoint {
         B::Error: Into<BoxError>,
     {
         let (parts, body) = request.into_parts();
+        if let Some(mcp) = self.mcp.as_ref().filter(|_| is_mcp_path(parts.uri.path())) {
+            let policy = self.policy.borrow().clone();
+            let request = Request::from_parts(parts, body);
+            return mcp.handle(policy.as_deref(), source, request).await;
+        }
         if let Some(inference) = self
             .inference
             .as_ref()

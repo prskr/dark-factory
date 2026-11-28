@@ -134,7 +134,18 @@ Comparable to Hubble: ephemeral, live, filterable — built for spotting missing
 - Provider hosts (e.g. `api.anthropic.com`) are no longer needed in the egress allowlist.
 - Later: provider adapters as WASI plugins (F5) if a provider needs more than header templates, token or cost budgets per request, the factory minion as a further client.
 
-## 10. MCP endpoint (later)
+## 10. MCP endpoint (slice: `iter4-mcp-gateway`; catalog, filters and grants later)
+
+Built in `iter4-mcp-gateway` (design D1 to D11 there; published description: `docs/content/security/mcp-endpoint.md`):
+
+- One MCP endpoint `/mcp` on the Git port (Streamable HTTP, JSON answers, no server stream) aggregating the third-party MCP servers a run's project has enabled (ADR-0032, amended). The sandbox is identified by pod IP and the run's servers come with the `PolicyWatch` snapshot (`Snapshot.mcp_servers`, `SandboxEntry.mcp_server_ids`, credentials in `provider_credentials`). Sessions hold no state on the gateway: the id names the run and every replica accepts it.
+- The runtime registers the endpoint as a second stdio MCP server `ext`: `factory-agent mcp-relay`, a transport bridge that reaches the gateway directly with the instance CA. HTTP MCP is optional in ACP, stdio is not, so no harness needs HTTP MCP support.
+- Upstream servers are HTTP servers with one static credential per instance (bearer, header or query parameter). The gateway is their MCP client (own thin layer on `hyper`, one session per run, server and pod), checks the destination of public servers (every resolved address; "Private network" skips it), never follows redirects and replaces the credential in everything it returns.
+- All tools of an enabled server are forwarded, with the upstream's current descriptions, unreviewed. Enablement is per project (opt-in), admins only. One record per call, and one per server left out of a `tools/list`, goes to the control plane (`GatewayMcp.Report`, table `mcp_calls`).
+
+What remains (`iter4-mcp-catalog` and the backlog): tool catalogs with review and pinning, instance-level filters (new tools disabled by default), persona grants and the `tool-access` permissions, `search_tools` / `load_server`, per-project credentials and rate limits, MCP resources and prompts, OAuth-based servers, stdio servers behind a bridge ([`agent-run.md`](agent-run.md) §9).
+
+The target described in ADR-0032:
 
 - One MCP endpoint (Streamable HTTP) aggregating the third-party MCP servers a run may use (ADR-0032). The runtime registers it in the harness configuration next to its own `factory` server.
 - Upstream servers are HTTP servers with static credentials (header, bearer token). Stdio servers run behind a stdio → HTTP bridge or in the sandbox ([`agent-run.md`](agent-run.md) §9); OAuth-based servers are in the backlog.

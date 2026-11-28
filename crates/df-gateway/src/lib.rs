@@ -3,6 +3,7 @@
 //! `dark-factory gateway` runs [`proxy`], [`tail`] and [`watch`] (no database access). The
 //! control plane's side of the links lives in `df-gateway-control`.
 
+pub mod batch;
 pub mod convert;
 mod count;
 pub mod denials;
@@ -12,6 +13,7 @@ pub mod git;
 pub mod health;
 pub mod inference;
 pub mod link;
+pub mod mcp;
 pub mod metrics;
 pub mod peer;
 pub mod policy;

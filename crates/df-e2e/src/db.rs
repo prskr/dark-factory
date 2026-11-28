@@ -653,3 +653,105 @@ pub async fn raise_text_question(
     .await?;
     Ok(row.id)
 }
+
+/// Makes `names` the MCP servers of the suite: any server of that name is disabled everywhere and
+/// deleted first (so a repeated run starts clean), then each is registered with the credential
+/// reference `fake-mcp` (bearer) and the URL of the fake MCP server for its name, with "Private
+/// network" because the fake runs on a cluster address. Returns the ids in the order of `names`.
+pub async fn register_mcp_servers(pool: &PgPool, names: &[&str]) -> Result<Vec<Uuid>> {
+    let principal = df_core::Principal::system("e2e");
+    let roles = vec!["admin".to_owned()];
+    let actor = df_db::catalog::Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    remove_mcp_servers(pool, names).await?;
+    let credential = df_db::catalog::list_credential_refs(pool)
+        .await?
+        .into_iter()
+        .find(|c| c.name == crate::data::MCP_CREDENTIAL_NAME)
+        .context("the seeded credential reference of the MCP servers")?;
+    let mut ids = Vec::new();
+    for name in names {
+        let saved = df_db::mcp_servers::save_mcp_server(
+            pool,
+            actor,
+            None,
+            &df_db::mcp_servers::McpServerInput {
+                name: (*name).to_owned(),
+                url: crate::data::fake_mcp_url(name),
+                credential_ref_id: credential.id.as_uuid(),
+                scheme: df_core::mcp::McpCredentialScheme::Bearer,
+                private_network: true,
+            },
+        )
+        .await
+        .with_context(|| format!("register MCP server {name}"))?;
+        ids.push(saved.id);
+    }
+    Ok(ids)
+}
+
+/// Disables the MCP servers `names` for every project and deletes them.
+pub async fn remove_mcp_servers(pool: &PgPool, names: &[&str]) -> Result<()> {
+    let principal = df_core::Principal::system("e2e");
+    let roles = vec!["admin".to_owned()];
+    let actor = df_db::catalog::Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let existing = df_db::mcp_servers::list_mcp_servers(pool).await?;
+    for server in existing
+        .iter()
+        .filter(|s| names.contains(&s.input.name.as_str()))
+    {
+        for key in &server.projects {
+            let project = df_db::catalog::get_project_by_key(pool, key)
+                .await?
+                .with_context(|| format!("project {key}"))?;
+            let keep: Vec<Uuid> = df_db::mcp_servers::project_mcp_server_ids(pool, project.id)
+                .await?
+                .into_iter()
+                .filter(|id| *id != server.id)
+                .collect();
+            df_db::mcp_servers::set_project_mcp_servers(pool, actor, project.id, &keep).await?;
+        }
+        df_db::mcp_servers::delete_mcp_server(pool, actor, server.id).await?;
+    }
+    Ok(())
+}
+
+/// Enables exactly the servers `ids` for project `key`.
+pub async fn enable_mcp_servers(pool: &PgPool, key: &str, ids: &[Uuid]) -> Result<()> {
+    let principal = df_core::Principal::system("e2e");
+    let roles = vec!["admin".to_owned()];
+    let actor = df_db::catalog::Actor {
+        principal: &principal,
+        roles: &roles,
+    };
+    let project = df_db::catalog::get_project_by_key(pool, key)
+        .await?
+        .with_context(|| format!("project {key}"))?;
+    df_db::mcp_servers::set_project_mcp_servers(pool, actor, project.id, ids)
+        .await
+        .with_context(|| format!("enable MCP servers for {key}"))?;
+    Ok(())
+}
+
+/// The MCP call records of the runs of task `key`, oldest first: server, tool and outcome.
+pub async fn mcp_calls(
+    pool: &PgPool,
+    key: &str,
+) -> Result<Vec<(String, String, df_core::mcp::McpCallOutcome)>> {
+    let task = df_core::TaskId::from_uuid(task_id(pool, key).await?);
+    let mut calls: Vec<_> = df_db::task_views::list_runs(pool, task)
+        .await?
+        .into_iter()
+        .flat_map(|run| run.mcp_calls)
+        .collect();
+    calls.sort_by_key(|call| call.started_at);
+    Ok(calls
+        .into_iter()
+        .map(|call| (call.server_name, call.tool, call.outcome))
+        .collect())
+}

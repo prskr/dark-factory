@@ -234,6 +234,7 @@ image_layer(
         "/opt/harness/scripts/existing-branch.yaml": "//crates/fake-acp-agent:scripts/existing-branch.yaml",
         "/opt/harness/scripts/interrupt.yaml": "//crates/fake-acp-agent:scripts/interrupt.yaml",
         "/opt/harness/scripts/landlock.yaml": "//crates/fake-acp-agent:scripts/landlock.yaml",
+        "/opt/harness/scripts/mcp.yaml": "//crates/fake-acp-agent:scripts/mcp.yaml",
         "/opt/probe-writable": ":probe_writable",
         "/opt/harness/scripts/network-access.yaml": "//crates/fake-acp-agent:scripts/network-access.yaml",
         "/opt/harness/scripts/push-hidden.yaml": "//crates/fake-acp-agent:scripts/push-hidden.yaml",
@@ -254,6 +255,7 @@ image_layer(
         "/opt/harness/scripts/existing-branch.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/interrupt.yaml": file_metadata(mode = "0644"),
         "/opt/harness/scripts/landlock.yaml": file_metadata(mode = "0644"),
+        "/opt/harness/scripts/mcp.yaml": file_metadata(mode = "0644"),
         "/opt/probe-writable": file_metadata(
             gid = 1000,
             mode = "0755",

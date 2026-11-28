@@ -47,6 +47,7 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 tonic.workspace = true
 tracing.workspace = true
+url.workspace = true
 uuid.workspace = true
 webpki-roots.workspace = true
 x509-parser.workspace = true

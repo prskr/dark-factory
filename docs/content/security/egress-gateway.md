@@ -25,6 +25,7 @@ flowchart LR
 | HTTP(S) to external hosts | Egress proxy (`CONNECT` or plain HTTP forwarding) | Egress rules in the proxy; the NetworkPolicy lets the sandbox reach only the gateway |
 | Git | Git proxy on the gateway | [Git proxy](git-proxy.md) |
 | Model traffic | Inference endpoint on the gateway, direct (not through the egress proxy) | [Inference endpoint](inference-endpoint.md) |
+| Third-party MCP tools | MCP endpoint on the gateway (`/mcp`, next to `/inference`), reached by the `ext` relay directly (not through the egress proxy) | [MCP endpoint](mcp-endpoint.md) |
 | In-cluster services | Direct, as `cluster-service` rules | Generated NetworkPolicy |
 | DNS | Denied | NetworkPolicy |
 

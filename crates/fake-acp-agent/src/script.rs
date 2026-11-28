@@ -161,10 +161,13 @@ fn default_fetch_timeout() -> u64 {
 }
 
 /// Scripted MCP call. A string argument `${name}` is replaced by the value saved as `name` by an
-/// earlier call of the turn.
+/// earlier call of the turn. Every `${name}` in `tool` is replaced by the variable `name`, which
+/// is also set by a marker `[name=value]` in the turn's prompt (`prompt_vars`), so a test can name
+/// the servers it registered.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpStep {
     pub server: String,
+    /// The tool name, with `${name}` placeholders.
     pub tool: String,
     #[serde(default)]
     pub args: serde_json::Value,

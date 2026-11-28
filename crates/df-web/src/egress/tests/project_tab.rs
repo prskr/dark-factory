@@ -83,7 +83,13 @@ async fn the_tab_sits_between_security_and_integrations_and_opens_from_the_url()
     assert_eq!(unknown_project.status(), StatusCode::NOT_FOUND);
     assert_eq!(
         tab_labels(&admin),
-        ["General", "Security", "Egress", "Integrations"]
+        [
+            "General",
+            "Security",
+            "Egress",
+            "Integrations",
+            "MCP servers"
+        ]
     );
     assert_eq!(tab_labels(&member), ["General", "Security", "Egress"]);
     assert_eq!(open_tab(&unknown), "general");

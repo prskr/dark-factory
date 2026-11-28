@@ -371,6 +371,9 @@ pub struct RunView {
     pub usage: Vec<ModelUsage>,
     /// Model requests whose response carried no usage (unknown, not zero).
     pub unknown_usage_requests: i64,
+    /// The calls of the run's agent to third-party MCP tools (and servers left out of a tool
+    /// list), oldest first.
+    pub mcp_calls: Vec<crate::mcp_servers::McpCallRecord>,
 }
 
 struct RunRow {
@@ -807,9 +810,12 @@ pub async fn list_runs(pool: &PgPool, task_id: TaskId) -> Result<Vec<RunView>, D
     )
     .fetch_all(pool)
     .await?;
+    let run_ids: Vec<Uuid> = runs.iter().map(|run| run.id).collect();
+    let mut mcp_calls = crate::mcp_servers::list_mcp_calls_of_runs(pool, &run_ids).await?;
     runs.into_iter()
         .map(|r| {
             Ok(RunView {
+                mcp_calls: mcp_calls.remove(&r.id).unwrap_or_default(),
                 usage: usage
                     .iter()
                     .filter(|u| u.run_id == r.id)

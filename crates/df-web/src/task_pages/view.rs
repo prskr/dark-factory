@@ -2,8 +2,10 @@
 //! the composer. Handlers live in the parent module; the live-update regions (`#task-head`,
 //! `#task-details`, `#runs`, `#pending`, `#task-rows`) are re-rendered by `crate::sse`.
 
+use df_core::mcp::McpCallOutcome;
 use df_core::{RunState, StatusSet, TITLE_MAX_CHARS, TaskKey, TaskSort, TaskStatus, TitleSource};
 use df_db::TaskMessageRow;
+use df_db::mcp_servers::McpCallRecord;
 use df_db::task_views::{ProjectFilterItem, RunView, TaskDetail};
 use jiff::Timestamp;
 use maud::{Markup, html};
@@ -986,6 +988,73 @@ fn run_card(task_key: &str, run: &RunView, persona_model: Option<&str>) -> Marku
                 @if run.unknown_usage_requests == 1 { " request without usage" } @else { " requests without usage" }
             }
         }
+        @if !run.mcp_calls.is_empty() { (mcp_calls(&run.mcp_calls)) }
+    }
+}
+
+/// The section "Tool calls (MCP)" of a run card: one two-line entry per call, oldest first.
+fn mcp_calls(calls: &[McpCallRecord]) -> Markup {
+    html! {
+        div class="space-y-2 border-t border-line pt-2" {
+            p class="text-xs font-medium uppercase tracking-wide text-faint" {
+                "Tool calls (MCP)" span class="ml-1 font-mono normal-case" { (calls.len()) }
+            }
+            ul class="space-y-2" {
+                @for call in calls {
+                    li {
+                        div class="flex items-center justify-between gap-2" {
+                            span class="min-w-0 truncate font-mono text-xs" { (mcp_tool_label(call)) }
+                            (tone_badge(mcp_tone(call.outcome), call.outcome.as_str()))
+                        }
+                        p class="font-mono text-xs text-muted" {
+                            (call.started_at.strftime("%H:%M")) " · " (call_duration(call.duration_ms))
+                            " · " (call_size(call.request_bytes)) " → " (call_size(call.response_bytes))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// `<server>__<tool>`; a server left out of a tool list shows as `<server> · tools/list`. A call
+/// the gateway rejected for a name without a server shows the name the agent sent.
+fn mcp_tool_label(call: &McpCallRecord) -> String {
+    if call.server_name.is_empty() {
+        call.tool.clone()
+    } else if call.tool == df_core::mcp::LIST_TOOL {
+        format!("{} · {}", call.server_name, call.tool)
+    } else {
+        df_core::mcp::prefixed_tool_name(&call.server_name, &call.tool)
+    }
+}
+
+const fn mcp_tone(outcome: McpCallOutcome) -> Tone {
+    match outcome {
+        McpCallOutcome::Ok => Tone::Completed,
+        McpCallOutcome::Rejected | McpCallOutcome::UpstreamError | McpCallOutcome::TooLarge => {
+            Tone::Failed
+        }
+        McpCallOutcome::Timeout | McpCallOutcome::ToolError => Tone::Limited,
+        McpCallOutcome::Cancelled => Tone::Queued,
+    }
+}
+
+/// `850 ms`, `1.2 s`.
+fn call_duration(millis: i64) -> String {
+    if millis < 1_000 {
+        format!("{millis} ms")
+    } else {
+        format!("{}.{} s", millis / 1_000, millis % 1_000 / 100)
+    }
+}
+
+/// `3.1 KB`; `–` for a missing size.
+fn call_size(bytes: i64) -> String {
+    if bytes <= 0 {
+        "–".to_owned()
+    } else {
+        format!("{}.{} KB", bytes / 1_000, bytes % 1_000 / 100)
     }
 }
 

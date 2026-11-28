@@ -532,16 +532,7 @@ async fn run_gateway_command(
         "starting gateway listeners"
     );
 
-    let settings = df_gateway::gateway::Settings {
-        pod,
-        control_plane: format!("{control_plane_name}:{}", cfg.server.internal_grpc_port),
-        buffer_size: cfg.gateway.buffer_size,
-        buffer_max_age: cfg.gateway.buffer_max_age(),
-        blocked_cidrs: cfg.gateway.blocked_cidrs.clone(),
-        retry: df_gateway::watch::RETRY_INTERVAL,
-        control_plane_name: Some(control_plane_name.clone()),
-        metrics: Arc::default(),
-    };
+    let settings = gateway_settings(&cfg, pod, &control_plane_name);
     let outside = df_gateway::gateway::Outside {
         connector: Arc::new(df_gateway::link::MtlsConnector::new(
             tls_paths(&tls),
@@ -577,10 +568,14 @@ async fn run_gateway_command(
     let push = df_gateway::git::push::Push::new(Arc::new(mirrors), &mirror_dir, max_push_size)
         .with_checks(checks)
         .with_recorder(recorder.clone());
-    let (inference, usage) = inference_endpoint(&outside, &settings, upstream_connector);
+    let (inference, usage) = inference_endpoint(&outside, &settings, upstream_connector.clone());
+    let (mcp, calls) = df_gateway::mcp::start(&outside, &settings, upstream_connector)
+        .context("invalid `gateway.blockedCidrs`")?;
+    let janitor = tokio::spawn(mcp.clone().run_janitor(policy_rx.clone(), shutdown.clone()));
     let git = Arc::new(
         df_gateway::git::server::GitEndpoint::new(policy_rx, Arc::new(upstream), Arc::new(push))
-            .with_inference(inference),
+            .with_inference(inference)
+            .with_mcp(mcp),
     );
     let git_task = tokio::spawn(git.serve(
         git_listener,
@@ -604,8 +599,28 @@ async fn run_gateway_command(
     }
     recorder.shutdown(RECORD_DRAIN_GRACE).await;
     usage.shutdown(RECORD_DRAIN_GRACE).await;
+    calls.shutdown(RECORD_DRAIN_GRACE).await;
+    janitor.abort();
     signals.abort();
     Ok(result?)
+}
+
+/// The settings of a gateway pod called `pod`.
+fn gateway_settings(
+    cfg: &InstanceConfig,
+    pod: String,
+    control_plane_name: &str,
+) -> df_gateway::gateway::Settings {
+    df_gateway::gateway::Settings {
+        pod,
+        control_plane: format!("{control_plane_name}:{}", cfg.server.internal_grpc_port),
+        buffer_size: cfg.gateway.buffer_size,
+        buffer_max_age: cfg.gateway.buffer_max_age(),
+        blocked_cidrs: cfg.gateway.blocked_cidrs.clone(),
+        retry: df_gateway::watch::RETRY_INTERVAL,
+        control_plane_name: Some(control_plane_name.to_owned()),
+        metrics: Arc::default(),
+    }
 }
 
 /// The inference endpoint of a gateway pod and the reporter that sends its usage records.

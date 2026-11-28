@@ -7,7 +7,8 @@ The web UI logs users in through an OIDC provider. The control plane is a confid
 (authorization code flow with PKCE, performed server-side). Browsers only get an HTTP-only session
 cookie; tokens stay on the server. Every UI page requires the role `board-member`, read from a flat
 claim of the ID token. The tab "Integrations" of a project's settings page (the lifecycle event
-subscriptions and the incoming webhook secret) also requires the role `admin`.
+subscriptions and the incoming webhook secret), the MCP servers page and the tab "MCP servers" of a
+project's settings page also require the role `admin`.
 
 ```mermaid
 sequenceDiagram
@@ -67,5 +68,6 @@ views (task list, task detail) reconnect at that point, so they stop as well.
    `board-member`.*
 3. A user with `board-member` but without `admin` sees no tab "Integrations" on the project's settings page,
    and requests for the project's subscriptions (`/projects/<KEY>/subscriptions`) answer `403` with
-   *Your account lacks the role `admin`.*
+   *Your account lacks the role `admin`.* The same holds for the MCP servers page (`/mcp-servers`)
+   and a project's `/projects/<KEY>/mcp-servers`, and the tab "MCP servers" is hidden.
 4. **Log out** deletes the server-side session and ends the provider session (RP-initiated logout).

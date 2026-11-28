@@ -370,6 +370,7 @@ impl RunScenario {
                     env: std::collections::HashMap::new(),
                     model: None,
                     files: vec![],
+                    mcp_endpoint: String::new(),
                 })),
             }),
             tools: self.tools.clone(),

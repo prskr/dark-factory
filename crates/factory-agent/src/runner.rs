@@ -29,7 +29,7 @@ use tokio::sync::{Mutex, Notify, broadcast, mpsc};
 
 use crate::git::Git;
 use crate::harness::{
-    BudgetTracker, PromptQueue, RateLimitInfo, RunOutcomeDecision, SessionSetupResult,
+    BudgetTracker, ExtRelay, PromptQueue, RateLimitInfo, RunOutcomeDecision, SessionSetupResult,
     TokioAsyncReadCompat, TokioAsyncWriteCompat, TurnOutcomeInput, approve_permission,
     build_acp_prompt_blocks, determine_run_outcome, parse_rate_limit, prepare_harness_environment,
     setup_session,
@@ -966,6 +966,7 @@ async fn setup_harness_session(
         ctx.assign.continuation.as_ref(),
         &ctx.runtime_exe,
         &ctx.runtime_sock_path,
+        ExtRelay::of(&ctx.assign),
     )
     .await;
     send_timing(

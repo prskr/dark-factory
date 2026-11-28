@@ -27,7 +27,7 @@ const SETTINGS_HOME: &str = "/projects";
 
 /// The sections of the settings area, in the order of the settings sidebar. The rail's Settings
 /// link is current on each of them and opens the first ([`SETTINGS_HOME`]).
-pub(crate) const SETTINGS_SECTIONS: [(Nav, &str, &str, Icon); 5] = [
+pub(crate) const SETTINGS_SECTIONS: [(Nav, &str, &str, Icon); 6] = [
     (Nav::Projects, SETTINGS_HOME, "Projects", Icon::Projects),
     (Nav::Personas, "/personas", "Personas", Icon::Personas),
     (
@@ -42,6 +42,7 @@ pub(crate) const SETTINGS_SECTIONS: [(Nav, &str, &str, Icon); 5] = [
         "Model providers",
         Icon::Server,
     ),
+    (Nav::McpServers, "/mcp-servers", "MCP servers", Icon::Wrench),
     (
         Nav::Allowlist,
         "/egress/allowlist",
@@ -347,7 +348,7 @@ mod tests {
     fn settings_sidebar_links_are_touch_sized_below_1024_px() {
         let html = settings_sidebar(Nav::Personas).into_string();
         let links = html.matches("<a ").count();
-        assert_eq!(links, 5);
+        assert_eq!(links, 6);
         assert_eq!(html.matches("h-11 ").count(), links, "{html}");
         assert_eq!(html.matches("lg:h-9 ").count(), links, "{html}");
     }

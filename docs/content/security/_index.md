@@ -25,7 +25,9 @@ boundary of the sandbox instead of inside it.
   The model credential stays in the gateway too: the harness gets a placeholder key and the
   [inference endpoint](inference-endpoint.md) adds the real one. A sandbox holds no secret. The
   same holds for the persona's signing key: the agent's commits are signed by the control plane at
-  commit time, and the [Git proxy](git-proxy.md) rejects a commit without that signature.
+  commit time, and the [Git proxy](git-proxy.md) rejects a commit without that signature. The
+  credentials of third-party MCP servers stay in the gateway as well: the
+  [MCP endpoint](mcp-endpoint.md) adds them, and replaces them in anything an upstream sends back.
 - **Git is the only durable store for code.** The task volume is a cache; the runtime regenerates
   the files it owns (`.git/config`, hooks path) before using the repository.
 - **Default deny on the network.** A sandbox reaches the control plane, the gateway and nothing else

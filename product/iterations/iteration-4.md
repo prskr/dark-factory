@@ -98,7 +98,7 @@ Decided on 2026-10-30 for this iteration:
 - ACP `session/new` with a second stdio MCP server `ext` (the gateway relay) in the Claude adapter, OpenCode and `df-native` (`iter4-mcp-gateway`, spike 1.2).
 - Claude Code reads skills from the skill directory under `HOME` (`/data/home`) when started through the ACP adapter.
 - ACP registry: format, and which registered agents accept a base URL for model access (compatible with the inference endpoint).
-- MCP Streamable HTTP endpoint and client in the gateway on the existing HTTP stack, `rmcp` for the message types (`iter4-mcp-gateway`, spike 1.1); `search_tools` / `load_server` are in the backlog.
+- MCP Streamable HTTP endpoint and client in the gateway on the existing HTTP stack, own thin JSON-RPC layer on `serde_json::Value` (`rmcp` is not used in the gateway: results must pass unchanged; `iter4-mcp-gateway`, spike 1.1); `search_tools` / `load_server` are in the backlog.
 - Whether all registry presets can send their model traffic through the inference endpoint (decision 13), and what usage ACP adapters report for those that can't.
 - The runtime starting a stdio MCP server from `.mcp.json` in the sandbox and passing it in `session/new`.
 - Context7 authentication (header name, key format) as the first static-credential server.

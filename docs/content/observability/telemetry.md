@@ -90,6 +90,7 @@ never attributes.
 | `df.gateway.inference.requests` | counter | | `wire_api` (`anthropic-messages`, `openai-chat`, `openai-responses`), `status_class` (`2xx`, `4xx`, `5xx`, `error`) | model requests of the inference endpoint, counted when their response ends |
 | `df.gateway.inference.duration` | histogram | s | `wire_api` | time from the request to the end of its response |
 | `df.gateway.inference.usage_dropped` | counter | | | usage records dropped because the buffer was full or the control plane refused them |
+| `df.gateway.mcp.calls_dropped` | counter | | | [MCP call records](../security/mcp-endpoint.md#records-and-logs) dropped because the buffer was full or the control plane refused them |
 
 ## Spans
 

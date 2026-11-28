@@ -19,6 +19,7 @@ use secrecy::ExposeSecret;
 use uuid::Uuid;
 
 use super::inference_routes;
+use super::mcp_servers::{self, McpData};
 
 /// Instance settings of the Git routes: the same values the run's `Assign` carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,13 +53,17 @@ pub async fn build(
     let push = PushData::load(pool, &runs).await?;
     let run_ids: Vec<Uuid> = runs.iter().map(|run| run.run_id).collect();
     let providers = model_providers::run_model_providers(pool, &run_ids).await?;
-    let mut update = assemble(version, &runs, &entries, git, &push, &providers);
+    let mcp = McpData::load(pool, &runs).await?;
+    let mut update = assemble(version, &runs, &entries, git, &push, &providers, &mcp);
     if let Some(snapshot) = update.snapshot.as_mut() {
         snapshot.forge_credentials =
             forge_credentials(secrets, &runs, &snapshot.sandboxes, &git.username).await;
         let references = df_db::catalog::list_credential_refs(pool).await?;
         snapshot.provider_credentials =
             inference_routes::credentials(secrets, &snapshot.sandboxes, &references).await;
+        snapshot
+            .provider_credentials
+            .extend(mcp_servers::credentials(secrets, &snapshot.mcp_servers, &references).await);
     }
     Ok(update)
 }
@@ -91,6 +96,7 @@ fn assemble(
     git: &GitSettings,
     push: &PushData,
     providers: &HashMap<Uuid, RunModelProvider>,
+    mcp: &McpData,
 ) -> PolicyUpdate {
     let sandboxes = runs
         .iter()
@@ -121,6 +127,7 @@ fn assemble(
             inference: providers
                 .get(&run.run_id)
                 .and_then(|found| inference_routes::route(run, found)),
+            mcp_server_ids: mcp.server_ids(run),
         })
         .collect();
     let push_policies = runs
@@ -140,6 +147,7 @@ fn assemble(
             forge_credentials: HashMap::new(),
             push_policies,
             provider_credentials: HashMap::new(),
+            mcp_servers: mcp.servers(),
         }),
     }
 }
@@ -296,6 +304,7 @@ mod tests {
             &settings(),
             &PushData::default(),
             &HashMap::new(),
+            &McpData::default(),
         )
     }
 
@@ -431,6 +440,7 @@ mod tests {
             &allowing,
             &PushData::default(),
             &HashMap::new(),
+            &McpData::default(),
         );
         let route = update.snapshot.unwrap().sandboxes[0].git.clone().unwrap();
         assert_eq!(
@@ -456,7 +466,15 @@ mod tests {
             ..PushData::default()
         };
 
-        let update = super::assemble(1, &runs, &[], &settings(), &push, &HashMap::new());
+        let update = super::assemble(
+            1,
+            &runs,
+            &[],
+            &settings(),
+            &push,
+            &HashMap::new(),
+            &McpData::default(),
+        );
 
         let policies = update.snapshot.unwrap().push_policies;
         assert_eq!(policies.len(), 2);
@@ -506,6 +524,7 @@ mod tests {
             &settings(),
             &push,
             &HashMap::new(),
+            &McpData::default(),
         );
 
         let sandboxes = update.snapshot.unwrap().sandboxes;

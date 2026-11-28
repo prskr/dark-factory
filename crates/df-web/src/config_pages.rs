@@ -35,6 +35,7 @@ use crate::responses::{htmx_location, internal_error, invalid, not_found};
 use crate::{project_subscriptions, project_webhook};
 
 mod branches;
+mod mcp_servers;
 mod persona_page;
 mod personas;
 mod project_page;
@@ -52,6 +53,7 @@ const COUNT_CLASS: &str = "inline-flex min-h-11 min-w-7 items-center justify-end
 pub(crate) fn routes() -> Router<WebState> {
     Router::new()
         .merge(providers::routes())
+        .merge(mcp_servers::routes())
         .route(
             "/credentials",
             get(credentials_list).post(credential_create),
@@ -1008,6 +1010,14 @@ fn project_form(
                 (project_subscriptions::lifecycle_group(&values.key))
                 (project_webhook::group(state, project))
             },
+        });
+    }
+    if let (Editing::AsAdmin, Some(project)) = (editing, project) {
+        tabs.push(Tab {
+            id: "mcp-servers",
+            label: "MCP servers",
+            saves: false,
+            panel: mcp_servers::project_tab::panel(&project.key),
         });
     }
     let open = if errors.is_empty() {

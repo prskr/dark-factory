@@ -72,7 +72,7 @@ The endpoint is a small JSON-RPC server: `initialize`, `ping`, `tools/list`, `to
 
 The upstream side is a small client: `POST` JSON-RPC, accept a JSON or an SSE response, read the SSE stream until the response with the request's id, answer server requests on the stream with `-32601`, drop notifications, keep `Mcp-Session-Id`, send `MCP-Protocol-Version`, never follow redirects.
 
-Both run on what the gateway already has: the hyper server of the Git port and `UpstreamConnector`, so TLS, timeouts, `LimitedBody` and the destination check stay in one place. `rmcp`'s model types give the wire format. Its Streamable HTTP transports bring axum and reqwest, a second HTTP stack each, which would bypass our checks. Spike 1.1 confirms the model types are usable alone.
+Both run on what the gateway already has: the hyper server of the Git port and `UpstreamConnector`, so TLS, timeouts, `LimitedBody` and the destination check stay in one place. Both work on `serde_json::Value`, not on `rmcp`'s typed model, so results pass unchanged. Its Streamable HTTP transports bring axum and reqwest, a second HTTP stack each, which would bypass our checks. Spike 1.1 (results at the end of this document) confirmed that the model types work alone but chose the thin layer on `Value`.
 
 ### D5: Aggregated tool list
 
@@ -95,21 +95,19 @@ On `tools/list` the gateway asks each enabled server for `tools/list` (all pages
 
 ### D7: Contracts
 
-`darkfactory.gateway.v1` (final numbers assigned at implementation, task 2.1):
+`darkfactory.gateway.v1` (numbers assigned at implementation, task 2.1):
 
 ```proto
 message Snapshot {
   // ... existing fields 1-4 ...
   // MCP servers enabled for at least one active run, keyed by server id.
-  // Final number assigned when the change is implemented.
-  map<string, McpServer> mcp_servers = <n1>;
+  map<string, McpServer> mcp_servers = 5;
 }
 
 message SandboxEntry {
   // ... existing fields 1-10 ...
   // Ids of the MCP servers enabled for the run's project.
-  // Final number assigned when the change is implemented.
-  repeated string mcp_server_ids = <n2>;
+  repeated string mcp_server_ids = 11;
 }
 
 message McpServer {
@@ -168,7 +166,7 @@ An unset `credential_scheme` is treated like a missing credential: the server's 
 
 **Credential redaction in returned content.** Upstreams often echo the request URL or headers in error messages. Before anything from an upstream goes back to the sandbox (tool lists, results, JSON-RPC errors), the gateway replaces the server's credential value, raw and URL-encoded, with `[redacted]`. This applies to every scheme; it matters most for `query`. Some servers need this: PenPot's MCP server, for example, takes a JWT as a query parameter. Without tool definitions in the snapshot, its size grows by a few hundred bytes per server.
 
-`darkfactory.agent.v1`: `AcpHarness.mcp_endpoint = <n3>` (string, empty = none; final number assigned at implementation). It sits on `AcpHarness` because registering MCP servers is an ACP session concern.
+`darkfactory.agent.v1`: `AcpHarness.mcp_endpoint = 6` (string, empty = none; assigned at implementation). It sits on `AcpHarness` because registering MCP servers is an ACP session concern.
 
 ### D8: Runtime: a stdio relay instead of HTTP in the harness
 
@@ -259,4 +257,14 @@ Taken on 2026-11-27:
 
 ## Open Questions
 
-- Context7's credential header (`CONTEXT7_API_KEY` or `Authorization: Bearer`) for the docs example: spike 1.3, no change to the design.
+- Context7's credential header (`CONTEXT7_API_KEY` or `Authorization: Bearer`) for the docs example: answered by spike 1.3 below (`Authorization: Bearer`), no change to the design.
+
+## Spike results (2026-11-27)
+
+**1.1 `rmcp` model types (done).** A throwaway test (`rmcp` 3.12 as locked, model types only, no transport) built `initialize`, `notifications/initialized` and `tools/call` messages and parsed Context7's live `initialize` and `tools/list` answers, a server `sampling/createMessage` request and an unknown method. Result: the model types work without the HTTP transports, but the gateway still uses the thin layer on `serde_json::Value` and does not depend on `rmcp`, for two reasons. First, call results must pass unchanged apart from the redaction: typed models drop fields they do not know (`_meta`, vendor extensions) and re-serialize defaults. Second, `InitializeRequestParams::default()` announces the newest modelled protocol version, `2026-07-28`, a revision without `initialize`; the gateway sets `2025-06-18` itself. `rmcp` models `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25` and `2026-07-28`. The endpoint answers `initialize` with the requested version if it is `2025-03-26`, `2025-06-18` or `2025-11-25`, otherwise with `2025-11-25`. Context7 answers every POST as `text/event-stream` (`event: message`, one `data:` line holding the JSON-RPC response), accepts `notifications/initialized` with 202, returns no `Mcp-Session-Id` (stateless) and takes `tools/list` and `tools/call` without a session. The upstream client therefore handles an SSE answer as the normal case.
+
+**1.2 Harnesses (partly answered from source and documentation; no harness was run).**
+- Claude Code adapter `@agentclientprotocol/claude-agent-acp` 0.110.0 (the pinned one, read from its `dist/v1/acp-agent.js`): it starts the SDK with `settingSources: ["user", "project", "local"]`, then spreads `_meta.claudeCode.options` of `session/new` over its options, so a client can pass `settingSources` and `strictMcpConfig` itself. `mcpServers` is `{...options.mcpServers, ...session/new servers}`, so the session's servers win over those of `_meta`. Tool names are `mcp__<server>__<tool>` (Claude Code documentation); the 64-character limit is the Anthropic tool name rule `^[a-zA-Z0-9_-]{1,64}$`. For D11 the likely switch is `_meta.claudeCode.options = { settingSources: ["user"], strictMcpConfig: true }`; the adapter itself uses `strictMcpConfig: true` for its utility queries. Not verified by a run: whether repository `.mcp.json` servers start without approval, whether a repository `ext` / `factory` entry replaces the session's, how often `tools/list` is called, and Claude Code's MCP startup and list timeouts.
+- OpenCode 2.4.2 (`OPENCODE_VERSION` in `MODULE.bazel`; documentation and source of tag `v2.4.2`): tools are named `<server>_<tool>` with characters other than letters, digits, `_` and `-` replaced by `_`, so the relay's tools are `ext_<server>__<tool>`. MCP servers are reached through Code Mode by default (`codemode: true`; tools sit in a `tools.<server>.<tool>(...)` namespace instead of the native tool list) unless an entry sets `codemode: false`; `disabled: true` keeps a configured server from connecting; the docs list timeouts `startup` 30 s, `catalog` 30 s, `execution` 12 h, while the v1 config schema in the same tag says "Timeout in ms for MCP server requests. Defaults to 5000". Not verified: which of these applies to servers passed in ACP `session/new`, whether they use Code Mode, and whether `opencode.json` `mcp` entries are overridden. If the 5 s request timeout applies, the 15 s / 20 s list deadline (D5) does not fit OpenCode and the acp-harness scenario "OpenCode" needs `codemode: false` and a longer `catalog` timeout in the generated configuration.
+
+**1.3 Credentials (done).** Context7 documents `Authorization: Bearer <key>` (README and docs, keys start with `ctx7sk`) and also accepts a `CONTEXT7_API_KEY` header; without a key it answers anonymously at lower rate limits, and an invalid key gives a tool result with `isError: true` ("Invalid API key") over HTTP 200, not a 401. The docs examples use the `bearer` scheme. Context7's tools are `resolve-library-id` and `query-docs` (not `get-library-docs`). PenPot's MCP server takes the MCP key as the query parameter `userToken`: `https://<penpot-domain>/mcp/stream?userToken=<MCP key>` (Penpot help center, MCP page). The docs example for the `query` scheme uses parameter `userToken`.

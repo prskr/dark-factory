@@ -2,7 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-16
-- **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0027](0027-agent-protocol-delivery-and-typed-tool-calls.md), [ADR-0029](0029-egress-gateway-and-generated-network-policies.md)
+- **Related:** [ADR-0011](0011-authentication-authorization-personas.md), [ADR-0027](0027-agent-protocol-delivery-and-typed-tool-calls.md), [ADR-0029](0029-egress-gateway-and-generated-network-policies.md), change `iter4-mcp-gateway`
+- **Amended by:** `iter4-mcp-gateway` (2026-11-25, 2026-11-27): the first slice forwards **all tools of an enabled server, unreviewed**, until `iter4-mcp-catalog` adds the catalog, its filters and persona grants; "upstream updates can't silently grant new capabilities" holds only after that change. Servers are enabled **per project, opt-in** (default deny) instead of projects restricting a default-allow grant: enabling a server gives the project's agents everything its one shared credential reaches. The runtime registers the endpoint as a **stdio relay** (`factory-agent mcp-relay`, server `ext`) instead of an HTTP server entry, because stdio is the only MCP transport every ACP harness must support.
 
 ## Context
 

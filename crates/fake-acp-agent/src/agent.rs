@@ -258,6 +258,7 @@ async fn handle_prompt(
         .join("\n");
     let mut stop_reason = StopReason::EndTurn;
     let mut failure = None;
+    ctx.vars.extend(crate::prompt_vars::prompt_vars(&prompt));
     for step in Step::expand(turn.steps, &prompt) {
         match play_step(step, &mut ctx, cx).await {
             StepOutcome::Continue => {}
@@ -606,6 +607,10 @@ async fn fetch_once(url: &str, limit: Duration) -> Result<(), String> {
 /// Reports a tool call to a stdio MCP server of the session and its result, and saves the values
 /// of `save` from the structured result.
 async fn play_mcp(mcp_step: McpStep, ctx: &mut TurnContext, cx: &ConnectionTo<Client>) {
+    let mcp_step = McpStep {
+        tool: crate::prompt_vars::expand(&mcp_step.tool, &ctx.vars),
+        ..mcp_step
+    };
     let matched_server = ctx.mcp_servers.iter().find_map(|s| match s {
         McpServer::Stdio(stdio) if stdio.name == mcp_step.server => Some(stdio.clone()),
         _ => None,

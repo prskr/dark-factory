@@ -84,6 +84,8 @@ pub enum Nav {
     Personas,
     Credentials,
     ModelProviders,
+    /// MCP servers.
+    McpServers,
     /// The settings page of one model provider: a page of the settings area (sidebar marks Model
     /// providers) without the phone navigation, like [`Nav::ProjectSettings`].
     ModelProviderSettings,
@@ -388,6 +390,7 @@ mod tests {
             (Nav::Personas, "/personas"),
             (Nav::Credentials, "/credentials"),
             (Nav::ModelProviders, "/model-providers"),
+            (Nav::McpServers, "/mcp-servers"),
             (Nav::Allowlist, "/egress/allowlist"),
         ];
         for (nav, current) in cases {
@@ -401,6 +404,7 @@ mod tests {
                 "Personas",
                 "Credentials",
                 "Model providers",
+                "MCP servers",
                 "Egress rules",
             ] {
                 assert!(
@@ -409,7 +413,7 @@ mod tests {
                     "{label}"
                 );
             }
-            assert_eq!(sidebar.matches("<svg").count(), 5, "an icon per entry");
+            assert_eq!(sidebar.matches("<svg").count(), 6, "an icon per entry");
             assert_eq!(sidebar.matches("aria-current=\"page\"").count(), 1);
             let marked = &sidebar[sidebar.find("aria-current").unwrap()..];
             assert!(marked.contains("before:bg-accent"), "{sidebar}");
