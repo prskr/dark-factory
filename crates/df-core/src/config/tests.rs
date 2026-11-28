@@ -575,7 +575,7 @@ database:
     );
     assert_eq!(
         cfg.harness.claude_code.image,
-        "ghcr.io/prskr/dark-factory/claude-harness:0.110.1"
+        "ghcr.io/prskr/dark-factory/claude-harness:0.112.0"
     );
 
     let custom = format!(

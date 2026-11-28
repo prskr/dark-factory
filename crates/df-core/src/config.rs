@@ -1160,7 +1160,7 @@ fn default_git_username() -> String {
 
 /// The adapter version is the tag of the harness image (`deploy/images/claude-harness`).
 fn default_claude_code_image() -> String {
-    "ghcr.io/prskr/dark-factory/claude-harness:0.110.1".to_string()
+    "ghcr.io/prskr/dark-factory/claude-harness:0.112.0".to_string()
 }
 
 fn default_adapter_command() -> Vec<String> {
